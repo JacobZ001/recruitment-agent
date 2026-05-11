@@ -16,6 +16,9 @@ Build a deterministic, AI-native **human evaluation infrastructure** for recruit
 - **Primary contracts**: schema-first (state/event/candidate), explicit typing, validation-ready structure.
 - **Workflow model**: event-driven, with auditability and replay as first-class goals.
 - **Governance**: ADR registry and tech-debt registry to prevent drift.
+- **Foundation for v1**: schemas, interfaces, and state-machine validation contracts are treated as **stable enough to build on**; further broad architecture expansion is intentionally secondary to runnable delivery.
+- **Execution focus**: integrate the **event → state → skill → decision** loop end-to-end so recruiter workflows can run deterministically with governance hooks, not add new cross-cutting abstractions by default.
+- **Deferred intentionally**: infrastructure hardening (bus implementations, persistence depth, replay tooling, telemetry) stays on the roadmap and tech-debt registry but is **not** the primary schedule driver until the first vertical slice is demonstrably running.
 
 ## Current Repository Structure
 
@@ -45,19 +48,39 @@ High-level topology (architecture-oriented):
 
 ## Current Development Phase
 
-### Phase 2 — Interface Layer (ACTIVE)
+### Phase 2 — Vertical Slice Runtime Delivery (ACTIVE)
 
-Goal: define stable interfaces between the deterministic orchestrator/state machine, integrations, storage, skills, and UI—without embedding business logic into prompts or schema constructors.
+**Milestone**: First End-to-End Recruiter Workflow.
+
+The project remains **governance-first** and **deterministic-first**: programs validate and route; LLMs stay behind typed interfaces; humans retain override authority. Within that posture, the **active execution strategy** is a **bounded vertical slice**: ship a minimal runnable path before scaling architecture surface area.
+
+**Current priority**: prioritize **runnable orchestration and recruiter workflow execution** over additional architecture expansion. Interface and transition contracts established in Phase 2 are the substrate; the emphasis is now **runtime wiring**—ingesting events, applying validated state transitions, invoking bounded skills, and recording decision signals—so operators can exercise a real workflow loop.
+
+**Clarifications**
+
+- The **architecture foundation** (schemas, interfaces, transition validation, governance docs) is considered **stable for v1** in the sense of “sufficient to integrate,” not “frozen forever.” Targeted fixes and contract tightening continue at boundaries as the slice exposes gaps.
+- **Current focus** is **runtime integration** of the **event → state → skill → decision** loop with explicit validation at each handoff, not new speculative subsystems.
+- **Infrastructure hardening** (durable bus, storage, replay runners, deep observability) remains **deferred intentionally** until the first slice proves the control plane and recruiter path; scaling stays **iterative** and debt-tracked rather than front-loaded.
+
+#### Vertical Slice Success Criteria
+
+Bounded acceptance criteria for the **first runnable recruiter workflow**. These define “done” for Phase 2’s vertical slice and **limit scope** during runtime iteration while keeping **deterministic-first** behavior.
+
+- A **recruiter can submit or upload a CV** for a candidate (single intake path is enough).
+- **Candidate aggregate / state** is created and updated only through **validated schemas** (no ad-hoc blobs as the source of truth).
+- **State transitions** are **deterministic** and pass the **transition validation engine** (illegal moves are rejected with explainable outcomes).
+- **Skills run only through** the canonical **skill interfaces** (bounded inputs/outputs; no inline LLM orchestration in control flow).
+- **Hard filter** and **scoring** (light or deep per slice scope) **both execute** on the path; outcomes are recorded, not silently dropped.
+- **Candidate ordering / ranking** in the slice is **explainable** (evidence references and/or structured rationale refs—not opaque scores only).
+- A **human override path** exists (approve/reject/override or equivalent) and is **logged** on the timeline.
+- The **event and state timeline** for a candidate in the slice is **reconstructable** from persisted facts (ids, correlation/causation where applicable) for audit and debugging—without requiring full production replay tooling.
 
 ## Immediate Next Steps
 
-- **Interface contracts**: define stable IO contracts for:
-  - event ingestion/recording
-  - state transition requests + validation outcomes
-  - artifact storage references (CVs, transcripts, messages)
-  - skill execution inputs/outputs (deterministic + LLM)
-- **Repository boundaries**: formalize module boundaries for control-plane vs cognition-plane.
-- **Validation harness hooks**: ensure schema validation and transition validation are mandatory at boundaries.
+- **Vertical slice**: implement the minimal **event → state → skill → decision** path needed for one recruiter-visible workflow (deterministic orchestration, no autonomous routing in LLMs).
+- **Boundary validation**: enforce schema + transition validation at orchestration boundaries; treat failures as structured, auditable outcomes.
+- **Human-in-the-loop hooks**: ensure override / approval / calibration entry points exist in the slice, even if UX is minimal.
+- **Defer by default**: additional cross-cutting architecture (new global abstractions, wide refactors) only when the slice **requires** it or ADR/tech-debt explicitly schedules it.
 
 ## Planned Future Phases
 
