@@ -36,6 +36,23 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - For skills, consider generic typed envelopes (e.g., `SkillInput[T]`, `SkillOutput[T]`) for high-value, stable payload shapes.
   - Require versioned contracts + harness coverage for all typed payload migrations.
 
+### Event envelope payload governance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-09
+- **Last reviewed**: 2026-05-09
+- **Current decision**: Keep event envelopes and payloads generic (`Dict[str, Any]`) for v1, but treat payload shape stability and hygiene as an explicit governance concern.
+- **Rationale**: Deterministic replay/auditability requires that historical events remain interpretable over time. Even before typed payload schemas exist, we need explicit norms to prevent silent drift and accidental coupling to producer-specific quirks.
+- **Future impact**: Without payload governance:
+  - Historical event interpretation can break (replay consistency risk).
+  - Producers/consumers may diverge on implicit payload contracts.
+  - Debugging/audits degrade due to inconsistent evidence references or missing context.
+- **Priority**: High
+- **Recommended future direction**: Establish a payload governance checklist (lightweight, no overengineering):
+  - Prefer **references** (artifact/evidence refs) over raw blobs.
+  - Document required/optional keys per event type in a versioned contract note (even before full typing).
+  - Add harness validation for payload invariants (presence, allowed types, key stability).
+  - Introduce typed payload schemas progressively once shapes stabilize (per “Typed payload contracts”).
+
 ### Interface and schema versioning strategy
 - **Status**: OPEN
 - **Introduced in**: 2026-05-08
@@ -106,6 +123,23 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Future impact**: Harder debugging/timeline reconstruction at scale without replay automation.
 - **Priority**: High
 - **Recommended future direction**: Build a “replay runner” that rehydrates `OrchestrationState` from an event stream with strict validation and deterministic logs.
+
+### Shared delivery semantics taxonomy (event bus + handlers)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-09
+- **Last reviewed**: 2026-05-09
+- **Current decision**: Keep delivery/ack semantics minimal and interface-scoped in v1 (e.g., `accepted/failed/rejected/skipped` + `ack/nack/drop`) without implementing broker-specific behavior.
+- **Rationale**: The system needs consistent semantics for determinism, observability, and replay across subsystems, but the operational model (in-memory vs DB-backed vs broker-backed) is still evolving.
+- **Future impact**: Without a shared, documented delivery taxonomy:
+  - Components may interpret `skipped`, `rejected`, or `nack` differently (semantic drift).
+  - Replay tooling and audit reports may misclassify failures vs intentional no-ops.
+  - Orchestrator upgrade safety decreases due to inconsistent handling expectations.
+- **Priority**: Medium
+- **Recommended future direction**: Publish a small shared taxonomy (doc/module) defining:
+  - Delivery statuses and invariants (e.g., `skipped` is non-error; forbids failure details).
+  - Ack decisions as **signals** only (policy owned by deterministic orchestration).
+  - Minimum required audit/tracing fields for publish vs handle operations.
+  - Harness tests that enforce consistent interpretation across implementations.
 
 ### Shared execution metadata structures
 - **Status**: OPEN
@@ -181,6 +215,22 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Future impact**: Divergence risk increases (similar concepts named differently across schemas), and integrations may depend on inconsistent strings.
 - **Priority**: Medium
 - **Recommended future direction**: Establish a `schemas/domain/` vocabulary package that includes stable enums, string vocab registries, and backward-compatible aliases. Promote entries only when they are proven stable and covered by harness validation.
+
+### Event naming convention governance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-09
+- **Last reviewed**: 2026-05-09
+- **Current decision**: Avoid prematurely enum’ing all event types, but require deterministic, reviewable naming conventions for event identifiers.
+- **Rationale**: Event types are control-plane vocabulary. Even as strings, they must remain stable for replay, routing determinism, and long-term interpretation.
+- **Future impact**: Without naming governance:
+  - Similar events may proliferate under different names (drift).
+  - Consumers may hardcode inconsistent strings, increasing breaking-change risk.
+  - Audit/replay tooling becomes brittle and harder to reason about.
+- **Priority**: Medium
+- **Recommended future direction**: Define and enforce conventions:
+  - Naming pattern (e.g., `noun_verb` or `domain.action`, stable casing).
+  - Rules for new event introduction (ADR/registry update, payload notes, backward compatibility expectations).
+  - Deprecation rules for renamed/superseded events (emit new event types; avoid mutation; provide mapping docs).
 
 ## Operational Governance
 
