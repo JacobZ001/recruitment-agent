@@ -293,3 +293,23 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Future impact**: Less static type safety; domain expansion increases validator complexity.
 - **Priority**: Medium
 - **Recommended future direction**: Consider discriminated union transition records per domain (pipeline/decision/communication) with typed enums per record.
+
+### Extraction of default transition registries from the engine module
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: Keep `default_pipeline_registry()` (and similar defaults) co-located with `transition_engine.py` for early discoverability.
+- **Rationale**: A single module reduces indirection while the rule set is small and there is only one consumer; moving too early splits governance from implementation without clear benefit.
+- **Future impact**: As domains and rule variants grow, default registries in the engine file increase noise and make versioned rule packs harder to swap in tests and production.
+- **Priority**: Low
+- **Recommended future direction**: Move default registries to `state_machine/registries/` (or `state_machine/rules/`) as explicit versioned modules (e.g. `pipeline_v1.py`) loaded by wiring code; keep `TransitionEngine` free of product-specific graphs.
+
+### Transition registry modularization (multi-domain rule packs)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: Use one immutable `TransitionRegistry` type with a flat sorted rule tuple; compose multiple domains in a single registry instance when needed.
+- **Rationale**: Keeps the validation engine simple and deterministic; premature package fragmentation can obscure global invariants (e.g. terminal sets, trigger naming).
+- **Future impact**: Large monolithic registries become harder to review, diff, and assign ownership; cross-pack conflicts (duplicate `rule_id`, overlapping edges) need explicit policy.
+- **Priority**: Medium
+- **Recommended future direction**: Introduce composable registry builders (merge with deterministic conflict rules), namespace `rule_id` prefixes per pack, and harness tests for merge semantics and replay alignment with `rule_set_id`.
