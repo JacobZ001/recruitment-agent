@@ -20,7 +20,8 @@ from tests.replay.test_vertical_slice_negative_paths import (
 )
 
 
-def test_happy_path_timeline_deterministic_twice_includes_deep_scored() -> None:
+def test_happy_path_timeline_deterministic_twice_auto_catalog_includes_emitted_ingest() -> None:
+    """Unified catalog (primary + recorded stream) resolves nested workflow ingests."""
     bus_a = RecordingInMemoryEventBus()
     bus_b = RecordingInMemoryEventBus()
     bundle_a = wire_vertical_slice_runtime(bus=bus_a)
@@ -28,11 +29,22 @@ def test_happy_path_timeline_deterministic_twice_includes_deep_scored() -> None:
     drive_vertical_slice_primary_sequence(bundle_a, verbose=False)
     drive_vertical_slice_primary_sequence(bundle_b, verbose=False)
 
-    text_a = vertical_slice_timeline_text(bundle_a, bus_a.recorded_envelopes)
-    text_b = vertical_slice_timeline_text(bundle_b, bus_b.recorded_envelopes)
+    text_a = vertical_slice_timeline_text(bundle_a)
+    text_b = vertical_slice_timeline_text(bundle_b)
     assert text_a == text_b
     assert "deep_scored" in text_a
     assert "final.pipeline.phase=deep_scored" in text_a
+    assert "ingest.event_type=questionnaire_requested" in text_a
+    assert "ingest.kind=runtime_emission" in text_a
+
+
+def test_happy_path_explicit_recorded_stream_matches_auto_catalog() -> None:
+    bus = RecordingInMemoryEventBus()
+    bundle = wire_vertical_slice_runtime(bus=bus)
+    drive_vertical_slice_primary_sequence(bundle, verbose=False)
+    auto = vertical_slice_timeline_text(bundle)
+    explicit = vertical_slice_timeline_text(bundle, bus.recorded_envelopes)
+    assert auto == explicit
 
 
 def test_negative_path_timeline_includes_transition_failure_code() -> None:

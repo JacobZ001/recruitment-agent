@@ -16,6 +16,11 @@ from orchestrator.orchestrator import (
 )
 from schemas.state_schema import OrchestrationState
 
+# Vertical-slice inspection labels (not persisted; human-readable only).
+INGEST_KIND_EXTERNAL = "external_ingress"
+INGEST_KIND_RUNTIME_EMISSION = "runtime_emission"
+INGEST_KIND_UNKNOWN = "unknown"
+
 
 def envelope_lookup(envelopes: Sequence[EventEnvelope]) -> Dict[str, EventEnvelope]:
     """Map ``event_id`` hex string → envelope (last wins if duplicates)."""
@@ -23,6 +28,44 @@ def envelope_lookup(envelopes: Sequence[EventEnvelope]) -> Dict[str, EventEnvelo
     for env in envelopes:
         out[str(env.event_id)] = env
     return out
+
+
+def merge_catalog_streams(*streams: Optional[Sequence[EventEnvelope]]) -> List[EventEnvelope]:
+    """
+    Build a unified ordered catalog for lookup: streams are merged left-to-right;
+    duplicate ``event_id`` values keep the **last** envelope instance.
+
+    Deterministic key order: first-seen ``event_id`` wins slot order; later streams
+    only replace envelope instances for ids already seen or append new ids (recorded
+    publish stream after primary ingress yields primary order then emitted-only ids).
+    """
+    by_id: Dict[str, EventEnvelope] = {}
+    order: List[str] = []
+    for stream in streams:
+        if not stream:
+            continue
+        for env in stream:
+            key = str(env.event_id)
+            if key not in by_id:
+                order.append(key)
+            by_id[key] = env
+    return [by_id[k] for k in order]
+
+
+def classify_vertical_slice_ingest_kind(envelope: EventEnvelope) -> str:
+    """
+    Distinguish externally published ingress vs orchestrator-emitted workflow events.
+
+    Emissions set ``metadata.causation_id`` to the triggering envelope's ``event_id``
+    (see orchestrator ``_build_emission_envelope``); primary bootstrap ingress uses
+    ``causation_id=None``.
+    """
+    meta = envelope.metadata
+    if meta is None:
+        return INGEST_KIND_EXTERNAL
+    if meta.causation_id is not None:
+        return INGEST_KIND_RUNTIME_EMISSION
+    return INGEST_KIND_EXTERNAL
 
 
 def render_vertical_slice_timeline_text(
@@ -34,10 +77,11 @@ def render_vertical_slice_timeline_text(
     """
     Render a deterministic, multi-line timeline for developer/operator inspection.
 
-    ``envelope_catalog`` should include every ``EventEnvelope`` whose ``event_id``
-    appears as ``trace.ingested_event_id`` in ``run_history`` (typically all envelopes
-    passed to ``InMemoryEventBus.publish``, e.g. from :class:`~tests.replay.recording_bus.RecordingInMemoryEventBus`).
-    Missing ids still render with ``event_type`` omitted.
+    Pass a **unified** ``envelope_catalog`` that includes every ``EventEnvelope`` whose
+    ``event_id`` appears as ``trace.ingested_event_id`` in ``run_history``. Use
+    :func:`merge_catalog_streams` with primary ingress plus a recorded publish stream
+    (e.g. ``RecordingInMemoryEventBus.recorded_envelopes``) so nested workflow events
+    such as ``questionnaire_requested`` resolve to concrete ``event_type`` values.
     """
     lines: List[str] = []
     by_id = envelope_lookup(envelope_catalog)
@@ -53,11 +97,20 @@ def render_vertical_slice_timeline_text(
         ingest_id = str(run.trace.ingested_event_id)
         ingest_env = by_id.get(ingest_id)
         etype = ingest_env.event_type if ingest_env else "<unknown_ingress_type>"
+        ikind = (
+            classify_vertical_slice_ingest_kind(ingest_env)
+            if ingest_env
+            else INGEST_KIND_UNKNOWN
+        )
         lines.append("")
         lines.append(
-            f"--- run {run_idx} | ingest.event_type={etype} | ingest.event_id={ingest_id} | ok={run.ok}"
+            f"--- run {run_idx} | ingest.event_type={etype} | ingest.kind={ikind} | "
+            f"ingest.event_id={ingest_id} | ok={run.ok}"
         )
         lines.append(f"    orchestration_execution_id={run.trace.orchestration_execution_id}")
+
+        if ingest_env and ikind == INGEST_KIND_RUNTIME_EMISSION and ingest_env.metadata.causation_id:
+            lines.append(f"    ingest.causation_event_id={ingest_env.metadata.causation_id}")
 
         if not run.ok:
             assert run.failure is not None

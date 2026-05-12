@@ -379,23 +379,44 @@ def vertical_slice_primary_ingress_envelopes(bundle: VerticalSliceRuntimeBundle)
     ]
 
 
+def resolve_vertical_slice_inspection_catalog(bundle: VerticalSliceRuntimeBundle) -> List[EventEnvelope]:
+    """
+    Unified envelope catalog for inspection: primary scripted ingress merged with any
+    envelopes captured on ``bundle.bus`` (e.g. ``recorded_envelopes`` on the test
+    :class:`~tests.replay.recording_bus.RecordingInMemoryEventBus`), so orchestration
+    runs triggered by runtime-emitted events resolve ``event_type`` correctly.
+    """
+    from runtime.inspection import merge_catalog_streams
+
+    primary = vertical_slice_primary_ingress_envelopes(bundle)
+    recorded = getattr(bundle.bus, "recorded_envelopes", None)
+    if recorded:
+        return merge_catalog_streams(primary, recorded)
+    return list(primary)
+
+
 def vertical_slice_timeline_text(
     bundle: VerticalSliceRuntimeBundle,
-    envelope_catalog: Sequence[EventEnvelope],
+    envelope_catalog: Optional[Sequence[EventEnvelope]] = None,
 ) -> str:
     """
     Human-readable multi-run timeline from :func:`render_vertical_slice_timeline_text`.
 
-    Pass all envelopes published to the bus (e.g. ``RecordingInMemoryEventBus.recorded_envelopes``)
-    for complete ingress labels including nested emissions; otherwise use
-    :func:`vertical_slice_primary_ingress_envelopes` for primary-path-only labels.
+    When ``envelope_catalog`` is omitted, builds a unified catalog via
+    :func:`resolve_vertical_slice_inspection_catalog` (primary ingress + recorded bus
+    envelopes when available). Pass an explicit catalog for narrow slices (e.g. negative
+    tests without a recording bus).
     """
-    from runtime.inspection import render_vertical_slice_timeline_text
+    from runtime.inspection import merge_catalog_streams, render_vertical_slice_timeline_text
 
     fin = bundle.store.get(bundle.state_id)
+    if envelope_catalog is None:
+        merged = resolve_vertical_slice_inspection_catalog(bundle)
+    else:
+        merged = merge_catalog_streams(envelope_catalog)
     return render_vertical_slice_timeline_text(
         run_history=bundle.subscriber.run_history,
-        envelope_catalog=envelope_catalog,
+        envelope_catalog=merged,
         final_state=fin.snapshot if fin.ok else None,
     )
 
@@ -411,9 +432,10 @@ def drive_vertical_slice_primary_sequence(
     Publish :data:`PRIMARY_VERTICAL_SLICE_EVENT_TYPES` in order (same as the CLI bootstrap).
 
     When ``print_timeline`` is true, append a human-readable inspection timeline (see
-    :func:`vertical_slice_timeline_text`). Pass ``timeline_envelopes`` for full bus
-    envelope coverage (e.g. recording bus captures); otherwise labels use primary
-    ingress envelopes only (nested ingests may show as unknown types).
+    :func:`vertical_slice_timeline_text`). If ``timeline_envelopes`` is omitted, the
+    timeline uses :func:`resolve_vertical_slice_inspection_catalog` so a recording bus
+    (when present) enriches labels for runtime-emitted ingests (e.g.
+    ``questionnaire_requested``).
     """
     state_id = bundle.state_id
     bus = bundle.bus
@@ -467,12 +489,10 @@ def drive_vertical_slice_primary_sequence(
         if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
             print("WARNING: expected deep_scored; check planner/registry alignment.")
     if print_timeline:
-        catalog = (
-            list(timeline_envelopes)
-            if timeline_envelopes is not None
-            else vertical_slice_primary_ingress_envelopes(bundle)
-        )
-        print(vertical_slice_timeline_text(bundle, catalog))
+        if timeline_envelopes is not None:
+            print(vertical_slice_timeline_text(bundle, timeline_envelopes))
+        else:
+            print(vertical_slice_timeline_text(bundle))
     return final.snapshot
 
 
@@ -592,4 +612,4 @@ def run_vertical_slice_bootstrap(
 
 
 if __name__ == "__main__":
-    run_vertical_slice_bootstrap(verbose=True,print_timeline=True)
+    run_vertical_slice_bootstrap(verbose=True)
