@@ -14,7 +14,7 @@ from orchestrator.orchestrator import (
     OrchestrationDecisionKind,
     OrchestrationExecutionResult,
 )
-from schemas.state_schema import OrchestrationState
+from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
 # Vertical-slice inspection labels (not persisted; human-readable only).
 INGEST_KIND_EXTERNAL = "external_ingress"
@@ -109,6 +109,10 @@ def render_vertical_slice_timeline_text(
         )
         lines.append(f"    orchestration_execution_id={run.trace.orchestration_execution_id}")
 
+        gov_note = _governance_ingress_note(ingest_env)
+        if gov_note:
+            lines.append(f"    {gov_note}")
+
         if ingest_env and ikind == INGEST_KIND_RUNTIME_EMISSION and ingest_env.metadata.causation_id:
             lines.append(f"    ingest.causation_event_id={ingest_env.metadata.causation_id}")
 
@@ -133,6 +137,8 @@ def render_vertical_slice_timeline_text(
                     f"    last_transition: domain={tr.state_domain.value} "
                     f"{tr.from_state!r} -> {tr.to_state!r} trigger={tr.trigger!r}"
                 )
+                gaudit = _governance_transition_audit_lines(tr)
+                lines.extend(gaudit)
 
         tv = run.transition_result
         if tv is not None:
@@ -170,6 +176,37 @@ def _emission_types_from_decisions(run: OrchestrationExecutionResult) -> List[st
         if d.kind == OrchestrationDecisionKind.EMISSION_SCHEDULED and d.code:
             out.append(str(d.code))
     return out
+
+
+def _governance_ingress_note(envelope: Optional[EventEnvelope]) -> Optional[str]:
+    if envelope is None:
+        return None
+    et = envelope.event_type
+    if not et.startswith("recruiter_"):
+        return None
+    pl = envelope.payload or {}
+    actor = pl.get("actor_id")
+    reason = pl.get("reason")
+    at = pl.get("actor_type")
+    return (
+        f"governance.ingress | event_type={et} actor_type={at!r} actor_id={actor!r} reason={reason!r}"
+    )
+
+
+def _governance_transition_audit_lines(tr: StateTransitionRecord) -> List[str]:
+    """Emit human-readable governance audit rows when transition record carries governance extensions."""
+    ex = tr.extensions or {}
+    dc = ex.get("governance.decision_code")
+    if not dc:
+        return []
+    actor = ex.get("governance.actor_id")
+    ho = ex.get("governance.force_human_override")
+    extra = ""
+    if ho is not None:
+        extra = f" force_human_override={ho!r}"
+    return [
+        f"    governance.transition | decision_code={dc} actor_id={actor!r}{extra}",
+    ]
 
 
 def _format_skill_block(sr: SkillExecutionResult) -> List[str]:

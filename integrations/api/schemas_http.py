@@ -7,10 +7,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from runtime.bootstrap_vertical_slice import PRIMARY_VERTICAL_SLICE_EVENT_TYPES
+from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_INGRESS_EVENT_TYPES
 
 
-_ALLOWED_INGRESS = frozenset(PRIMARY_VERTICAL_SLICE_EVENT_TYPES)
+_ALLOWED_INGRESS = frozenset(VERTICAL_SLICE_INGRESS_EVENT_TYPES)
 
 
 class VerticalSliceIngressEventBody(BaseModel):

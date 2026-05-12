@@ -284,6 +284,46 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Add **explicit provenance / source metadata** (versioned envelope extensions or first-class fields) for categories such as external ingress, control-plane emission, replay injection—**deterministic** classification in inspection from recorded facts, not inferred solely from causation presence; coordinate with **Shared execution metadata structures**.
 
+### Governance semantic partitioning (shared stream vs read-model clarity)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: First bounded governance ingress (``recruiter_*`` events) rides the **same** append-only publish/handle path as operational ingress and orchestration-derived envelopes. Timelines and replay harnesses treat them as typed ``event_type`` facts without a separate governance channel or persisted partition yet.
+- **Rationale**: Keeps the vertical slice **single-bus**, **replay-testable**, and small—no second runtime or premature split of what counts as an immutable fact.
+- **Future impact**: As workflows grow, timeline and replay consumers may overload one stream with mixed semantics (operator decisions vs domain progression vs emissions) unless projections can filter or label categories reliably.
+- **Priority**: Medium
+- **Recommended future direction**: When read-model needs emerge, **distinguish governance decisions from operational signals** in **deterministic projections** (tags, provenance fields, or typed catalog views)—**preserve replay compatibility** on the underlying immutable stream; avoid forking control-plane semantics until harness and audit contracts need it.
+
+### Governance authority semantics (``human_override`` / force paths)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``recruiter_force_transition`` sets ``ProposedTransition.human_override`` as a **bounded audit signal**; transitions still pass through ``TransitionEngine.validate`` with the same registry rules—**no** open-ended skip-validation path.
+- **Rationale**: Deterministic-first posture: operators are visible in history without granting unrestricted graph edits.
+- **Future impact**: Product language around emergency override, escalation tiers, and which edges may use ``human_override`` is **not** yet codified—risk of inconsistent operator expectations vs engine behavior as more edges appear.
+- **Priority**: Medium
+- **Recommended future direction**: Document **allowable override classes** (terminal escape, policy exception, replay-only, etc.) in small ADR or registry metadata; keep **replay and audit logs** the source of truth; **no** autonomous mutation authority outside validated transitions.
+
+### Governance identity lineage (opaque ``actor_id``)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Governance payloads use a **minimal** stable ``actor_id`` string plus ``actor_type`` (see ``schemas/governance_schema.py``). No delegation chain, impersonation metadata, or multi-step review graph.
+- **Rationale**: Ships accountable human facts on the slice without permission systems or identity products.
+- **Future impact**: Delegation, escalation lineage, impersonation controls, calibration attribution, and multi-review provenance cannot be expressed faithfully without richer—but still **deterministic**—metadata.
+- **Priority**: Low
+- **Recommended future direction**: **Intentionally evolve only when** governance workflows require it: optional structured lineage fields (parent action id, review role, calibration session id) behind versioned payload contracts; keep defaults minimal for harness stability.
+
+### Governance policy modularization (planner-local vs packs)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Bounded governance transitions and whitelist rules live **inline** in ``orchestrator/vertical_slice_planner.py`` next to the rest of slice policy.
+- **Rationale**: Fast iteration, single file to read for vertical-slice behavior; avoids abstract policy frameworks before shapes stabilize.
+- **Future impact**: More recruiter/operator paths will **densify** the planner—harder to review, version, and test in isolation without duplication risk.
+- **Priority**: Medium
+- **Recommended future direction**: Extract **versioned governance policy tables or registries** (pure data + harness) called from the planner—**deterministic planning unchanged**; **no** premature framework; refactor only when file complexity hurts correctness reviews.
+
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-09

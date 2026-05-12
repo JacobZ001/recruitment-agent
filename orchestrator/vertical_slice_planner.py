@@ -74,7 +74,9 @@ time or external IO.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Optional, Tuple
+
+from pydantic import ValidationError
 
 from interfaces.event_bus_interface import DeliveryContext, EventEnvelope
 
@@ -85,6 +87,11 @@ from .orchestrator import (
     SkillInvocationSpec,
 )
 from interfaces.skill_interface import SkillInputEnvelope
+from schemas.governance_schema import (
+    governance_record_extensions,
+    parse_governance_ingress,
+    parse_governance_override_ingress,
+)
 from schemas.state_schema import DecisionActorType, OrchestrationState, PipelinePhase, StateActor, StateDomain
 
 
@@ -97,6 +104,18 @@ SKILL_LIGHT_SCORING = "recruitment.vertical_slice.light_scoring"
 SKILL_DEEP_SCORING = "recruitment.vertical_slice.deep_scoring"
 SKILL_QUESTIONNAIRE_STAGE = "recruitment.vertical_slice.questionnaire_stage"
 
+# Bounded whitelist: explicit governance transitions must match default_pipeline_registry edges.
+_ALLOWED_GOVERNANCE_OVERRIDE_TRIPLES: FrozenSet[Tuple[str, str, str]] = frozenset(
+    {
+        (PipelinePhase.DEEP_SCORED.value, PipelinePhase.SHORTLISTED.value, "manual_recruiter_approve"),
+        (
+            PipelinePhase.SHORTLISTED.value,
+            PipelinePhase.INTERVIEW_PENDING.value,
+            "manual_recruiter_schedule_interview",
+        ),
+    }
+)
+
 
 def _event_trigger(name: str) -> str:
     return f"event:{name}"
@@ -105,6 +124,10 @@ def _event_trigger(name: str) -> str:
 def _system_actor(envelope: EventEnvelope) -> StateActor:
     actor_id = envelope.metadata.actor_id if envelope.metadata else None
     return StateActor(actor_type=DecisionActorType.SYSTEM, actor_id=actor_id)
+
+
+def _human_actor_from_governance(actor_id: str) -> StateActor:
+    return StateActor(actor_type=DecisionActorType.HUMAN, actor_id=actor_id)
 
 
 def _human_override(envelope: EventEnvelope) -> bool:
@@ -176,6 +199,14 @@ class VerticalSlicePlanner:
             return self._plan_questionnaire_completed(phase, envelope)
         if et == "deep_scoring_completed":
             return self._plan_deep_scoring_completed(phase, envelope, planner_path="deep_scoring_completed")
+        if et == "recruiter_approve_candidate":
+            return self._plan_recruiter_approve_candidate(phase, envelope)
+        if et == "recruiter_reject_candidate":
+            return self._plan_recruiter_reject_candidate(phase, envelope)
+        if et == "recruiter_override_transition":
+            return self._plan_recruiter_override_transition(phase, envelope, force_human_override=False)
+        if et == "recruiter_force_transition":
+            return self._plan_recruiter_override_transition(phase, envelope, force_human_override=True)
         if et == "scoring_completed":
             if phase == PipelinePhase.HARD_FILTER_PASSED:
                 return self._plan_light_scoring_completed(
@@ -444,6 +475,96 @@ class VerticalSlicePlanner:
                     skill_name=SKILL_DEEP_SCORING,
                     input=_skill_input(planner_path=planner_path, envelope=envelope),
                     required=True,
+                ),
+            ),
+        )
+
+    def _plan_recruiter_approve_candidate(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``deep_scored_to_shortlisted`` (deterministic recruiter approval)."""
+        try:
+            gov = parse_governance_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        if phase != PipelinePhase.DEEP_SCORED:
+            return OrchestrationPlan()
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.DEEP_SCORED.value,
+                to_state=PipelinePhase.SHORTLISTED.value,
+                trigger="manual_recruiter_approve",
+                human_override=False,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=governance_record_extensions(
+                    event_type="recruiter_approve_candidate",
+                    gov=gov,
+                    decision_code="GOVERNANCE_APPROVE_CANDIDATE",
+                ),
+            ),
+        )
+
+    def _plan_recruiter_reject_candidate(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``any_to_inactive`` with ``event:candidate_rejected``."""
+        try:
+            gov = parse_governance_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        if phase == PipelinePhase.INACTIVE:
+            return OrchestrationPlan()
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=phase.value,
+                to_state=PipelinePhase.INACTIVE.value,
+                trigger="event:candidate_rejected",
+                human_override=False,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=governance_record_extensions(
+                    event_type="recruiter_reject_candidate",
+                    gov=gov,
+                    decision_code="GOVERNANCE_REJECT_CANDIDATE",
+                ),
+            ),
+        )
+
+    def _plan_recruiter_override_transition(
+        self, phase: PipelinePhase, envelope: EventEnvelope, *, force_human_override: bool
+    ) -> OrchestrationPlan:
+        """
+        Bounded explicit transition requests; still validated by the transition engine.
+
+        ``recruiter_force_transition`` sets ``human_override=True`` for audit/replay
+        (terminal escape semantics when applicable).
+        """
+        try:
+            gov = parse_governance_override_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        triple = (gov.requested_from_phase, gov.requested_to_phase, gov.trigger)
+        if triple not in _ALLOWED_GOVERNANCE_OVERRIDE_TRIPLES:
+            return OrchestrationPlan()
+        ho = force_human_override or gov.force_human_override
+        et = "recruiter_force_transition" if force_human_override else "recruiter_override_transition"
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=gov.requested_from_phase,
+                to_state=gov.requested_to_phase,
+                trigger=gov.trigger,
+                human_override=ho,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=governance_record_extensions(
+                    event_type=et,
+                    gov=gov,
+                    decision_code="GOVERNANCE_OVERRIDE_TRANSITION",
+                    extra={
+                        "governance.force_human_override": ho,
+                        "governance.requested_trigger": gov.trigger,
+                    },
                 ),
             ),
         )

@@ -232,6 +232,10 @@ class ProposedTransition(_OrchestratorBase):
     trigger: str = Field(..., min_length=1)
     human_override: bool = False
     transition_actor: StateActor
+    record_extensions: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Merged into StateTransitionRecord.extensions after validation (audit metadata).",
+    )
 
 
 class SkillInvocationSpec(_OrchestratorBase):
@@ -441,6 +445,9 @@ def _commit_transition(
     updated_by: str,
     occurred_at: datetime,
 ) -> OrchestrationState:
+    ext: Dict[str, Any] = {"matched_rule_id": matched_rule_id}
+    if proposed.record_extensions:
+        ext = {**ext, **proposed.record_extensions}
     record = StateTransitionRecord(
         state_domain=proposed.state_domain,
         from_state=proposed.from_state,
@@ -449,7 +456,7 @@ def _commit_transition(
         timestamp=occurred_at,
         actor=proposed.transition_actor,
         event_id=envelope.event_id,
-        extensions={"matched_rule_id": matched_rule_id},
+        extensions=ext,
     )
     new_transitions: List[StateTransitionRecord] = list(state.transitions) + [record]
     new_audit = _model_copy(state.audit, updated_at=occurred_at, updated_by=updated_by)

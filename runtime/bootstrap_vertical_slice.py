@@ -98,6 +98,7 @@ from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
 from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
 from skills.deterministic.fake_light_scoring_skill import FakeLightScoringSkill
+from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 from state_machine.transition_engine import TransitionEngine, default_pipeline_registry
 
 _BOOT_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ffee")
@@ -280,6 +281,9 @@ PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
     "questionnaire_completed",
     "deep_scoring_completed",
 )
+
+# API / integration allowlist = primary progression + bounded governance ingress.
+VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES
 
 
 @dataclass
