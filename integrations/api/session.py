@@ -5,8 +5,18 @@ from __future__ import annotations
 import threading
 from uuid import UUID
 
-from runtime.bootstrap_vertical_slice import VerticalSliceRuntimeBundle, wire_vertical_slice_runtime
+from orchestrator.vertical_slice_planner import VerticalSlicePlanner
+from runtime.bootstrap_vertical_slice import (
+    VerticalSliceRuntimeBundle,
+    drive_vertical_slice_primary_sequence,
+    wire_vertical_slice_runtime,
+)
 from runtime.recording_event_bus import RecordingInMemoryEventBus
+from schemas.state_schema import OrchestrationState, PipelinePhase
+
+
+class DemoRunPreconditionError(ValueError):
+    """Raised when ``POST /demo/run`` cannot safely replay the scripted primary sequence."""
 
 
 class VerticalSliceApiRuntime:
@@ -20,6 +30,7 @@ class VerticalSliceApiRuntime:
     def __init__(self) -> None:
         self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
             bus=RecordingInMemoryEventBus(),
+            planner=VerticalSlicePlanner(demo_skill_context=True),
         )
         self._seq = 0
         self._lock = threading.Lock()
@@ -36,3 +47,20 @@ class VerticalSliceApiRuntime:
         with self._lock:
             self._seq += 1
             return self._seq
+
+    def run_primary_demo_sequence(self) -> OrchestrationState:
+        """
+        Publish the canonical primary ingress sequence via the bus (same as bootstrap CLI).
+
+        Requires pipeline phase ``NEW`` so the scripted envelopes align with transition
+        preconditions; callers that already advanced the slice should use ``POST /events``.
+        """
+        with self._lock:
+            got = self.bundle.store.get(self.bundle.state_id)
+            if not got.ok or got.snapshot is None:
+                raise DemoRunPreconditionError("orchestration state missing")
+            if got.snapshot.pipeline.phase != PipelinePhase.NEW:
+                raise DemoRunPreconditionError(
+                    "demo run requires pipeline_phase NEW; use POST /events for partial progression"
+                )
+            return drive_vertical_slice_primary_sequence(self.bundle)

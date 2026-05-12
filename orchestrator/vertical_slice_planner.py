@@ -94,6 +94,8 @@ from schemas.governance_schema import (
 )
 from schemas.state_schema import DecisionActorType, OrchestrationState, PipelinePhase, StateActor, StateDomain
 
+from runtime.demo_candidate_fixture import merge_demo_profile_into_skill_payload
+
 
 # Stable skill identifiers — must match keys in the orchestrator skill registry wiring.
 SKILL_CANDIDATE_CREATED = "recruitment.vertical_slice.candidate_created"
@@ -138,22 +140,6 @@ def _human_override(envelope: EventEnvelope) -> bool:
     return False
 
 
-def _skill_input(
-    *,
-    planner_path: str,
-    envelope: EventEnvelope,
-    extras: Optional[Dict[str, Any]] = None,
-) -> SkillInputEnvelope:
-    payload: Dict[str, Any] = {
-        "vertical_slice.planner_path": planner_path,
-        "ingested_event_id": str(envelope.event_id),
-        "ingested_event_type": envelope.event_type,
-    }
-    if extras:
-        payload.update(extras)
-    return SkillInputEnvelope(payload=payload)
-
-
 class VerticalSlicePlanner:
     """
     First runnable recruiter vertical-slice :class:`OrchestrationStepPlanner`.
@@ -167,6 +153,32 @@ class VerticalSlicePlanner:
     ``light_scored`` → ``questionnaire_pending`` → ``questionnaire_sent`` →
     ``questionnaire_completed`` per the default registry.
     """
+
+    def __init__(self, *, demo_skill_context: bool = False) -> None:
+        """
+        When ``demo_skill_context`` is True, merge :mod:`runtime.demo_candidate_fixture`
+        keys into every skill input (``setdefault``) for recruiter-visible demos.
+        Bootstrap/replay should keep the default False so historical payloads stay equal.
+        """
+        self._demo_skill_context = demo_skill_context
+
+    def _skill_input(
+        self,
+        *,
+        planner_path: str,
+        envelope: EventEnvelope,
+        extras: Optional[Dict[str, Any]] = None,
+    ) -> SkillInputEnvelope:
+        payload: Dict[str, Any] = {
+            "vertical_slice.planner_path": planner_path,
+            "ingested_event_id": str(envelope.event_id),
+            "ingested_event_type": envelope.event_type,
+        }
+        if extras:
+            payload.update(extras)
+        if self._demo_skill_context:
+            merge_demo_profile_into_skill_payload(payload)
+        return SkillInputEnvelope(payload=payload)
 
     def plan(
         self,
@@ -229,7 +241,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_CANDIDATE_CREATED,
-                    input=_skill_input(planner_path="candidate_created", envelope=envelope),
+                    input=self._skill_input(planner_path="candidate_created", envelope=envelope),
                     required=False,
                 ),
             ),
@@ -250,7 +262,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_CV_UPLOADED,
-                    input=_skill_input(planner_path="cv_uploaded", envelope=envelope),
+                    input=self._skill_input(planner_path="cv_uploaded", envelope=envelope),
                     required=True,
                 ),
             ),
@@ -271,7 +283,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_CV_PARSED,
-                    input=_skill_input(planner_path="cv_parsed", envelope=envelope),
+                    input=self._skill_input(planner_path="cv_parsed", envelope=envelope),
                     required=True,
                 ),
             ),
@@ -292,7 +304,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_HARD_FILTER,
-                    input=_skill_input(
+                    input=self._skill_input(
                         planner_path="hard_filter_passed",
                         envelope=envelope,
                         extras={"outcome": "passed"},
@@ -321,7 +333,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_HARD_FILTER,
-                    input=_skill_input(
+                    input=self._skill_input(
                         planner_path="hard_filter_failed",
                         envelope=envelope,
                         extras={"outcome": "failed"},
@@ -356,7 +368,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_LIGHT_SCORING,
-                    input=_skill_input(planner_path=planner_path, envelope=envelope),
+                    input=self._skill_input(planner_path=planner_path, envelope=envelope),
                     required=True,
                 ),
             ),
@@ -384,7 +396,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_QUESTIONNAIRE_STAGE,
-                    input=_skill_input(planner_path="questionnaire_requested", envelope=envelope),
+                    input=self._skill_input(planner_path="questionnaire_requested", envelope=envelope),
                     required=False,
                 ),
             ),
@@ -411,7 +423,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_QUESTIONNAIRE_STAGE,
-                    input=_skill_input(planner_path="questionnaire_sent", envelope=envelope),
+                    input=self._skill_input(planner_path="questionnaire_sent", envelope=envelope),
                     required=False,
                 ),
             ),
@@ -441,7 +453,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_QUESTIONNAIRE_STAGE,
-                    input=_skill_input(planner_path="questionnaire_completed", envelope=envelope),
+                    input=self._skill_input(planner_path="questionnaire_completed", envelope=envelope),
                     required=False,
                 ),
             ),
@@ -473,7 +485,7 @@ class VerticalSlicePlanner:
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_DEEP_SCORING,
-                    input=_skill_input(planner_path=planner_path, envelope=envelope),
+                    input=self._skill_input(planner_path=planner_path, envelope=envelope),
                     required=True,
                 ),
             ),

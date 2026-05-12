@@ -9,19 +9,24 @@ No workflow policy or direct state mutation here.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
+from integrations.api.demo_page import build_demo_recruiter_html
+from integrations.api.demo_summary import vertical_slice_demo_skill_summaries
 from integrations.api.schemas_http import (
+    DemoCandidateResponse,
+    DemoRunResponse,
     EventIngressResponse,
     HealthResponse,
     StateSummaryResponse,
     TimelineResponse,
     VerticalSliceIngressEventBody,
 )
-from integrations.api.session import VerticalSliceApiRuntime
+from integrations.api.session import DemoRunPreconditionError, VerticalSliceApiRuntime
 from interfaces.event_bus_interface import DeliveryStatus
 from runtime.bootstrap_vertical_slice import (
     VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
@@ -29,6 +34,7 @@ from runtime.bootstrap_vertical_slice import (
     _envelope,
     _FIXED_CLOCK,
 )
+from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
 from schemas.state_schema import OrchestrationState
 
 
@@ -42,6 +48,25 @@ def _state_summary_from_snapshot(
         transitions_count=len(snap.transitions),
         state_id=str(snap.id),
         store_revision=store_revision,
+    )
+
+
+def _demo_candidate_response(rt: VerticalSliceApiRuntime) -> DemoCandidateResponse:
+    got = rt.bundle.store.get(rt.bundle.state_id)
+    state_summary: Optional[StateSummaryResponse] = None
+    phase: Optional[str] = None
+    if got.ok and got.snapshot is not None and got.meta is not None:
+        phase = got.snapshot.pipeline.phase.value
+        state_summary = _state_summary_from_snapshot(
+            got.snapshot,
+            store_revision=got.meta.store_revision,
+        )
+    return DemoCandidateResponse(
+        candidate_id=str(rt.candidate_id),
+        profile=dict(DEMO_CANDIDATE_DISPLAY),
+        pipeline_phase=phase,
+        state_summary=state_summary,
+        skill_summaries=vertical_slice_demo_skill_summaries(rt.bundle),
     )
 
 
@@ -169,6 +194,40 @@ def create_app() -> FastAPI:
         note = _timeline_catalog_note(rt)
         text = vertical_slice_timeline_text(rt.bundle)
         return TimelineResponse(timeline_text=text, catalog_note=note)
+
+    @app.get("/demo/candidate", response_model=DemoCandidateResponse)
+    def get_demo_candidate(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoCandidateResponse:
+        return _demo_candidate_response(rt)
+
+    @app.get("/candidate/{candidate_id}", response_model=DemoCandidateResponse)
+    def get_candidate_demo_profile(
+        candidate_id: UUID,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> DemoCandidateResponse:
+        if candidate_id != rt.candidate_id:
+            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime")
+        return _demo_candidate_response(rt)
+
+    @app.post("/demo/run", response_model=DemoRunResponse)
+    def post_demo_run(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoRunResponse:
+        try:
+            snap = rt.run_primary_demo_sequence()
+        except DemoRunPreconditionError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        got = rt.bundle.store.get(rt.bundle.state_id)
+        if not got.ok or got.meta is None:
+            raise HTTPException(status_code=500, detail="state store meta missing after demo run")
+        return DemoRunResponse(
+            message="primary vertical slice sequence published via bus",
+            state_summary=_state_summary_from_snapshot(
+                snap,
+                store_revision=got.meta.store_revision,
+            ),
+        )
+
+    @app.get("/demo", response_class=HTMLResponse)
+    def get_demo_page(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> HTMLResponse:
+        return HTMLResponse(content=build_demo_recruiter_html(rt))
 
     return app
 

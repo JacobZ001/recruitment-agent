@@ -63,3 +63,20 @@ class EventIngressResponse(BaseModel):
     event_type: str
     publish_result: Dict[str, Any]
     state_summary: Optional[StateSummaryResponse] = None
+
+
+class DemoCandidateResponse(BaseModel):
+    """Demo fixture profile plus current slice snapshot (inspection-oriented, not a domain aggregate)."""
+
+    candidate_id: str
+    profile: Dict[str, Any]
+    pipeline_phase: Optional[str] = None
+    state_summary: Optional[StateSummaryResponse] = None
+    skill_summaries: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DemoRunResponse(BaseModel):
+    """Result of publishing the scripted primary sequence via the bus."""
+
+    message: str
+    state_summary: StateSummaryResponse

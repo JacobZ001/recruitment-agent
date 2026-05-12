@@ -22,7 +22,7 @@ The long-term direction is broader than recruitment automation. The system is de
 
 # Core Principles
 
-## 1\. Human-in-the-loop
+## 1 Human-in-the-loop
 
 The system assists decision-making but never fully replaces human authority.
 
@@ -41,7 +41,7 @@ AI acts as:
 - Structured evaluator
 - Workflow coordinator
 
-## 2\. AI evaluates human signals, not just resumes
+## 2 AI evaluates human signals, not just resumes
 
 Traditional recruitment relies heavily on:
 
@@ -62,7 +62,7 @@ BlueOcean's system instead prioritizes:
 
 CVs are treated only as an initial reference layer.
 
-## 3\. Cost-efficient AI usage
+## 3 Cost-efficient AI usage
 
 The system avoids unnecessary AI usage.
 

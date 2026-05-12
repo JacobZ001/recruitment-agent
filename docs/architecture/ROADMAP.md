@@ -17,14 +17,14 @@ Build a deterministic, AI-native **human evaluation infrastructure** for recruit
 - **Workflow model**: event-driven, with auditability and replay as first-class goals.
 - **Governance**: ADR registry and tech-debt registry to prevent drift.
 - **Foundation for v1**: schemas, interfaces, state-machine validation contracts, and the **reference runtime stack** (in-memory bus + state store + orchestrator + vertical-slice planner) are treated as **stable enough to build on**; schedule pressure is on **proving** end-to-end recruiter workflows, not inventing new control-plane shape.
-- **Phase transition**: the **control plane / reference runtime** (orchestrator, transition engine, planner, in-memory bus and store, fake deterministic skills, replay-aware execution semantics) **substantially exists**; a **thin HTTP ingress** (`integrations/api/`) makes the slice **externally exercisable** for validation and debugging. Active work has shifted from **standing up foundational runtime plumbing** to **governed operator workflows, audit-oriented interactions, and deeper proving** (harnesses, governance loops, structured inspection evolution).
-- **Execution focus**: close gaps with **end-to-end workflow proving**, deterministic orchestration validation, and **cognition replacement** behind existing contracts—without LLM-driven routing or speculative cross-cutting abstractions by default.
+- **Phase transition**: the **control plane / reference runtime** (orchestrator, transition engine, planner, in-memory bus and store, fake deterministic skills, replay-aware execution semantics) **substantially exists**; a **thin HTTP ingress** (`integrations/api/`) makes the slice **externally exercisable** for validation and debugging. **Bounded governance ingress**, **read-only inspection** (timelines, operator navigation, decision/evidence summaries), and **replay/governance tests** are in place. Active work shifts from **internal runtime expansion** toward a **recruiter-visible demo** that **consumes** the existing API and projections—still **deterministic-first**, **not** a production product milestone.
+- **Execution focus**: ship a **recruiter-visible demo** on top of the existing API and inspection projections; continue **end-to-end workflow proving** and deterministic validation; **cognition replacement** behind existing contracts when ready—**without** LLM-driven routing or speculative cross-cutting abstractions by default.
 - **Deferred intentionally**: durable persistence, production broker/event store, full replay-from-store runners, deep observability, and multi-tenant hardening remain **scheduled and debt-tracked**—they deepen **runtime evolution** after **replayable workflow confidence** and **human-governed operations** are demonstrated on the slice, not the reverse.
 - **Operations-centric posture**: maturity is measured by **governed workflows** (audit, replay signals, operator hooks, external exercise of orchestration) more than by counting backend components.
 
 ## Current Architectural State
 
-The **control plane exists** as a synchronous in-process stack with stable orchestration boundaries (planner policy vs. orchestrator execution vs. engine validation vs. skill contracts). **Primary risk is workflow proof and operator confidence**: correct handoffs across events, state, skills, and emissions; **replayable harness behavior**; **inspection/timeline visibility**; **human-in-the-loop governance** (overrides, review, audit); then **controlled cognition** and durable storage under the same gates—not “more infrastructure first.”
+The **control plane exists** as a synchronous in-process stack with stable orchestration boundaries (planner policy vs. orchestrator execution vs. engine validation vs. skill contracts). **Architecturally** the slice is strong (replay, API, governance, inspection). **Practically**, the next bottleneck is **recruiter-facing demo value**: thin candidate/CV artifacts and minimal presentation surface. Priority: **demo that exercises the runtime** (submit/simulate profile → progression → visible state, scores, filter reasoning, evidence refs, governance, timeline)—**without** implying production frontend or persistence.
 
 ## Current Repository Structure
 
@@ -63,6 +63,9 @@ High-level topology (architecture-oriented):
 - **Architecture governance system** (documented principles and boundaries).
 - **ADR registry** (`docs/architecture/ADR.md`).
 - **Technical debt registry** (`docs/architecture/tech_debt.md`).
+- **Reference HTTP ingress** (`integrations/api/`): sync-first FastAPI boundary for the vertical slice (health, events, state, timeline)—demonstration and harnesses, not a shipped product surface.
+- **Replay and governance harnesses** (`tests/replay/`, `tests/governance/`): structural replay, negative paths, bounded `recruiter_*` governance events with deterministic transition validation.
+- **Inspection and operator navigation** (`runtime/inspection/`): deterministic timelines, governance and transition audit lines, **decision/evidence summaries** and **navigation projections** (read-only; no orchestration policy in renderers).
 
 ## Current Development Phase
 
@@ -70,9 +73,9 @@ High-level topology (architecture-oriented):
 
 **Milestone**: **Proven** end-to-end deterministic recruiter workflows—runnable paths, harness-backed assertions, replay-validation confidence, and integration correctness—while cognition and product surfaces remain mostly fake or absent.
 
-The **control plane and reference runtime substantially exist** (orchestrator, transition engine, planner, in-memory event bus and state store, fake deterministic skills for intake/filter/light/deep scoring, replay-aware execution semantics). **Orchestration semantics remain deterministic and replay-tested** (replay harnesses + negative-path coverage); **manual integration proof** remains via `runtime/bootstrap_vertical_slice.py` (ingress sequence through `deep_scored` with derived `questionnaire_requested` emission). The runtime is **externally exercisable** through a **thin, validated HTTP boundary** (`integrations/api/`)—sync-first, schema-validated ingress; **no** production deployment claims. **Inspection/timeline** (`runtime/inspection/` and `GET /timeline/{candidate_id}`) gives **operator- and debugging-oriented visibility** (read-only; bounded completeness when history is not fully recorded). **Primary gap vs “proven”** shifts toward **human / operator governance loops** (override, review, audit-oriented interactions), **richer ingress semantics** (identity scope, idempotency—debt-tracked), and **structured inspection/timeline models**—not additional foundational control-plane plumbing by default.
+The **control plane and reference runtime substantially exist** (orchestrator, transition engine, planner, in-memory event bus and state store, fake deterministic skills for intake/filter/light/deep scoring, replay-aware execution semantics). **Orchestration semantics remain deterministic and replay-tested** (replay harnesses + negative-path coverage); **manual integration proof** remains via `runtime/bootstrap_vertical_slice.py` (ingress sequence through `deep_scored` with derived `questionnaire_requested` emission). The runtime is **externally exercisable** through a **thin, validated HTTP boundary** (`integrations/api/`)—sync-first, schema-validated ingress; **no** production deployment claims. **Inspection** (`runtime/inspection/`, `GET /timeline/{candidate_id}`) includes timelines plus **decision/evidence summaries and operator navigation** (read-only; bounded when envelope history is incomplete). **Primary near-term gap** is a **recruiter-visible demo surface** and **richer demo artifacts** so the same runtime reads as a credible walkthrough—not more control-plane invention by default. Deeper items (**structured inspection/timeline models** as first-class typed products, richer ingress idempotency, persistence) follow the demo unless a demo milestone explicitly requires them sooner.
 
-**Sequencing (operations-first)**: **prove** in tests (**in progress**: pytest replay + API harnesses) → **thin ingress** (**delivered**: FastAPI reference; optional CLI/extension later) → **human governance & replay confidence** on the slice → **controlled LLM** experiments behind skill interfaces (may start **before** durable persistence) → **deterministic policy depth** → **persistence & durable runtime** when warranted → **debt-tracked** hardening. **Authoritative ordered list:** **Upcoming (prioritized)** under Immediate Next Steps.
+**Sequencing (operations-first)**: **prove** in tests (**delivered** baseline: pytest replay + API + governance harnesses) → **thin ingress** (**delivered**: FastAPI reference) → **recruiter-visible demo** (thin presentation + richer demo artifacts; **not** production SPA) → **extend governance / ingress** as demos expose gaps → **structured inspection models** when demo or integrations require typed projections → **controlled LLM** experiments behind skill interfaces → **deterministic policy depth** → **persistence** when warranted → **debt-tracked** hardening. **Authoritative ordered list:** **Upcoming (prioritized)** under Immediate Next Steps.
 
 **Clarifications**
 
@@ -85,7 +88,7 @@ The **control plane and reference runtime substantially exist** (orchestrator, t
 
 Bounded criteria for **Phase 3 proving work**; they **limit scope** while keeping **deterministic-first** behavior.
 
-**Progress note (engineering)**: the **control-plane loop** is **wiring-complete** for the reference fake path (including light + deep scoring fakes). **Phase 3** now emphasizes **governed operator workflows**, **audit-visible overrides**, **richer ingress and inspection contracts** (without diluting deterministic-first semantics), and **expanded replay/governance coverage** where not yet demonstrated (e.g. human override exercised end-to-end, persistence-backed timelines when required).
+**Progress note (engineering)**: the **control-plane loop** is **wiring-complete** for the reference fake path (including light + deep scoring fakes). **Bounded governance** (`recruiter_*` events) and **decision/evidence navigation** projections are delivered. **Phase 3** now prioritizes a **thin recruiter demo** (consume `POST /events` / `GET /state` / `GET /timeline`) and **richer candidate/CV demo payloads** so hard-filter reasoning, score summaries, evidence refs, and governance actions read clearly in timeline/navigation output—**without** LLM routing, **without** durable persistence or auth as prerequisites, and **without** committing to a production UI framework.
 
 - A **recruiter can submit or upload a CV** for a candidate (single intake path is enough).
 - **Candidate aggregate / state** is created and updated only through **validated schemas** (no ad-hoc blobs as the source of truth).
@@ -102,8 +105,9 @@ Bounded criteria for **Phase 3 proving work**; they **limit scope** while keepin
 - **`runtime/recording_event_bus.py`**: canonical **`RecordingInMemoryEventBus`** for recorded publish envelopes (tests + API wiring); single implementation—no duplicate bus semantics.
 - **`fake_light_scoring_skill`** / **`fake_deep_scoring_skill`**: deterministic scoring stand-ins behind canonical skill contracts, aligned with planner/registry semantics.
 - **`runtime/bootstrap_vertical_slice.py`**: synchronous integration entrypoint (transition engine + default registry + planner + orchestrator + fake skills + in-memory bus/state store); demonstrates full pipeline progression to **`deep_scored`** with questionnaire emission handling.
-- **`runtime/inspection/`**: human-readable **workflow timeline** formatting from orchestration artifacts (runs, decisions, transitions, skills, emissions, failures)—inspect-only; **`vertical_slice_timeline_text`** and HTTP **`GET /timeline/{candidate_id}`** for developer, operator, and debugging visibility (bounded when full envelope history is unavailable).
-- **`integrations/api/`** — thin **FastAPI** boundary and **externally callable** reference workflow runtime (single-process in-memory vertical slice; **not** a production platform): **`GET /health`**, **`POST /events`**, **`GET /state/{candidate_id}`**, **`GET /timeline/{candidate_id}`**; validates ingress, builds `EventEnvelope` via existing bootstrap factory, publishes to the bus—**no** workflow policy in route handlers, **no** direct state mutation, **no** auth/DB.
+- **`runtime/inspection/`** — read-only **workflow timeline** (`render_vertical_slice_timeline_text`, `vertical_slice_timeline_text`), **operator navigation** and **decision/evidence summaries** (`decision_evidence.py`: filter/scoring/governance lines, transition trail helpers); HTTP **`GET /timeline/{candidate_id}`**; bounded catalog completeness when history is incomplete.
+- **`integrations/api/`** — thin **FastAPI** boundary (**externally callable** reference runtime; single-process in-memory; **not** production): **`GET /health`**, **`POST /events`**, **`GET /state/{candidate_id}`**, **`GET /timeline/{candidate_id}`**; validates ingress; **no** workflow policy in routes, **no** direct state mutation, **no** auth/DB.
+- **Bounded governance slice**: deterministic `recruiter_*` ingress, transition-engine–validated overrides, governance fields on transition records and timelines (`tests/governance/`).
 - **`requirements.txt`**: Pydantic for schemas/interfaces; FastAPI + httpx for the reference API tests.
 
 ## Immediate Next Steps
@@ -112,18 +116,21 @@ Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first
 
 ### Upcoming (prioritized)
 
-1. **Human / operator governance loops on the slice**: end-to-end **`human_override`** (and related hooks) with **audit-visible** transitions and timelines; recruiter/operator **actions** as first-class, deterministic events—before persistence depth unless audit demands it.
-2. **Richer ingress semantics**: extend the reference **`integrations/api/`** boundary (optional **CLI**, idempotency/dedupe policy, multi-aggregate/candidate scope—**debt-tracked**) without turning ingress into workflow policy; sync-first remains the default posture.
-3. **Structured inspection / timeline models**: evolve from deterministic plain-text timelines toward **typed, shareable projections** (text/JSON/UI renderers) while keeping inspection **read-only** and **non-authoritative**.
-4. **Replay-validation expansion**: deepen bus + transition engine + orchestrator replay **signals** and harness edge cases (no claim of full historical replay products yet).
-5. **Controlled cognition experiments**: first **`skills/llm/`** or hybrid skills (extraction, summarization, structured signals) behind canonical contracts; deterministic policy and orchestration unchanged; **may precede** durable persistence.
-6. **Real deterministic recruiter policies**: policy-backed gates, typed vocabularies, versioned rule packs (see tech debt on vocabulary / scoring governance).
-7. **Persistence abstraction & durable evolution**: repository/event-store shapes and a first **durable** or file-backed implementation **when operators or replay requirements demand it**—immutable-event discipline preserved.
-8. **Richer operator surfaces**: recruiter/admin UI or tooling on top of the API boundary—when workflow and governance paths are stable enough to merit UX investment.
-9. **Production infrastructure hardening**: durable bus patterns, telemetry, outbox/idempotent consumers, multi-tenant operational maturity—**debt-tracked**, following **replayable workflow confidence** (not parallel “component accumulation”).
+1. **Thin Recruiter Demo Surface**: a **demo-grade** way for a recruiter to drive the slice end-to-end—e.g. minimal HTML/CLI/scripted walkthrough or tiny static page that calls the **existing** `integrations/api/` endpoints—so **pipeline phase**, **score summaries**, **hard-filter reasoning**, **evidence refs**, **governance actions**, and **timeline/navigation text** are visible in one sitting. **Not** production frontend work; **not** a broad SPA/React commitment; **no** auth required for the first demo; **no** LLM routing.
+2. **Rich Candidate Artifact Demo**: thicken **deterministic** demo inputs (fixtures, declared CV-like fields, structured payloads through `POST /events`) so fake filter/scoring skills emit **meaningful** summaries in timelines—still bounded, replay-stable, schema-validated; **no** real persistence required yet.
+3. **Human / operator governance (extend)**: deepen recruiter/operator paths and audit narratives on top of the bounded `recruiter_*` slice where demos expose gaps—still event-driven, transition-validated, replay-tested.
+4. **Richer ingress semantics**: optional **CLI**, idempotency/dedupe, multi-aggregate scope (**debt-tracked**); ingress remains a thin adapter—**no** workflow policy at the HTTP edge.
+5. **Structured inspection / timeline models**: typed JSON (or similar) **shareable projections** when the demo or integrations need them—**intentionally after** the thin demo surface unless a demo milestone requires machine-stable timeline rows first; inspection stays read-only and non-authoritative.
+6. **Replay-validation expansion**: deepen replay **signals** and harness edge cases (no full historical replay product claim).
+7. **Controlled cognition experiments**: first **`skills/llm/`** or hybrid skills behind canonical contracts; deterministic orchestration unchanged; **may precede** durable persistence.
+8. **Real deterministic recruiter policies**: policy-backed gates, typed vocabularies, versioned rule packs (see tech debt).
+9. **Persistence abstraction & durable evolution**: when operators or replay **require** surviving restarts—immutable-event discipline preserved.
+10. **Richer operator surfaces**: polished recruiter/admin UI—**after** demo and governance paths stabilize; still **not** implied production readiness.
+11. **Production infrastructure hardening**: brokers, telemetry, outbox, multi-tenant maturity—**debt-tracked**; not parallel component accumulation.
 
 Cross-cutting reminders (unchanged philosophy):
 
+- **Demo constraints**: recruiter-visible surfaces consume the **existing** API and inspection projections; **no** LLM-driven routing; **no** production readiness claim; persistence and auth remain optional until demos or audit demand them.
 - **Boundary validation**: enforce schema + transition validation at orchestration boundaries; treat failures as structured, auditable outcomes.
 - **Human-in-the-loop hooks**: keep override / approval / calibration entry points first-class in contracts and events, even before rich UX.
 - **Defer by default**: additional cross-cutting architecture (new global abstractions, wide refactors) only when **Phase 3 proving work** **requires** it or ADR/tech-debt explicitly schedules it.
@@ -132,17 +139,19 @@ Cross-cutting reminders (unchanged philosophy):
 
 Phases below are **outcome-oriented** (workflow confidence, governance, cognition, durable evolution, operations maturity). **Infrastructure appears as an enabler**, not as the definition of progress. **Deterministic-first governance, replay/audit priority, and debt-tracked hardening** stay explicit.
 
-**Emphasis going forward**: later phases center on **operational governance maturity**, **durable runtime evolution**, **controlled cognition integration**, and **multi-aggregate orchestration**—not on “adding APIs” for their own sake. The reference HTTP ingress is a **bounded, demonstration-grade** external exercise surface; further milestones should deepen **governed behavior and auditability**, not checklist API counts.
+**Emphasis going forward**: the next **practical** milestone is **recruiter-visible demonstration** of the existing deterministic stack (API + state + timeline + governance + evidence summaries)—not additional internal runtime surface for its own sake. Later phases still center on **operational governance maturity**, **durable runtime evolution**, **controlled cognition**, and **multi-aggregate orchestration**; the reference HTTP ingress remains **demonstration-grade** until product and persistence requirements harden.
 
 ### Phase 4 — Replayable workflow confidence (maturation)
 
 - **Intent**: raise confidence that **the same inputs yield the same governed outcomes**—harness culture, integration tests, and operational clarity around orchestration runs—not “shipping more components.”
+- **Current note**: vertical slice already has **structural replay**, **negative-path** tests, and **timeline/navigation** projections; Phase 4 broadens coverage and moves toward **semantic/assertion profiles** where strict JSON equality is insufficient (see tech debt)—without requiring a production replay product.
 - Broaden **automated** checks across planner → engine → orchestrator → skills → emissions; tighten **replay signal** coverage as debt items demand.
 - Treat orchestration as the **governed execution core** of an **AI operations platform** (bounded runs, explicit decisions), not merely a library.
 
 ### Phase 5 — Human governance operations
 
 - **Intent**: mature **operator loops**: override, approval, calibration, and audit narratives anchored on **immutable events** and transition records.
+- **Current note**: **bounded** governance ingress and audit-visible transitions on the slice are **in place**; Phase 5 deepens **operator workflows** and vocabulary—not replacing deterministic validation.
 - First-class **human actions** on timelines; governance UX may be thin (API + logs) before polished UI.
 - **Replay/audit** remain primary—operators must answer **what happened** and **why** without inferring from opaque scores.
 
@@ -167,6 +176,7 @@ Phases below are **outcome-oriented** (workflow confidence, governance, cognitio
 ### Phase 10 — Replay & investigation tooling (operator-facing)
 
 - Move from **signal-only replay** toward **operator workflows**: “why did this candidate land here?”—deterministic reconstruction from stored envelopes + state, aligned with ADR immutability.
+- **Current note**: plain-text timelines plus **decision/evidence summaries** and **navigation helpers** already support **manual** investigation on the reference runtime; Phase 10 adds **durable** stores and productized tooling when persistence lands—not a blocker for the thin demo milestone.
 
 ### Phase 11 — Observability & architecture governance cadence
 
