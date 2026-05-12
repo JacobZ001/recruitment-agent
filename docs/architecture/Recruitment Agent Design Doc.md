@@ -77,6 +77,16 @@ AI is reserved only for:
 
 This significantly reduces token consumption and operational cost.
 
+## Reference implementation today (engineering reality)
+
+The **current codebase** includes a **reference vertical slice** used to prove architecture—not a finished recruiting product.
+
+- **Single-process and in-memory**: one deterministic runtime in a developer or demo environment; **no** production deployment claim, **no** multi-tenant database in this path.
+- **Event-driven progression**: each step is triggered by **events**; a deterministic orchestration layer applies **validated** state changes. **Programs** advance the workflow; **AI is not** choosing the next pipeline state in this reference path.
+- **Screening and scoring today**: implemented with **deterministic stand-in skills** and, for demonstrations, **fixed sample candidate data**—so teams can see filters, scores, evidence references, and timelines **without** live CV parsing or paid model calls. The **business vision** for AI-assisted parsing and questionnaires is unchanged; those are **later capabilities** on the same architectural spine.
+- **Human governance**: recruiter-style **approve / reject** actions exist as **bounded, audited event types** in the reference slice, aligned with the “humans retain authority” principle. Full operator products, persistence, and channel integrations (e.g. Telegram) are **not** implied by this slice.
+- **Intentional bounds (not omissions by accident):** durable persistence, multi-tenant orchestration, distributed execution, and production-grade infrastructure are **later platform evolution** concerns. They are deferred so the **deterministic reference runtime** can prove orchestration semantics and contracts first; they are **not** forgotten requirements.
+
 # High-Level Workflow
 
 ## Step 1 - JD Generation
@@ -125,6 +135,8 @@ The system also supports manual uploads for channels AI cannot directly access.
 ## Step 4 - CV Parsing
 
 AI extracts structured information from candidate submissions.
+
+In the **reference implementation today**, structured fields are **simulated** with deterministic inputs so the pipeline can be tested end-to-end **without** live document extraction. **Full AI parsing** remains part of the product direction once contracts and governance are stable.
 
 Examples:
 
@@ -194,6 +206,8 @@ Examples:
 
 This stage is designed as a structured information extraction process rather than a chatbot conversation.
 
+Operationally, the system may distinguish **pending**, **sent**, and **completed** questionnaire snapshots so later scoring can rely on an explicit “questionnaire done” state—not only a single “questionnaire sent” label.
+
 ## Step 8 - Deep Evaluation
 
 The system combines:
@@ -227,16 +241,17 @@ It produces:
 
 The recruitment system operates through a structured candidate lifecycle.
 
-Examples of candidate states:
+Examples of pipeline stages (the exact set evolves with the product; engineering uses explicit named states for traceability):
 
-- CV received
-- Parsed
-- Filtered
-- Questionnaire sent
-- Scored
+- New intake
+- CV received and parsed
+- Hard filter passed (or closed if rejected)
+- Initial (light) scoring
+- Questionnaire pending, sent, and completed
+- Deep evaluation / scoring
 - Shortlisted
-- Interview scheduled
-- Offer sent
+- Interview and offer stages where the workflow requires them
+- Inactive / closed when appropriate
 
 This ensures:
 
