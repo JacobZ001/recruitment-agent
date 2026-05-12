@@ -209,6 +209,24 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Planner invariant testing**: property tests over state/event pairs for monotonicity, allowed triggers, and schema-safe payloads.
   - **Forbidden entropy source checks**: CI lint or runtime probes for `random`, uncontrolled `datetime.now`, environment reads, and network calls inside planner modules.
 
+### Conditional questionnaire workflow branching (vertical slice planner)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: The first vertical-slice planner (``orchestrator/vertical_slice_planner.py``) wires a **fixed** questionnaire leg after light scoring: deterministic transitions and emissions always advance along ``light_scored`` → ``questionnaire_pending`` → ``questionnaire_sent`` → ``questionnaire_completed`` before deep scoring. There is **no** conditional bypass, alternate questionnaire template routing, or role-specific graph selection in v1.
+- **Rationale**: Intentional **bounded simplification** so deterministic runtime validation, harness tests, and demos stay small: one explainable path beats premature branching before recruiter configuration and intake semantics stabilize.
+- **Future impact**: Real pipelines will need **policy branching** that the current slice does not model:
+  - Some candidates may **bypass** questionnaire collection (e.g. sufficient structured profile, executive fast-path, internal referral rules).
+  - **Questionnaire routing** should become explicit **deterministic policy branching** (still not LLM routing): which template, which channels, which gates.
+  - Branch decisions may depend on **profile completeness**, **recruiter/org configuration**, or **role requirements**—all inputs that must flow through typed, testable planner policy, not ad-hoc conditionals scattered across integrations.
+- **Priority**: Low
+- **Recommended future direction** (preserve deterministic-first posture; planner remains **policy**, orchestrator **execution**):
+  - **Deterministic branch policies** inside planner implementations (pure functions, stable branch ids, audit-friendly reasons).
+  - **Configurable workflow policies** (versioned policy packs loaded at wiring time; no runtime “magic” config reads without injection for tests).
+  - **Role-specific recruiter pipelines** (explicit graph variants or composed registries with deterministic merge rules—see transition-registry debt for merge semantics).
+  - **Optional questionnaire stages** (skip edges with explicit triggers and harness coverage; never silent skips).
+  - **Workflow graph branching semantics** (documented fork/join, lineage ids, replay alignment with ``rule_set_id`` / branch metadata).
+
 ### Recursive publish / re-entrancy governance (in-memory event bus)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-11
