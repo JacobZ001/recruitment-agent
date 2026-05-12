@@ -209,6 +209,39 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Planner invariant testing**: property tests over state/event pairs for monotonicity, allowed triggers, and schema-safe payloads.
   - **Forbidden entropy source checks**: CI lint or runtime probes for `random`, uncontrolled `datetime.now`, environment reads, and network calls inside planner modules.
 
+### Recursive publish / re-entrancy governance (in-memory event bus)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: The synchronous in-memory bus does not detect or forbid nested ``publish()`` calls from within subscriber handlers; ordering and partial dispatch traces depend on call patterns at runtime.
+- **Rationale**: Vertical-slice wiring prioritizes a minimal runtime; formal re-entrancy policies (depth limits, deadlock detection, flattening rules) add measurable complexity before multi-subscriber demos stabilize.
+- **Future impact**: Handlers that synchronously publish can produce nested traces, overlapping ``PublishAudit`` ids, and subtle audit ordering unless callers discipline themselves—especially dangerous when combined with orchestrator-driven emissions.
+- **Priority**: Medium
+- **Recommended future direction**: Define explicit policies and harness coverage:
+  - Optional **re-entrancy depth cap** or “no nested publish” mode for tests.
+  - Documented **dispatch freeze** rules during handler execution vs. deferred publish queues (still synchronous; not a broker queue—could be a simple collect-then-flush list owned by the caller).
+  - Audit correlation fields linking nested ``publish_id`` / ``delivery_id`` chains.
+
+### Dispatch backpressure handling (event bus runtime)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: In-memory dispatch applies only fixed numeric caps (subscriptions registered, max handler dispatches per publish); there is no cooperative **slow consumer** or load-shedding signal beyond bounded counts.
+- **Rationale**: Backpressure bridges runtime policy and operational capacity; the first slice targets deterministic correctness on a single thread with explicit limits, not fair scheduling across subscribers.
+- **Future impact**: Pathological handlers can still tie up the publisher thread for long CPU-bound stretches; observability may show latency without a structured “apply pressure” channel.
+- **Priority**: Medium
+- **Recommended future direction**: When persistence or multi-tenant handlers arrive, introduce deterministic **backpressure signals** (skip with audit reason, structured ``HandleResult``, or caller-owned admission control) without introducing async brokers—keep semantics documented in the shared delivery taxonomy.
+
+### Publish aggregate status precedence governance (event bus)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: The in-memory bus aggregates subscriber ``HandleResult.status`` values into a single ``PublishResult.status`` using an implementation-defined precedence (currently: any ``failed`` wins, else any ``rejected``, else all ``skipped`` → ``skipped``, else ``accepted``).
+- **Rationale**: A vertical slice needs a predictable rule set quickly; global precedence semantics were deferred until multiple bus implementations and orchestrator coupling patterns exist.
+- **Future impact**: Different runtimes could aggregate differently unless documented, harming cross-environment audits and replay comparisons (“publish succeeded” vs. “one subscriber failed”).
+- **Priority**: Medium
+- **Recommended future direction**: Publish a **canonical precedence table** + ack implications in architecture docs; add harness tests across reference implementations; consider explicit ``PublishResult.extensions`` fields for per-status counts instead of inferring from traces alone.
+
 ### Shared confidence abstraction consolidation
 - **Status**: OPEN
 - **Introduced in**: 2026-05-08
