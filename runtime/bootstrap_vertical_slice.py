@@ -406,6 +406,8 @@ def resolve_vertical_slice_inspection_catalog(bundle: VerticalSliceRuntimeBundle
 def vertical_slice_timeline_text(
     bundle: VerticalSliceRuntimeBundle,
     envelope_catalog: Optional[Sequence[EventEnvelope]] = None,
+    *,
+    include_operator_navigation: bool = True,
 ) -> str:
     """
     Human-readable multi-run timeline from :func:`render_vertical_slice_timeline_text`.
@@ -426,6 +428,7 @@ def vertical_slice_timeline_text(
         run_history=bundle.subscriber.run_history,
         envelope_catalog=merged,
         final_state=fin.snapshot if fin.ok else None,
+        include_operator_navigation=include_operator_navigation,
     )
 
 
@@ -620,4 +623,5 @@ def run_vertical_slice_bootstrap(
 
 
 if __name__ == "__main__":
-    run_vertical_slice_bootstrap(verbose=True)
+    '''leave print_timeline=True for timeline inspection'''
+    run_vertical_slice_bootstrap(verbose=True, print_timeline=True) 

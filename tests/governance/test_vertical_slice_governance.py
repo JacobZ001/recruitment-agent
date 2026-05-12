@@ -189,18 +189,26 @@ def test_governance_timeline_contains_audit_lines() -> None:
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
     drive_vertical_slice_primary_sequence(bundle)
+    payload = {
+        **_GOV_BASE,
+        "evidence_refs": ["artifact://review/a", "artifact://review/b"],
+        "override_rationale": "Escalation narrative " + ("x" * 120),
+    }
     env = _gov_envelope(
         event_type="recruiter_approve_candidate",
         seq=62,
         candidate_id=bundle.candidate_id,
         correlation_id=bundle.correlation_id,
-        payload=dict(_GOV_BASE),
+        payload=payload,
     )
     bundle.bus.publish(env)
     text = vertical_slice_timeline_text(bundle)
     assert "governance.ingress" in text
-    assert "governance.transition" in text
+    assert "governance.decision_code=" in text
     assert "GOVERNANCE_APPROVE_CANDIDATE" in text
+    assert "governance.evidence.refs=" in text
+    assert "artifact://review/a" in text
+    assert "governance.override_rationale=" in text
 
 
 def test_governance_replay_twice_identical() -> None:
@@ -228,6 +236,7 @@ def test_governance_replay_twice_identical() -> None:
     assert fa is not None and fb is not None
     assert _json_dict(fa) == _json_dict(fb)
     assert _runs_payload(bundle_a.subscriber.run_history) == _runs_payload(bundle_b.subscriber.run_history)
+    assert vertical_slice_timeline_text(bundle_a) == vertical_slice_timeline_text(bundle_b)
 
 
 def test_governance_force_transition_sets_human_override_flag() -> None:
