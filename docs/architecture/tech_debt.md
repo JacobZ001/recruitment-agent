@@ -206,6 +206,24 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - Coordinate with **schema versioning** and **policy pack versioning** entries: replay fixtures pin `(schema_version, rule_set_id)` and document intentional upgrade breaks vs drift bugs.
   - For future concurrency: specify **ordering contracts** and replay scopes (single aggregate vs multi-tenant isolation)—without implying premature production posture.
 
+### Inspection event-history provenance and catalog governance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``runtime/inspection/`` renders **read-only**, deterministic human-readable timelines from supplied artifacts (``OrchestrationExecutionResult`` history + envelope catalogs). **Unified catalog** wiring merges **primary scripted ingress** envelopes with envelopes captured from the full **published stream** when available (e.g. ``tests/replay/recording_bus.RecordingInMemoryEventBus.recorded_envelopes``), so nested orchestration runs triggered by **runtime-emitted** events (e.g. ``questionnaire_requested``) resolve ``event_type`` in inspection output. ``RecordingInMemoryEventBus`` remains **test instrumentation**, not a canonical production event-history store. **Ingress classification** for display uses a **heuristic**: ``ingest.kind=runtime_emission`` when ``EventEnvelope.metadata.causation_id`` is present (orchestrator emissions set causation to the parent ingest); **external** bootstrap ingress uses ``causation_id=None``. The default reference ``InMemoryEventBus`` does **not** retain publish history—callers without a recorded stream may pass an explicit envelope catalog or accept incomplete labeling for emitted-only ingests.
+- **Rationale**: Inspection must stay **non-authoritative**: it interprets recorded facts and merges catalogs for developer/operator clarity **without** embedding orchestration policy or mutating runtime state. A durable event store is intentionally deferred; bounded merge + causation-based labeling ships Phase 3 visibility **before** persistence contracts exist.
+- **Future impact**:
+  - **Incomplete catalogs**: plain runtime without recorded envelopes (or without explicit catalog injection) may lack emitted-event envelopes—timeline reconstruction can miss labels even when orchestration runs succeeded.
+  - **Heuristic brittleness**: ``causation_id`` may **not** cleanly separate **external integration** ingress from **runtime emission** once external producers also populate causation links—classification could drift without explicit provenance fields.
+  - **Semantic drift**: operator-facing timelines may disagree across tools if **event provenance / source** semantics are not standardized alongside envelope contracts.
+  - **Product boundaries**: future API/UI surfaces need **stable event-history** (read models or append-only feeds)—test-local recording buses are not sufficient as the system-of-record story evolves.
+- **Priority**: Medium
+- **Recommended future direction** (preserve **deterministic-first** posture; inspection stays **read-only**; **no** production event store by debt entry alone):
+  - Introduce **explicit provenance / source** fields (or versioned metadata extensions) on ``EventEnvelope`` for **external ingress** vs **control-plane emission** vs other categories—rather than relying solely on causation presence.
+  - Define **canonical event-history / read-model contracts** when **durable runtime** and persistence work land; align append-only semantics with replay and audit entries—implement storage **there**, not inside the inspection renderer.
+  - Keep the inspection layer as **projection-only**: render text / JSON / UI from **recorded facts**; add **structured timeline entries** later as an intermediate representation shared by multiple renderers.
+  - Coordinate with **future orchestration replay tooling** and **event envelope payload governance** entries so timelines remain reproducible under schema and policy evolution.
+
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-09
