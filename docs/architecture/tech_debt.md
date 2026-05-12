@@ -161,6 +161,24 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Define shared `ExecutionTiming` / `ExecutionAudit` building blocks once the minimum required set is proven across at least two subsystems; preserve deterministic-first principles by keeping all audit/timing as *recorded facts* rather than auto-mutating behavior.
 
+### Deterministic runtime clock governance (fake skills + slice execution)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Vertical-slice **fake** deterministic skills (e.g. ``skills/deterministic/fake_cv_uploaded_skill.py``) use **module-local deterministic reference clocks** for fields such as skill ``ExecutionTiming`` / ``ExecutionAudit.recorded_at`` and related evidence timestamps, instead of wall-clock or orchestrator-supplied logical time.
+- **Rationale**: Intentional **bounded simplification** for the first runnable slice: bit-stable skill outputs and harness comparisons without coupling tests to real time, while keeping orchestration **deterministic-first** and **replay-safe** at the payload/provenance level (correlation via event and execution ids). Skills remain **synchronous and bounded**; clocks are not used for routing or scoring.
+- **Future impact**:
+  - **Cross-skill temporal inconsistency**: different fake (or mixed real/fake) skills may stamp results with unrelated reference epochs, weakening “what happened before what?” reasoning within a single orchestration run when only skill audit fields are consulted.
+  - **Replay timeline coordination**: replay runners that merge event ``occurred_at`` with skill timing fields may see artificial inversions or flat segments unless they explicitly prioritize envelope/state timelines over skill-local clocks.
+  - **Distributed execution timestamp alignment**: if workers later stamp skill results independently without a shared logical clock contract, cross-node ordering and audit exports become harder to normalize.
+  - **Audit sequencing ambiguity**: operators or tools that sort strictly by skill ``recorded_at`` / ``started_at`` may mis-order steps relative to immutable events unless governance docs and UIs anchor on event ids and orchestration decision records.
+- **Priority**: Low
+- **Recommended future direction** (preserve deterministic-first, replay-safe, bounded execution):
+  - **Centralized deterministic runtime clock providers**: inject a single logical clock interface into skill execution (tests freeze it; production supplies UTC or logical ticks) without moving routing/retry policy into skills.
+  - **Replay-aware logical clocks**: tie skill audit timestamps to replay context (e.g. envelope logical time, monotonic tick per run) so reconstructed timelines align with stored facts.
+  - **Orchestration-level timing coordination**: optionally have the orchestrator pass an explicit “execution instant” or tick in ``ExecutionContext.extensions`` for all skills in one dispatch, keeping policy in the orchestrator and skills as pure functions of context + input.
+  - **Monotonic execution timeline governance**: document and enforce ordering rules for persisted artifacts (events primary, skill results secondary) and add harness checks that forbid ambiguous orderings where it matters for compliance or debugging.
+
 ### Future shared failure taxonomy consolidation
 - **Status**: OPEN
 - **Introduced in**: 2026-05-08
