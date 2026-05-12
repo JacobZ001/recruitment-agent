@@ -132,6 +132,27 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Cross-skill vocabulary governance**: lint or CI rules for allowed prefixes/namespaces; deprecation windows when codes merge or split.
   - **Machine-readable workflow ontology/versioning**: optional ontology or graph metadata (versioned) for “allowed transitions × decision artifacts,” consumed by replay/reporting tools—not for LLM control.
 
+### Centralized scoring policy governance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Fake deterministic scoring (e.g. ``skills/deterministic/fake_light_scoring_skill.py``) applies **local, bounded weighting policies** and **local normalized score semantics** (factor definitions, weight vectors, clamping rules) embedded in each skill module. The vertical slice **intentionally** keeps policy local so orchestration validation, harness tests, and explainable numeric outputs can ship before org-wide calibration and policy infrastructure exist.
+- **Rationale**: Maintains **deterministic-first** control (orchestrator/planner still own workflow), **explainable** factorized outputs, and **bounded** execution without prematurely centralizing recruiter policy while product semantics are still moving.
+- **Future impact**:
+  - **Scoring semantic drift across skills**: light vs deep (and future) scoring modules may interpret “normalized score,” factor names, or weights differently unless aligned by contract.
+  - **Inconsistent recruiter weighting policies**: different pipelines or tenants may encode incompatible defaults, complicating comparisons and governance reviews.
+  - **Replay inconsistency after policy evolution**: historical ``SkillExecutionResult`` payloads may not carry enough **policy identity/version** to reinterpret scores under the rules that were logically in effect at emission time.
+  - **Organization-wide ranking fragmentation**: without shared policy artifacts, cross-role or cross-requisition comparability of scores remains informal and error-prone.
+  - **Unclear normalized-score interpretation across workflows**: consumers may treat ``[0, 1]`` as comparable across stages when factors and weights differ, harming audit narratives and analytics.
+- **Priority**: Medium
+- **Recommended future direction** (preserve deterministic-first, explainable scoring, bounded orchestration—**no** LLM-driven policy mutation):
+  - **Centralized scoring policy registries**: canonical factor taxonomies, default weights, and clamp rules as data or typed modules referenced by skills—not ad-hoc literals scattered per skill.
+  - **Versioned recruiter scoring policies**: explicit ``policy_id`` / ``policy_version`` (or equivalent) embedded in skill outputs and audit extensions for traceability.
+  - **Replay-stable scoring policy capture**: persist or hash the effective policy snapshot used per run so replay and compliance tooling can reproduce numeric results deterministically.
+  - **Organization-level scoring governance**: ownership, approval, and publication workflow for policy packs (still deterministic at execution time).
+  - **Scoring calibration and distribution semantics**: documented meaning of normalized scores (e.g. per-stage, per-requisition), optional calibration curves as **deterministic** transforms with harness coverage—not autonomous tuning loops in skills.
+  - **Deterministic policy rollout/versioning**: staged rollout (pinned defaults, explicit migrations, harness checks) so orchestrator upgrades do not silently change score meaning without a recorded policy bump.
+
 ## Execution Architecture
 
 ### Future orchestration replay tooling
