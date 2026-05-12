@@ -112,6 +112,26 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: High
 - **Recommended future direction**: Define a small set of typed adjustment operations (e.g., `ScoreAdjustment`, `LabelOverride`, `RuleException`) and validate with a harness.
 
+### Canonical workflow decision and rejection vocabulary governance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Fake deterministic vertical-slice skills (e.g. ``skills/deterministic/fake_hard_filter_skill.py``, ``skills/deterministic/fake_cv_uploaded_skill.py``) emit **local, machine-oriented reason codes** and **planner-aligned decision semantics** inside skill ``payload`` / ``extensions`` without a shared, versioned workflow ontology. The first vertical slice **intentionally** allows these **bounded local vocabularies** so runtime wiring, harness tests, and explainable pass/fail paths can iterate quickly before cognition layers land.
+- **Rationale**: Preserves **deterministic-first** orchestration and **bounded** skill execution: programs still own transitions and routing; skills remain explainable via structured strings without prematurely freezing a global enum set while domain language is still moving.
+- **Future impact**:
+  - **Semantic drift across skills**: each fake (then real) skill may invent overlapping but non-equivalent codes for similar situations, complicating cross-pipeline reasoning.
+  - **Inconsistent rejection terminology**: operators, audit UIs, and integrations may show divergent labels for the same underlying gate unless mappings are maintained by hand.
+  - **Replay/audit ambiguity**: historical runs may be harder to interpret uniformly if reason codes lack stable cross-version definitions or canonical parents.
+  - **Orchestration interpretation inconsistencies**: subscribers that branch on skill output strings may disagree with planner/event semantics unless contracts are centralized.
+  - **Analytics fragmentation**: dashboards and warehouse models cannot rely on a single dimension for “why rejected” without ad-hoc normalization tables.
+- **Priority**: Medium
+- **Recommended future direction** (preserve deterministic-first posture, explainable workflow semantics, and bounded orchestration—**no** autonomous routing in vocabularies):
+  - **Centralized canonical decision vocabularies**: small shared modules/schemas for pass/fail/no-op categories and workflow stage decisions, composed into skill outputs rather than ad-hoc literals.
+  - **Stable rejection reason registries**: versioned registries (code → definition, severity, retryability *signal*, optional human-facing copy) with harness checks for unknown codes.
+  - **Shared orchestration semantic contracts**: document how planner triggers, event types, and skill decision fields relate (e.g. explicit mapping tables, not implicit string equality in scattered handlers).
+  - **Cross-skill vocabulary governance**: lint or CI rules for allowed prefixes/namespaces; deprecation windows when codes merge or split.
+  - **Machine-readable workflow ontology/versioning**: optional ontology or graph metadata (versioned) for “allowed transitions × decision artifacts,” consumed by replay/reporting tools—not for LLM control.
+
 ## Execution Architecture
 
 ### Future orchestration replay tooling
