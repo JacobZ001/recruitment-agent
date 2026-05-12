@@ -324,6 +324,20 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Extract **versioned governance policy tables or registries** (pure data + harness) called from the planner—**deterministic planning unchanged**; **no** premature framework; refactor only when file complexity hurts correctness reviews.
 
+### Governance lifecycle policy centralization
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Recruiter **lifecycle governance** semantics remain **explicitly distributed**: ``orchestrator/vertical_slice_planner.py`` maps ingress ``event_type`` + ``PipelinePhase`` → ``ProposedTransition`` (including wrong-phase / terminal **empty plans** for deterministic NOOPs); ``state_machine/transition_engine.py`` / ``default_pipeline_registry()`` own **edge legality** and **allowed triggers**; ``schemas/governance_schema.py`` constrains **ingress payload shape**; HTTP/adapters must not contaminate those payloads (``extra=forbid``). This is **acceptable** for the current **bounded vertical slice**: each layer stays small, testable, and replay-stable without a second source of truth.
+- **Rationale**: A **full policy engine** (generic condition/action interpreter, dynamic rule loading, implicit trigger resolution) would add **entropy** now—harder to prove determinism, easier to hide routing in “data,” and more surfaces for drift between “what operators think happened” and what the engine validated. The slice prioritizes **legible, harness-backed** behavior over premature centralization.
+- **Future impact**: As **more recruiter actions**, **deeper lifecycle**, **multiple operator personas**, and **governance product evolution** land, the same facts will be touched in more places—risk of **semantic drift** (e.g. duplicate-action behavior, terminal handling, trigger names) unless coordination discipline improves.
+- **Priority**: Low (**not urgent** while the slice stays narrow and planner-owned tables remain reviewable).
+- **Recommended future direction** (still **deterministic-first**; **not** an autonomous policy runtime):
+  - **Declarative governance transition registry**: single versioned table (event × from-phase × to-phase × trigger × audit template) consumed by the planner **or** generated into planner code—**transition engine remains authoritative** for legality.
+  - **Terminal-state semantics table**: explicit matrix for which phases reject / NOOP / require override—shared by planner and docs, validated by harness.
+  - **Duplicate-action policy normalization**: one documented rule (e.g. always NOOP vs explicit rejection envelope) applied consistently and asserted in tests.
+  - **Shared governance capability metadata**: small schema or doc artifact listing supported actions, allowed phases, and decision codes for operators and integrations—**read-only** projections derive from it where helpful.
+
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-09
