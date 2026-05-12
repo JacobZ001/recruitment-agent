@@ -181,6 +181,34 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: If needed, migrate via an *execution envelope* pattern: synchronous “start” skill emits an execution id + references; progress/completion is represented as events/results with the same contract invariants. Avoid embedding routing/retry/state transitions into the skill interface.
 
+### Orchestration side-effect consistency after publish failure
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: The synchronous orchestrator applies validated state transitions and runs skills **before** it attempts to publish derived events; publish outcomes are checked only after those steps. On publish failure, the returned `OrchestrationExecutionResult` does not commit a new `OrchestrationState`, but **skills may already have executed** and any external side effects from skills are outside the orchestrator's rollback scope.
+- **Rationale**: This ordering is an intentional, bounded tradeoff for the first **single-process vertical-slice** runtime: it prioritizes a runnable `event → validate → skills → state → emit` path without introducing transactional persistence, outbox writers, or distributed consistency machinery in the control plane yet.
+- **Future impact**: Operators and replay tooling may observe **partial effects** (e.g., skill side effects or prior successful publishes in a multi-emission batch) when emission fails mid-flight, complicating audit narratives and recovery unless callers compensate explicitly.
+- **Priority**: Medium
+- **Recommended future direction**: Harden cross-layer consistency as the stack gains persistence:
+  - **Transactional outbox**: record intended emissions atomically with state commits; publish from the outbox with idempotent consumers.
+  - **Durable event store**: append-only log as the source of truth for “what was emitted,” aligned with correlation/causation ids.
+  - **Exactly-once / eventual consistency strategies**: idempotent event handlers, dedupe keys, and documented dual-write semantics where full ACID across bus + DB is unavailable.
+  - **Replay-safe recovery semantics**: deterministic reconciliation jobs and harness-defined rules for “continue from last acknowledged emission” vs. full segment replay.
+
+### Planner determinism verification harness
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: `OrchestrationStepPlanner` implementations are **expected** to be deterministic, pure policy code (no LLM routing, no autonomous workflow control). The orchestrator **does not verify** that property; it consumes the plan by contract only.
+- **Rationale**: Centralizing planner analysis in the orchestrator would blur the boundary between execution and policy, and meaningful checks (entropy, IO, clocks) require dedicated harness infrastructure not justified until planner modules multiply and stabilize.
+- **Future impact**: A nondeterministic or environment-coupled planner undermines replay guarantees, audit explainability, and test stability without failing fast at the boundary.
+- **Priority**: Low
+- **Recommended future direction**: Add engineering guardrails as planners grow:
+  - **Deterministic replay harnesses**: fixed seeds, frozen clocks, recorded envelopes → expect bit-for-bit stable plans or stable normalized plan hashes where appropriate.
+  - **Nondeterminism detection**: optional static/dynamic checks for banned APIs (random, wall-clock reads outside injected time, hidden global mutable state).
+  - **Planner invariant testing**: property tests over state/event pairs for monotonicity, allowed triggers, and schema-safe payloads.
+  - **Forbidden entropy source checks**: CI lint or runtime probes for `random`, uncontrolled `datetime.now`, environment reads, and network calls inside planner modules.
+
 ### Shared confidence abstraction consolidation
 - **Status**: OPEN
 - **Introduced in**: 2026-05-08
