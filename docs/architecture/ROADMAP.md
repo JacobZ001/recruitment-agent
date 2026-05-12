@@ -96,10 +96,6 @@ Bounded criteria for **Phase 3 proving work**; they **limit scope** while keepin
 - A **human override path** exists (approve/reject/override or equivalent) and is **logged** on the timeline.
 - The **event and state timeline** for a candidate in the slice is **reconstructable** from persisted facts (ids, correlation/causation where applicable) for audit and debugging—without requiring full production replay tooling.
 
-## Immediate Next Steps
-
-Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first; realistic sequencing; debt-tracked where noted):
-
 ### Recently delivered (reference slice)
 
 - **Replay harnesses** (`tests/replay/`): automated structural replay for the vertical slice; **negative-path** validation (transition rejection, missing skill registration, `hard_filter_failed` closure, bus handler-exception isolation).
@@ -109,6 +105,10 @@ Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first
 - **`runtime/inspection/`**: human-readable **workflow timeline** formatting from orchestration artifacts (runs, decisions, transitions, skills, emissions, failures)—inspect-only; **`vertical_slice_timeline_text`** and HTTP **`GET /timeline/{candidate_id}`** for developer, operator, and debugging visibility (bounded when full envelope history is unavailable).
 - **`integrations/api/`** — thin **FastAPI** boundary and **externally callable** reference workflow runtime (single-process in-memory vertical slice; **not** a production platform): **`GET /health`**, **`POST /events`**, **`GET /state/{candidate_id}`**, **`GET /timeline/{candidate_id}`**; validates ingress, builds `EventEnvelope` via existing bootstrap factory, publishes to the bus—**no** workflow policy in route handlers, **no** direct state mutation, **no** auth/DB.
 - **`requirements.txt`**: Pydantic for schemas/interfaces; FastAPI + httpx for the reference API tests.
+
+## Immediate Next Steps
+
+Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first; realistic sequencing; debt-tracked where noted):
 
 ### Upcoming (prioritized)
 
