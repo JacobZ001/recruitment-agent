@@ -14,7 +14,6 @@ from typing import Any, Dict, List
 
 import pytest
 
-from interfaces.event_bus_interface import EventEnvelope
 from orchestrator.orchestrator import OrchestrationExecutionResult
 from runtime.bootstrap_vertical_slice import (
     PRIMARY_VERTICAL_SLICE_EVENT_TYPES,
@@ -22,20 +21,9 @@ from runtime.bootstrap_vertical_slice import (
     drive_vertical_slice_primary_sequence,
     wire_vertical_slice_runtime,
 )
-from runtime.in_memory_event_bus import InMemoryEventBus
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
-
-class RecordingInMemoryEventBus(InMemoryEventBus):
-    """Captures every envelope passed to ``publish`` (ingress + orchestrator emissions)."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.recorded_envelopes: List[EventEnvelope] = []
-
-    def publish(self, envelope: EventEnvelope):  # type: ignore[override]
-        self.recorded_envelopes.append(envelope)
-        return super().publish(envelope)
+from tests.replay.recording_bus import RecordingInMemoryEventBus
 
 
 def _json_dict(model: Any) -> Dict[str, Any]:

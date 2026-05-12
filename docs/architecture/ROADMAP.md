@@ -104,6 +104,7 @@ Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first
 
 - **`fake_light_scoring_skill`** / **`fake_deep_scoring_skill`**: deterministic scoring stand-ins behind canonical skill contracts, aligned with planner/registry semantics.
 - **`runtime/bootstrap_vertical_slice.py`**: synchronous integration entrypoint (transition engine + default registry + planner + orchestrator + fake skills + in-memory bus/state store); demonstrates full pipeline progression to **`deep_scored`** with questionnaire emission handling.
+- **`runtime/inspection/`**: human-readable **workflow timeline** formatting from orchestration artifacts (runs, decisions, transitions, skills, emissions, failures)—inspect-only; optional **`print_timeline`** / **`vertical_slice_timeline_text`** after bootstrap for developer and future operator visibility **before** HTTP or LLM surfaces.
 - **`requirements.txt`**: Pydantic dependency for schema/interface validation.
 
 ### Upcoming (prioritized)

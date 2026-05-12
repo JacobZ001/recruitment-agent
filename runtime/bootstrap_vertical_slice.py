@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID, uuid4, uuid5
 
 from interfaces.event_bus_interface import (
@@ -294,12 +294,17 @@ def wire_vertical_slice_runtime(
     *,
     bus: Optional[InMemoryEventBus] = None,
     clock: Optional[Callable[[], datetime]] = None,
+    skills: Optional[Mapping[str, Skill]] = None,
+    planner: Optional[VerticalSlicePlanner] = None,
 ) -> VerticalSliceRuntimeBundle:
     """
     Compose the same runtime as :func:`run_vertical_slice_bootstrap` without publishing events.
 
     ``clock`` bounds state-store revision timestamps; ingress envelopes use
     :data:`_FIXED_CLOCK` via :func:`_envelope`.
+
+    Pass ``skills`` and/or ``planner`` to exercise alternate registries or planner policy
+    in harness tests (defaults match the CLI vertical slice).
     """
     state_id = _state_id()
     candidate_id = _candidate_id()
@@ -307,7 +312,7 @@ def wire_vertical_slice_runtime(
 
     registry = default_pipeline_registry()
     engine = TransitionEngine(registry)
-    planner = VerticalSlicePlanner()
+    use_planner = planner if planner is not None else VerticalSlicePlanner()
     use_bus = bus or InMemoryEventBus()
     collector = _EmissionCollector()
     tick = clock or (lambda: _FIXED_CLOCK)
@@ -315,10 +320,12 @@ def wire_vertical_slice_runtime(
         InMemoryStateStoreConfig(clock=tick),
     )
 
+    skill_map: Dict[str, Skill] = dict(skills) if skills is not None else _skill_registry()
+
     ctx = OrchestrationContext(
         transition_engine=engine,
-        planner=planner,
-        skills=_skill_registry(),
+        planner=use_planner,
+        skills=skill_map,
         publisher=collector,
         rule_set_id="default_pipeline_registry",
         updated_by="bootstrap_vertical_slice",
@@ -358,17 +365,57 @@ def wire_vertical_slice_runtime(
     )
 
 
+def vertical_slice_primary_ingress_envelopes(bundle: VerticalSliceRuntimeBundle) -> List[EventEnvelope]:
+    """Deterministic primary ingress envelopes (same sequence as :func:`drive_vertical_slice_primary_sequence`)."""
+    return [
+        _envelope(
+            event_type=et,
+            candidate_id=bundle.candidate_id,
+            correlation_id=bundle.correlation_id,
+            occurred_at=_FIXED_CLOCK,
+            seq=seq,
+        )
+        for seq, et in enumerate(PRIMARY_VERTICAL_SLICE_EVENT_TYPES, start=1)
+    ]
+
+
+def vertical_slice_timeline_text(
+    bundle: VerticalSliceRuntimeBundle,
+    envelope_catalog: Sequence[EventEnvelope],
+) -> str:
+    """
+    Human-readable multi-run timeline from :func:`render_vertical_slice_timeline_text`.
+
+    Pass all envelopes published to the bus (e.g. ``RecordingInMemoryEventBus.recorded_envelopes``)
+    for complete ingress labels including nested emissions; otherwise use
+    :func:`vertical_slice_primary_ingress_envelopes` for primary-path-only labels.
+    """
+    from runtime.inspection import render_vertical_slice_timeline_text
+
+    fin = bundle.store.get(bundle.state_id)
+    return render_vertical_slice_timeline_text(
+        run_history=bundle.subscriber.run_history,
+        envelope_catalog=envelope_catalog,
+        final_state=fin.snapshot if fin.ok else None,
+    )
+
+
 def drive_vertical_slice_primary_sequence(
     bundle: VerticalSliceRuntimeBundle,
     *,
     verbose: bool = False,
+    print_timeline: bool = False,
+    timeline_envelopes: Optional[Sequence[EventEnvelope]] = None,
 ) -> OrchestrationState:
     """
     Publish :data:`PRIMARY_VERTICAL_SLICE_EVENT_TYPES` in order (same as the CLI bootstrap).
+
+    When ``print_timeline`` is true, append a human-readable inspection timeline (see
+    :func:`vertical_slice_timeline_text`). Pass ``timeline_envelopes`` for full bus
+    envelope coverage (e.g. recording bus captures); otherwise labels use primary
+    ingress envelopes only (nested ingests may show as unknown types).
     """
     state_id = bundle.state_id
-    candidate_id = bundle.candidate_id
-    correlation_id = bundle.correlation_id
     bus = bundle.bus
     sub = bundle.subscriber
     store = bundle.store
@@ -379,23 +426,14 @@ def drive_vertical_slice_primary_sequence(
             print("=== BlueOcean vertical slice bootstrap (deterministic) ===")
             print(f"initial {_dump_state_summary(cur0.snapshot)}")
 
-    seq = 0
     history_offset = 0
-    for et in PRIMARY_VERTICAL_SLICE_EVENT_TYPES:
-        seq += 1
-        env = _envelope(
-            event_type=et,
-            candidate_id=candidate_id,
-            correlation_id=correlation_id,
-            occurred_at=_FIXED_CLOCK,
-            seq=seq,
-        )
+    for env in vertical_slice_primary_ingress_envelopes(bundle):
         pr = bus.publish(env)
         if verbose:
-            print(f"\n-- publish {et!r} status={pr.status.value} event_id={env.event_id}")
+            print(f"\n-- publish {env.event_type!r} status={pr.status.value} event_id={env.event_id}")
 
         if pr.status != DeliveryStatus.ACCEPTED:
-            raise RuntimeError(f"publish failed for {et!r}: {pr.failure}")
+            raise RuntimeError(f"publish failed for {env.event_type!r}: {pr.failure}")
 
         snap = store.get(state_id)
         if not snap.ok or snap.snapshot is None:
@@ -428,6 +466,13 @@ def drive_vertical_slice_primary_sequence(
         print(f"terminal pipeline phase: {final.snapshot.pipeline.phase.value!r}")
         if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
             print("WARNING: expected deep_scored; check planner/registry alignment.")
+    if print_timeline:
+        catalog = (
+            list(timeline_envelopes)
+            if timeline_envelopes is not None
+            else vertical_slice_primary_ingress_envelopes(bundle)
+        )
+        print(vertical_slice_timeline_text(bundle, catalog))
     return final.snapshot
 
 
@@ -525,7 +570,12 @@ class _OrchestrationSubscriber:
         return orchestration_to_handle_result(result)
 
 
-def run_vertical_slice_bootstrap(*, verbose: bool = True) -> OrchestrationState:
+def run_vertical_slice_bootstrap(
+    *,
+    verbose: bool = True,
+    print_timeline: bool = False,
+    timeline_envelopes: Optional[Sequence[EventEnvelope]] = None,
+) -> OrchestrationState:
     """
     Wire bus + store + orchestrator and drive the default recruiter slice through ``deep_scored``.
 
@@ -533,7 +583,12 @@ def run_vertical_slice_bootstrap(*, verbose: bool = True) -> OrchestrationState:
     ``light_scoring_completed`` once state has advanced (via the emission collector).
     """
     bundle = wire_vertical_slice_runtime()
-    return drive_vertical_slice_primary_sequence(bundle, verbose=verbose)
+    return drive_vertical_slice_primary_sequence(
+        bundle,
+        verbose=verbose,
+        print_timeline=print_timeline,
+        timeline_envelopes=timeline_envelopes,
+    )
 
 
 if __name__ == "__main__":

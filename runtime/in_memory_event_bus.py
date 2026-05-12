@@ -68,7 +68,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
-from uuid import UUID, uuid4, uuid5
+from uuid import UUID, uuid5
 
 # Stable dispatch correlation IDs: derive from envelope + subscription (replay harness).
 _BUS_DISPATCH_ID_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ff03")
@@ -253,6 +253,7 @@ def _synthetic_handler_failure_result(
     subscription_id: str,
     subscriber_id: str,
     delivery_id: UUID,
+    occurred_at: datetime,
     runtime_label: str,
 ) -> HandleResult:
     """
@@ -264,8 +265,8 @@ def _synthetic_handler_failure_result(
     """
 
     audit = HandleAudit(
-        handling_id=uuid4(),
-        recorded_at=datetime.now(timezone.utc),
+        handling_id=uuid5(_BUS_DISPATCH_ID_NS, f"synthetic_handler_exc:{delivery_id}"),
+        recorded_at=occurred_at,
         runtime=runtime_label,
     )
     exc_type = type(exc).__name__
@@ -544,6 +545,7 @@ class InMemoryEventBus:
                     subscription_id=step.subscription_id,
                     subscriber_id=step.subscriber_id,
                     delivery_id=step.delivery_id,
+                    occurred_at=envelope.occurred_at,
                     runtime_label=self._config.runtime_label,
                 )
             records.append(
