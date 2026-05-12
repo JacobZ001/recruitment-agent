@@ -153,6 +153,25 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Scoring calibration and distribution semantics**: documented meaning of normalized scores (e.g. per-stage, per-requisition), optional calibration curves as **deterministic** transforms with harness coverage—not autonomous tuning loops in skills.
   - **Deterministic policy rollout/versioning**: staged rollout (pinned defaults, explicit migrations, harness checks) so orchestrator upgrades do not silently change score meaning without a recorded policy bump.
 
+### Workflow-context-aware scoring priors
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Fake deep scoring (``skills/deterministic/fake_deep_scoring_skill.py``) applies **deterministic workflow-stage priors**—for example, when questionnaire fields are omitted it assumes a **bounded default questionnaire component** and records a **stage prior** signal—so the vertical slice can simulate “richer post-questionnaire cognition” without wiring full questionnaire payloads into every harness case.
+- **Rationale**: **Bounded** vertical-slice simulation: keeps execution **deterministic-first**, **explainable** (explicit flags such as ``used_questionnaire_stage_prior`` / signal codes), and **replay-stable** for the same inputs, while deferring centralized contextual policy infrastructure.
+- **Future impact**:
+  - **Hidden contextual weighting drift**: priors embedded in skills can diverge from real pipeline context as graphs multiply unless policy identity is explicit in outputs.
+  - **Inconsistent stage priors across workflows**: different stages or tenants may need incompatible priors; local constants risk forked semantics without registries.
+  - **Replay inconsistencies after policy evolution**: historical scores may change meaning if priors change without a captured **prior version** alongside results.
+  - **Unclear recruiter interpretation of contextual score boosts**: operators may read a higher score as “better candidate” rather than “stage assumption + sparse inputs” unless UI/docs map priors clearly.
+- **Priority**: Medium
+- **Recommended future direction** (preserve deterministic-first, explainable scoring, bounded orchestration):
+  - **Centralized contextual scoring policy governance**: own stage/default rules in versioned policy packs referenced by skills, not magic numbers scattered per module.
+  - **Workflow-aware scoring policy registries**: map ``(workflow_id, pipeline_phase, skill_kind)`` → allowed priors and defaults with harness validation.
+  - **Replay-stable prior versioning**: embed ``prior_policy_id`` / ``prior_policy_version`` (or hash) in skill output extensions when any prior applies.
+  - **Explainable contextual weighting semantics**: documented formulas and UI-safe labels distinguishing **declared evidence** vs **stage priors** vs **neutral fillers**.
+  - **Deterministic workflow-context scoring calibration**: explicit calibration tables (deterministic transforms only) and tests that pin expected scores for canonical fixture payloads.
+
 ## Execution Architecture
 
 ### Future orchestration replay tooling
