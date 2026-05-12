@@ -184,6 +184,28 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: High
 - **Recommended future direction**: Build a “replay runner” that rehydrates `OrchestrationState` from an event stream with strict validation and deterministic logs.
 
+### Replay validation evolution (structural vs semantic equality)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: The vertical-slice replay harness (`tests/replay/test_vertical_slice_replay.py`) intentionally asserts **strict structural replay equality**: canonical ingress is driven twice through independently wired runtimes, and artifacts are compared via **deterministic, byte-stable JSON serialization** of final `OrchestrationState`, full `OrchestrationExecutionResult` histories, bus-published `EventEnvelope` timelines, explicit scoring/filter extracts, and orchestration decision traces. This is the **first architecture-confidence layer** for the synchronous orchestration runtime: it proves stable identifiers, clocks, and bounded execution paths before layering richer semantics.
+- **Rationale**: Early validation should maximize signal per test run and catch unintended drift in control-plane wiring. Structural equality over full serialized artifacts is the simplest contract when instrumentation surface area is small and deterministic-first semantics are the primary product.
+- **Future impact**:
+  - **Observability / tracing metadata** will evolve on timelines **independent of workflow semantics** (spans, host labels, sampling flags). If replay tests remain strict JSON equality over entire execution results, **benign instrumentation changes will fail tests** unrelated to orchestration correctness.
+  - **Strict JSON equality may become too rigid** as runtime diagnostics grow (dispatch traces, publish extensions, subscriber rows). The harness must not force either (a) freezing incidental metadata forever or (b) abandoning replay discipline entirely.
+  - Replay validation will likely need **layered equality semantics**, applied deliberately rather than one blanket assertion:
+    - **Structural replay equality**: stable state transitions, pipeline phase progression, emitted event types/ids/payloads relevant to workflow facts, skill outcomes material to decisions.
+    - **Semantic replay equivalence**: normalize or project artifacts before compare (e.g. strip volatile tracing fields; compare hashed stable subsets; equivalence classes for numeric tolerances where explicitly governed).
+    - **Governance / audit replay equality**: prove immutable audit narratives—who/what/when for transitions and overrides—with explicit schemas for operator-facing timelines, possibly distinct from developer-facing debug payloads.
+  - **Expansion pressure** (still bounded, deterministic-first): failure-path replay, partial-success (`PARTIAL_SUCCESS`) replay, replay **under schema evolution** (versioned interpretation rules), replay **across policy-version upgrades** (rule set id + compatibility harness), and eventually **distributed/concurrent execution** replay—each introduces dimensions where strict byte equality is either insufficient or the wrong default.
+- **Priority**: Medium
+- **Recommended future direction** (preserve **deterministic-first** orchestration, **replay/audit** primacy, **bounded** runtime semantics):
+  - Define **explicit replay assertion profiles** (e.g. `structural_strict`, `semantic_workflow`, `audit_timeline`) and map harness tests to profiles as the runtime grows.
+  - Partition persisted/captured models into **workflow facts** vs **diagnostic overlays**; tests compare facts by default; overlays opt-in or snapshot selectively.
+  - Add targeted suites for **failure** and **partial-success** paths once planner/registry scenarios exist; keep success-path structural harness as the regression anchor.
+  - Coordinate with **schema versioning** and **policy pack versioning** entries: replay fixtures pin `(schema_version, rule_set_id)` and document intentional upgrade breaks vs drift bugs.
+  - For future concurrency: specify **ordering contracts** and replay scopes (single aggregate vs multi-tenant isolation)—without implying premature production posture.
+
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-09

@@ -68,7 +68,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
+
+# Stable dispatch correlation IDs: derive from envelope + subscription (replay harness).
+_BUS_DISPATCH_ID_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ff03")
 
 from pydantic import BaseModel, Field
 
@@ -340,7 +343,7 @@ def _build_publish_plan(
     for sid in ordered_ids:
         entry = subs[sid]
         spec = entry.spec
-        delivery_id = uuid4()
+        delivery_id = uuid5(_BUS_DISPATCH_ID_NS, f"delivery:{envelope.event_id}:{sid}")
 
         if replay_base.replay_mode and not spec.replay_enabled:
             plan.append(
@@ -465,10 +468,10 @@ class InMemoryEventBus:
         ``publish``. ``BaseException`` subclasses outside ``Exception`` (e.g.
         ``KeyboardInterrupt``) are not caught and will abort the process as usual.
         """
-        publish_id = uuid4()
+        publish_id = uuid5(_BUS_DISPATCH_ID_NS, f"publish:{envelope.event_id}")
         audit = PublishAudit(
             publish_id=publish_id,
-            recorded_at=datetime.now(timezone.utc),
+            recorded_at=envelope.occurred_at,
             runtime=self._config.runtime_label,
             host=self._config.host_label,
         )
@@ -527,7 +530,7 @@ class InMemoryEventBus:
             entry = self._subs[step.subscription_id]
             dctx = DeliveryContext(
                 delivery_id=step.delivery_id,
-                delivered_at=datetime.now(timezone.utc),
+                delivered_at=envelope.occurred_at,
                 attempt=1,
                 subscriber_id=step.subscriber_id,
                 subscription_id=step.subscription_id,
@@ -561,6 +564,7 @@ class InMemoryEventBus:
             envelope_event_id=envelope.event_id,
             envelope_event_type=envelope.event_type,
             dispatch_records=tuple(records),
+            recorded_at=envelope.occurred_at,
             runtime_label=self._config.runtime_label,
         )
 

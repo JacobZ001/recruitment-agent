@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4, uuid5
 
 from interfaces.event_bus_interface import (
@@ -87,7 +87,13 @@ from orchestrator.vertical_slice_planner import (
 )
 from runtime.in_memory_event_bus import InMemoryEventBus, SimpleEventSubscription
 from runtime.in_memory_state_store import InMemoryStateStore, InMemoryStateStoreConfig
-from schemas.state_schema import OrchestrationState, PipelinePhase, StateLink
+from schemas.state_schema import (
+    OrchestrationState,
+    PipelinePhase,
+    PipelineState,
+    StateAudit,
+    StateLink,
+)
 from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
 from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
@@ -148,7 +154,8 @@ class _EmissionCollector:
 
     def publish(self, envelope: EventEnvelope) -> PublishResult:
         self._pending.append(envelope)
-        audit = PublishAudit(publish_id=uuid4(), recorded_at=_FIXED_CLOCK, runtime="bootstrap.collector")
+        pid = uuid5(_BOOT_NS, f"collector_publish:{envelope.event_id}")
+        audit = PublishAudit(publish_id=pid, recorded_at=envelope.occurred_at, runtime="bootstrap.collector")
         return PublishResult(status=DeliveryStatus.ACCEPTED, failure=None, audit=audit)
 
     def drain(self) -> List[EventEnvelope]:
@@ -244,11 +251,184 @@ def _skill_registry() -> Dict[str, Skill]:
     }
 
 
-def _initial_state(*, state_id: UUID, candidate_id: UUID) -> OrchestrationState:
+def _initial_state(*, state_id: UUID, candidate_id: UUID, occurred_at: datetime) -> OrchestrationState:
+    """Frozen timestamps so replay harnesses can assert identical aggregates across runs."""
     return OrchestrationState(
         id=state_id,
         links=[StateLink(kind="candidate", id=candidate_id, source="bootstrap_vertical_slice")],
+        pipeline=PipelineState(entered_phase_at=occurred_at),
+        audit=StateAudit(
+            created_at=occurred_at,
+            updated_at=occurred_at,
+            updated_by="bootstrap_vertical_slice",
+        ),
     )
+
+
+# Canonical recruiter vertical-slice ingress sequence (deterministic planner/registry).
+PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
+    "candidate_created",
+    "cv_uploaded",
+    "cv_parsed",
+    "hard_filter_passed",
+    "light_scoring_completed",
+    "questionnaire_sent",
+    "questionnaire_completed",
+    "deep_scoring_completed",
+)
+
+
+@dataclass
+class VerticalSliceRuntimeBundle:
+    """Wired transition engine + orchestrator + bus/store for integration and replay tests."""
+
+    bus: InMemoryEventBus
+    store: InMemoryStateStore
+    state_id: UUID
+    candidate_id: UUID
+    correlation_id: UUID
+    subscriber: _OrchestrationSubscriber
+
+
+def wire_vertical_slice_runtime(
+    *,
+    bus: Optional[InMemoryEventBus] = None,
+    clock: Optional[Callable[[], datetime]] = None,
+) -> VerticalSliceRuntimeBundle:
+    """
+    Compose the same runtime as :func:`run_vertical_slice_bootstrap` without publishing events.
+
+    ``clock`` bounds state-store revision timestamps; ingress envelopes use
+    :data:`_FIXED_CLOCK` via :func:`_envelope`.
+    """
+    state_id = _state_id()
+    candidate_id = _candidate_id()
+    correlation_id = candidate_id
+
+    registry = default_pipeline_registry()
+    engine = TransitionEngine(registry)
+    planner = VerticalSlicePlanner()
+    use_bus = bus or InMemoryEventBus()
+    collector = _EmissionCollector()
+    tick = clock or (lambda: _FIXED_CLOCK)
+    store = InMemoryStateStore(
+        InMemoryStateStoreConfig(clock=tick),
+    )
+
+    ctx = OrchestrationContext(
+        transition_engine=engine,
+        planner=planner,
+        skills=_skill_registry(),
+        publisher=collector,
+        rule_set_id="default_pipeline_registry",
+        updated_by="bootstrap_vertical_slice",
+    )
+    orchestrator = Orchestrator(ctx)
+
+    sub = _OrchestrationSubscriber(
+        orchestrator=orchestrator,
+        store=store,
+        state_id=state_id,
+        bus=use_bus,
+        collector=collector,
+    )
+    use_bus.register_subscription(
+        SimpleEventSubscription(
+            spec=SubscriptionSpec(
+                subscriber_id="vertical_slice.orchestrator",
+                subscription_id="bootstrap.vertical_slice.orchestrator",
+                selector=SubscriptionSelector(subject_kind="candidate"),
+            ),
+            handler=sub,
+        )
+    )
+
+    init = _initial_state(state_id=state_id, candidate_id=candidate_id, occurred_at=_FIXED_CLOCK)
+    created = store.create(init)
+    if not created.ok:
+        raise RuntimeError(f"state store create failed: {created.failure}")
+
+    return VerticalSliceRuntimeBundle(
+        bus=use_bus,
+        store=store,
+        state_id=state_id,
+        candidate_id=candidate_id,
+        correlation_id=correlation_id,
+        subscriber=sub,
+    )
+
+
+def drive_vertical_slice_primary_sequence(
+    bundle: VerticalSliceRuntimeBundle,
+    *,
+    verbose: bool = False,
+) -> OrchestrationState:
+    """
+    Publish :data:`PRIMARY_VERTICAL_SLICE_EVENT_TYPES` in order (same as the CLI bootstrap).
+    """
+    state_id = bundle.state_id
+    candidate_id = bundle.candidate_id
+    correlation_id = bundle.correlation_id
+    bus = bundle.bus
+    sub = bundle.subscriber
+    store = bundle.store
+
+    if verbose:
+        cur0 = store.get(state_id)
+        if cur0.ok and cur0.snapshot is not None:
+            print("=== BlueOcean vertical slice bootstrap (deterministic) ===")
+            print(f"initial {_dump_state_summary(cur0.snapshot)}")
+
+    seq = 0
+    history_offset = 0
+    for et in PRIMARY_VERTICAL_SLICE_EVENT_TYPES:
+        seq += 1
+        env = _envelope(
+            event_type=et,
+            candidate_id=candidate_id,
+            correlation_id=correlation_id,
+            occurred_at=_FIXED_CLOCK,
+            seq=seq,
+        )
+        pr = bus.publish(env)
+        if verbose:
+            print(f"\n-- publish {et!r} status={pr.status.value} event_id={env.event_id}")
+
+        if pr.status != DeliveryStatus.ACCEPTED:
+            raise RuntimeError(f"publish failed for {et!r}: {pr.failure}")
+
+        snap = store.get(state_id)
+        if not snap.ok or snap.snapshot is None:
+            raise RuntimeError("state missing after publish")
+        if verbose:
+            print(f"   state {_dump_state_summary(snap.snapshot)}")
+
+        new_runs = sub.run_history[history_offset:]
+        history_offset = len(sub.run_history)
+        if verbose and new_runs:
+            for idx, lr in enumerate(new_runs, start=1):
+                tag = f"orchestration_run[{idx}/{len(new_runs)}]"
+                print(f"   --- {tag} ok={lr.ok} ---")
+                if lr.decisions:
+                    for d in lr.decisions[-6:]:
+                        print(f"   decision {d.kind.value}: {d.message} code={d.code}")
+                if lr.skill_results:
+                    print("   skills:")
+                    for sr in lr.skill_results:
+                        print(f"      {_summarize_skill_result(sr)}")
+                if lr.produced_event_ids:
+                    print(f"   emitted_event_ids: {[str(x) for x in lr.produced_event_ids]}")
+
+    final = store.get(state_id)
+    if not final.ok or final.snapshot is None:
+        raise RuntimeError("final state missing")
+    if verbose:
+        print("\n=== final snapshot ===")
+        print(_dump_state_summary(final.snapshot))
+        print(f"terminal pipeline phase: {final.snapshot.pipeline.phase.value!r}")
+        if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
+            print("WARNING: expected deep_scored; check planner/registry alignment.")
+    return final.snapshot
 
 
 def _envelope(
@@ -352,117 +532,8 @@ def run_vertical_slice_bootstrap(*, verbose: bool = True) -> OrchestrationState:
     Publishes the primary ingress sequence; ``questionnaire_requested`` is published after
     ``light_scoring_completed`` once state has advanced (via the emission collector).
     """
-    state_id = _state_id()
-    candidate_id = _candidate_id()
-    correlation_id = candidate_id
-
-    registry = default_pipeline_registry()
-    engine = TransitionEngine(registry)
-    planner = VerticalSlicePlanner()
-    bus = InMemoryEventBus()
-    collector = _EmissionCollector()
-    store = InMemoryStateStore(
-        InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK),
-    )
-
-    ctx = OrchestrationContext(
-        transition_engine=engine,
-        planner=planner,
-        skills=_skill_registry(),
-        publisher=collector,
-        rule_set_id="default_pipeline_registry",
-        updated_by="bootstrap_vertical_slice",
-    )
-    orchestrator = Orchestrator(ctx)
-
-    sub = _OrchestrationSubscriber(
-        orchestrator=orchestrator,
-        store=store,
-        state_id=state_id,
-        bus=bus,
-        collector=collector,
-    )
-    bus.register_subscription(
-        SimpleEventSubscription(
-            spec=SubscriptionSpec(
-                subscriber_id="vertical_slice.orchestrator",
-                subscription_id="bootstrap.vertical_slice.orchestrator",
-                selector=SubscriptionSelector(subject_kind="candidate"),
-            ),
-            handler=sub,
-        )
-    )
-
-    init = _initial_state(state_id=state_id, candidate_id=candidate_id)
-    created = store.create(init)
-    if not created.ok:
-        raise RuntimeError(f"state store create failed: {created.failure}")
-
-    primary_events = (
-        "candidate_created",
-        "cv_uploaded",
-        "cv_parsed",
-        "hard_filter_passed",
-        "light_scoring_completed",
-        "questionnaire_sent",
-        "questionnaire_completed",
-        "deep_scoring_completed",
-    )
-
-    if verbose:
-        print("=== BlueOcean vertical slice bootstrap (deterministic) ===")
-        print(f"initial {_dump_state_summary(created.snapshot)}")
-
-    seq = 0
-    history_offset = 0
-    for et in primary_events:
-        seq += 1
-        env = _envelope(
-            event_type=et,
-            candidate_id=candidate_id,
-            correlation_id=correlation_id,
-            occurred_at=_FIXED_CLOCK,
-            seq=seq,
-        )
-        pr = bus.publish(env)
-        if verbose:
-            print(f"\n-- publish {et!r} status={pr.status.value} event_id={env.event_id}")
-
-        if pr.status != DeliveryStatus.ACCEPTED:
-            raise RuntimeError(f"publish failed for {et!r}: {pr.failure}")
-
-        snap = store.get(state_id)
-        if not snap.ok or snap.snapshot is None:
-            raise RuntimeError("state missing after publish")
-        if verbose:
-            print(f"   state {_dump_state_summary(snap.snapshot)}")
-
-        new_runs = sub.run_history[history_offset:]
-        history_offset = len(sub.run_history)
-        if verbose and new_runs:
-            for idx, lr in enumerate(new_runs, start=1):
-                tag = f"orchestration_run[{idx}/{len(new_runs)}]"
-                print(f"   --- {tag} ok={lr.ok} ---")
-                if lr.decisions:
-                    for d in lr.decisions[-6:]:
-                        print(f"   decision {d.kind.value}: {d.message} code={d.code}")
-                if lr.skill_results:
-                    print("   skills:")
-                    for sr in lr.skill_results:
-                        print(f"      {_summarize_skill_result(sr)}")
-                if lr.produced_event_ids:
-                    print(f"   emitted_event_ids: {[str(x) for x in lr.produced_event_ids]}")
-
-    final = store.get(state_id)
-    if not final.ok or final.snapshot is None:
-        raise RuntimeError("final state missing")
-    if verbose:
-        print("\n=== final snapshot ===")
-        print(_dump_state_summary(final.snapshot))
-        print(f"terminal pipeline phase: {final.snapshot.pipeline.phase.value!r}")
-        if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
-            print("WARNING: expected deep_scored; check planner/registry alignment.")
-    return final.snapshot
+    bundle = wire_vertical_slice_runtime()
+    return drive_vertical_slice_primary_sequence(bundle, verbose=verbose)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,23 @@ from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
+
+# Namespace for stable orchestration correlation IDs (replay harness / deterministic runs).
+# IDs derive from the ingested envelope and structural indices — no ambient randomness.
+_ORCHESTRATION_ID_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ff02")
+
+
+def _run_id_for_ingested_event(envelope_event_id: UUID) -> UUID:
+    return uuid5(_ORCHESTRATION_ID_NS, f"orch_run:{envelope_event_id}")
+
+
+def _skill_execution_id_for(envelope_event_id: UUID, skill_index: int, skill_name: str) -> UUID:
+    return uuid5(_ORCHESTRATION_ID_NS, f"skill_exec:{envelope_event_id}:{skill_index}:{skill_name}")
+
+
+def _emission_event_id_for(causation_id: UUID, emission_index: int, event_type: str) -> UUID:
+    return uuid5(_ORCHESTRATION_ID_NS, f"emit:{causation_id}:{emission_index}:{event_type}")
 
 from pydantic import BaseModel, Field
 
@@ -484,8 +500,10 @@ def _build_emission_envelope(
     trace_id: Optional[str],
     request_id: Optional[str],
     actor_id: Optional[str],
+    emission_index: int,
+    occurred_at: datetime,
 ) -> EventEnvelope:
-    eid = uuid4()
+    eid = _emission_event_id_for(causation_id, emission_index, draft.event_type)
     meta = EventEnvelopeMetadata(
         trace_id=trace_id,
         request_id=request_id,
@@ -496,7 +514,7 @@ def _build_emission_envelope(
     return EventEnvelope(
         event_id=eid,
         event_type=draft.event_type,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=occurred_at,
         subject_id=draft.subject_id,
         subject_kind=draft.subject_kind,
         payload=dict(draft.payload),
@@ -517,8 +535,14 @@ def orchestration_to_handle_result(
     infrastructure layers outside this orchestrator.
     """
 
-    hid = handling_id or uuid4()
-    audit = HandleAudit(handling_id=hid, recorded_at=datetime.now(timezone.utc))
+    hid = handling_id or uuid5(
+        _ORCHESTRATION_ID_NS,
+        f"handle:{result.trace.ingested_event_id}",
+    )
+    recorded_at = result.trace.ended_at or result.trace.started_at
+    if recorded_at is None:
+        recorded_at = datetime.now(timezone.utc)
+    audit = HandleAudit(handling_id=hid, recorded_at=recorded_at)
     if result.ok:
         return HandleResult(
             status=DeliveryStatus.ACCEPTED,
@@ -580,7 +604,7 @@ class Orchestrator:
         envelope: EventEnvelope,
         delivery: DeliveryContext,
     ) -> OrchestrationExecutionResult:
-        run_id = uuid4()
+        run_id = _run_id_for_ingested_event(envelope.event_id)
         trace = OrchestrationTraceMeta(
             orchestration_execution_id=run_id,
             ingested_event_id=envelope.event_id,
@@ -590,6 +614,7 @@ class Orchestrator:
             replay_run_id=delivery.replay.replay_run_id,
             replay_sequence=delivery.replay.sequence,
             rule_set_id=self._ctx.rule_set_id,
+            started_at=envelope.occurred_at,
         )
         decisions: List[OrchestrationDecisionRecord] = []
         skill_results: List[SkillExecutionResult] = []
@@ -603,7 +628,7 @@ class Orchestrator:
             details: Optional[Dict[str, Any]] = None,
             transition_result: Optional[TransitionValidationResult] = None,
         ) -> OrchestrationExecutionResult:
-            ended = datetime.now(timezone.utc)
+            ended = envelope.occurred_at
             trace_done = _model_copy(trace, ended_at=ended)
             decisions.append(
                 OrchestrationDecisionRecord(
@@ -691,7 +716,7 @@ class Orchestrator:
                 )
             )
 
-        for spec in plan.skills:
+        for skill_index, spec in enumerate(plan.skills):
             skill = self._ctx.skills.get(spec.skill_name)
             if skill is None:
                 return _fail(
@@ -701,7 +726,7 @@ class Orchestrator:
                     transition_result=tv,
                 )
 
-            execution_id = uuid4()
+            execution_id = _skill_execution_id_for(envelope.event_id, skill_index, spec.skill_name)
             exc_ctx = _build_execution_context(
                 envelope=envelope,
                 delivery=delivery,
@@ -760,7 +785,7 @@ class Orchestrator:
             )
 
         if self._ctx.publisher is not None:
-            for draft in plan.emissions:
+            for emission_index, draft in enumerate(plan.emissions):
                 out = _build_emission_envelope(
                     draft=draft,
                     causation_id=envelope.event_id,
@@ -768,6 +793,8 @@ class Orchestrator:
                     trace_id=envelope.metadata.trace_id,
                     request_id=envelope.metadata.request_id,
                     actor_id=envelope.metadata.actor_id,
+                    emission_index=emission_index,
+                    occurred_at=occurred_at,
                 )
                 decisions.append(
                     OrchestrationDecisionRecord(
@@ -792,8 +819,7 @@ class Orchestrator:
                     )
                 produced_ids.append(out.event_id)
 
-        ended = datetime.now(timezone.utc)
-        trace_done = _model_copy(trace, ended_at=ended)
+        trace_done = _model_copy(trace, ended_at=occurred_at)
         decisions.append(
             OrchestrationDecisionRecord(
                 kind=OrchestrationDecisionKind.RUN_COMPLETED,
