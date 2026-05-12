@@ -19,11 +19,12 @@ Build a deterministic, AI-native **human evaluation infrastructure** for recruit
 - **Foundation for v1**: schemas, interfaces, state-machine validation contracts, and the **reference runtime stack** (in-memory bus + state store + orchestrator + vertical-slice planner) are treated as **stable enough to build on**; schedule pressure is on **proving** end-to-end recruiter workflows, not inventing new control-plane shape.
 - **Phase transition**: the **control plane / reference runtime** (orchestrator, transition engine, planner, in-memory bus and store, fake deterministic skills, replay-aware execution semantics) **substantially exists**; active work has shifted from **standing up runtime infrastructure** to **proving runnable deterministic workflow execution** (harnesses, integration correctness, replay validation).
 - **Execution focus**: close gaps with **end-to-end workflow proving**, deterministic orchestration validation, and **cognition replacement** behind existing contracts—without LLM-driven routing or speculative cross-cutting abstractions by default.
-- **Deferred intentionally**: durable persistence, production broker/event store, full replay-from-store runners, deep observability, external integrations, production LLM wiring, and recruiter-facing UI remain **scheduled and debt-tracked**; they follow workflow proof, not the other way around.
+- **Deferred intentionally**: durable persistence, production broker/event store, full replay-from-store runners, deep observability, and multi-tenant hardening remain **scheduled and debt-tracked**—they deepen **runtime evolution** after **replayable workflow confidence** and **human-governed operations** are demonstrated on the slice, not the reverse.
+- **Operations-centric posture**: maturity is measured by **governed workflows** (audit, replay signals, operator hooks, external exercise of orchestration) more than by counting backend components.
 
 ## Current Architectural State
 
-The **control plane exists** as a synchronous in-process stack with stable orchestration boundaries (planner policy vs. orchestrator execution vs. engine validation vs. skill contracts). **Primary engineering risk is now integration and proof**: wiring correctness across events, state, skills, and emissions; replay/harness confidence; then replacing fake cognition with real skills under the same gates.
+The **control plane exists** as a synchronous in-process stack with stable orchestration boundaries (planner policy vs. orchestrator execution vs. engine validation vs. skill contracts). **Primary risk is workflow proof and operator confidence**: correct handoffs across events, state, skills, and emissions; **replayable harness behavior**; **human-in-the-loop visibility**; then **controlled cognition** and durable storage under the same gates—not “more infrastructure first.”
 
 ## Current Repository Structure
 
@@ -32,7 +33,7 @@ High-level topology (architecture-oriented):
 - **`schemas/`**: canonical contracts (state, event, candidate). Schemas are validation-first and remain stable.
 - **`interfaces/`**: execution boundaries between subsystems (typed IO contracts; no business logic).
 - **`state_machine/`**: deterministic states, transitions, and validation rules.
-- **`runtime/`**: reference in-memory implementations of bus and state-store contracts for vertical-slice runs, local tests, and demos (not production persistence).
+- **`runtime/`**: reference in-memory implementations of bus and state-store contracts for vertical-slice runs, local tests, and demos (not production persistence); includes **`bootstrap_vertical_slice.py`**, the first synchronous integration entrypoint wiring planner + orchestrator + transition engine + fake skills + bus + store.
 - **`skills/`**: bounded execution units
   - **`skills/deterministic/`**: pure programmatic logic (no LLM calls)
   - **`skills/llm/`**: cognition layer (understanding/extraction/generation)
@@ -52,7 +53,9 @@ High-level topology (architecture-oriented):
 - **In-memory state store** (`runtime/in_memory_state_store.py`) for orchestration state snapshots and candidate linkage in vertical-slice runs (explicitly not durable multi-tenant storage).
 - **Orchestrator runtime** (`orchestrator/orchestrator.py`): synchronous control-plane loop (ingest → plan invariants → validate transition → run skills → commit new state → publish derived events), with replay flags forwarded into transition validation.
 - **Vertical slice planner** (`orchestrator/vertical_slice_planner.py`): pure deterministic policy mapping envelopes + state snapshots to plans aligned with the default pipeline registry (no LLM routing, no autonomous workflow control).
-- **Fake deterministic skills** (e.g. `skills/deterministic/fake_cv_uploaded_skill.py`, `skills/deterministic/fake_hard_filter_skill.py`) validating end-to-end control-plane wiring, skill IO boundaries, and explainable pass/fail paths without production cognition.
+- **Fake deterministic vertical-slice skills**: CV upload (`fake_cv_uploaded_skill.py`), hard filter (`fake_hard_filter_skill.py`), light scoring (`fake_light_scoring_skill.py`), deep scoring (`fake_deep_scoring_skill.py`)—plus minimal **stub** skills where the planner still expects a registration (`candidate_created`, `cv_parsed`, `questionnaire_stage`), validating control-plane wiring and contracts without production cognition.
+- **Runnable integration bootstrap** (`runtime/bootstrap_vertical_slice.py`): deterministic scripted ingress through default pipeline phases to `deep_scored`, with emission fan-out via an emission collector (state commit ordering vs. nested publish).
+- **Python dependency pin** (`requirements.txt`): Pydantic for canonical schemas/interfaces.
 - **Replay-safe execution semantics** (orchestrator + transition engine + bus): replay treated as explicit, signal-driven context—same envelope, delivery replay context, and state snapshot yield the same deterministic plan/validation outcomes; full historical replay runners and durable logs remain future work (see tech debt).
 - **Deterministic orchestration governance**: ADRs, tech-debt registry, and code-level boundaries preserving “programs control; LLMs understand” through reference runtime delivery.
 - **State machine foundation** (deterministic transitions as an architectural requirement)—now exercised by the orchestrator and planner, not only specified.
@@ -67,22 +70,22 @@ High-level topology (architecture-oriented):
 
 **Milestone**: **Proven** end-to-end deterministic recruiter workflows—runnable paths, harness-backed assertions, replay-validation confidence, and integration correctness—while cognition and product surfaces remain mostly fake or absent.
 
-The **control plane and reference runtime now substantially exist** (orchestrator, transition engine, planner, in-memory event bus and state store, fake deterministic skills, replay-aware execution semantics). **Primary engineering risk and priority** have shifted from **building runtime infrastructure** to **proving runnable deterministic workflow execution**: end-to-end recruiter scenarios, **integration correctness** across handoffs, **replay validation**, **harness execution**, and **deterministic orchestration validation**. **Major remaining work** is **workflow validation** plus **cognition replacement** (real skills and policies behind the same interfaces), not greenfield orchestration.
+The **control plane and reference runtime substantially exist** (orchestrator, transition engine, planner, in-memory event bus and state store, fake deterministic skills for intake/filter/light/deep scoring, replay-aware execution semantics). **Manual integration proof** exists via `runtime/bootstrap_vertical_slice.py` (ingress sequence through `deep_scored` with derived `questionnaire_requested` emission). **Primary gap vs “proven”** is **automated harness coverage** (pytest or equivalent), structured assertions on state/skill outputs, **external exercise** of orchestration (minimal API/CLI ingress), and **operator-visible governance loops**—not missing fake scoring modules.
 
-**Current priority**: ship missing path coverage (e.g. light/deep scoring fakes), **E2E runnable harnesses**, expanded replay-validation tests, and persistence/API boundaries only as needed for proof—**integration complexity** is the main schedule driver; avoid speculative new subsystems.
+**Sequencing (operations-first)**: **prove** in tests → **thin ingress** (API/CLI) so orchestration is externally exercisable → **human governance & replay confidence** on the slice → **controlled LLM** experiments behind skill interfaces (may start **before** durable persistence) → **deterministic policy depth** → **persistence & durable runtime** when warranted → **debt-tracked** hardening. **Authoritative ordered list:** **Upcoming (prioritized)** under Immediate Next Steps.
 
 **Clarifications**
 
 - **Governance and determinism** unchanged: programs validate and route; LLMs stay behind typed interfaces; humans retain override authority.
-- **Cognition**: still **fake / simulated** on the proven path; **no production LLM** yet; real cognition is a **replacement** step after workflow proof.
-- **Persistence / UI / integrations**: reference path remains **in-memory**, **no recruiter UI**, **no external integrations**; see Planned Future Phases and tech debt.
-- **Infrastructure hardening** follows **proof** (durable bus/store, stream replay products, telemetry)—still debt-tracked, not the current bottleneck.
+- **Cognition**: fake skills remain the default regression path; **bounded LLM experiments** are allowed once harness + boundaries exist—not blocked on production databases.
+- **Persistence**: reference runtime may stay in-memory for some time; **durable storage is not a prerequisite** for thin API or controlled cognition; it arrives when audit/replay **requires** surviving process restarts.
+- **Infrastructure hardening** (brokers, deep observability, outbox) remains **debt-tracked** and **bounded**; it augments **replayable operations**, not a checklist of components.
 
 #### First runnable recruiter workflow (acceptance criteria)
 
 Bounded criteria for **Phase 3 proving work**; they **limit scope** while keeping **deterministic-first** behavior.
 
-**Progress note (engineering)**: the **control-plane loop** is **wiring-complete** for fake skills; **Phase 3** closes the gap on **full-path execution proof**, replay/harness confidence, and remaining slice criteria (scoring on path, explainability, persistence-backed timelines where required).
+**Progress note (engineering)**: the **control-plane loop** is **wiring-complete** for the reference fake path (including light + deep scoring fakes). **Phase 3** now emphasizes **automated proof** (tests/harness), **replay-validation confidence**, and remaining slice criteria where not yet demonstrated (e.g. human override exercised end-to-end, persistence-backed timelines when required).
 
 - A **recruiter can submit or upload a CV** for a candidate (single intake path is enough).
 - **Candidate aggregate / state** is created and updated only through **validated schemas** (no ad-hoc blobs as the source of truth).
@@ -97,16 +100,23 @@ Bounded criteria for **Phase 3 proving work**; they **limit scope** while keepin
 
 Ordered **upcoming engineering priorities** for **Phase 3** (deterministic-first; realistic sequencing; debt-tracked where noted):
 
-1. **`fake_light_scoring_skill`**: deterministic light-scoring stand-in wired through the same skill contracts as production-scoring predecessors.
-2. **`fake_deep_scoring_skill`**: deterministic deep-scoring stand-in post-questionnaire, aligned with registry edges and planner semantics.
-3. **End-to-end runnable workflow harness**: scripted or test-harness-driven runs that exercise the full orchestrator loop (ingress events through derived emissions) with fixed inputs and stable assertions.
-4. **Replay validation tests**: expand coverage for replay signal paths (bus + transition engine + orchestrator), including edge cases called out in `docs/architecture/tech_debt.md` (without claiming full stream replay yet).
-5. **Persistence abstraction**: introduce repository/store interfaces and a first durable or file-backed implementation when the harness requires it—preserving immutable-event discipline.
-6. **Real deterministic recruiter policies**: replace or narrow fake skill behavior with policy-backed gates, typed reason vocabularies, and versioned rule packs as domain language stabilizes (see tech debt on vocabulary governance).
-7. **LLM cognition layer integration**: wire real LLM skills **only** behind `skills/llm/` and hybrid gates—signals in, deterministic policy out; no LLM orchestration.
-8. **API / service boundary layer**: expose the orchestration runtime through a stable service API (sync first), keeping schemas and validation at the edge.
-9. **Recruiter dashboard / UI**: human-in-the-loop operations (review, override, calibration, evidence navigation) on top of the service boundary.
-10. **Production infrastructure hardening**: durable bus, telemetry, consistency patterns (outbox, idempotent consumers), and operational playbooks—after **Phase 3** harness and workflow proof.
+### Recently delivered (reference slice)
+
+- **`fake_light_scoring_skill`** / **`fake_deep_scoring_skill`**: deterministic scoring stand-ins behind canonical skill contracts, aligned with planner/registry semantics.
+- **`runtime/bootstrap_vertical_slice.py`**: synchronous integration entrypoint (transition engine + default registry + planner + orchestrator + fake skills + in-memory bus/state store); demonstrates full pipeline progression to **`deep_scored`** with questionnaire emission handling.
+- **`requirements.txt`**: Pydantic dependency for schema/interface validation.
+
+### Upcoming (prioritized)
+
+1. **Automated end-to-end workflow harness**: formal **pytest** (or equivalent) with **fixed UUIDs/timestamps**, assertions on `OrchestrationState`, `SkillExecutionResult` payloads, and emitted event ids—beyond the manual bootstrap script.
+2. **Lightweight ingress / external boundary**: minimal **HTTP API** (e.g. FastAPI) and/or **CLI** to submit validated events and read outcomes—so orchestration is **exercisable externally** (curl/Postman-level); schemas and validation at the edge; sync-first; **not** a full “platform” milestone.
+3. **Human / operator governance loops on the slice**: end-to-end **`human_override`** (and related governance hooks) with **audit-visible** transition and event timelines—before investing in persistence depth.
+4. **Replay-validation tests**: bus + transition engine + orchestrator replay **signals**, including tech-debt edge cases (no claim of full historical replay products yet).
+5. **Controlled cognition experiments**: first **`skills/llm/`** or hybrid skills (extraction, summarization, structured signals) behind canonical contracts; deterministic policy and orchestration unchanged; **may precede** durable persistence.
+6. **Real deterministic recruiter policies**: policy-backed gates, typed vocabularies, versioned rule packs (see tech debt on vocabulary / scoring governance).
+7. **Persistence abstraction & durable evolution**: repository/event-store shapes and a first **durable** or file-backed implementation **when operators or replay requirements demand it**—**after** external boundary and governance demos; immutable-event discipline preserved.
+8. **Richer operator surfaces**: recruiter/admin UI or tooling on top of the API boundary—when workflow and governance paths are stable enough to merit UX investment.
+9. **Production infrastructure hardening**: durable bus patterns, telemetry, outbox/idempotent consumers, multi-tenant operational maturity—**debt-tracked**, following **replayable workflow confidence** (not parallel “component accumulation”).
 
 Cross-cutting reminders (unchanged philosophy):
 
@@ -116,56 +126,57 @@ Cross-cutting reminders (unchanged philosophy):
 
 ## Planned Future Phases
 
-### Phase 4 — Orchestrator Core (maturation)
+Phases below are **outcome-oriented** (workflow confidence, governance, cognition, durable evolution, operations maturity). **Infrastructure appears as an enabler**, not as the definition of progress. **Deterministic-first governance, replay/audit priority, and debt-tracked hardening** stay explicit.
 
-- **Progress**: reference synchronous orchestrator and deterministic planner exist; remaining work matures orchestration as a **core** subsystem (broader contexts, operational concerns), not greenfield creation from zero.
-- Deterministic orchestration engine that consumes events and produces validated state transition requests.
-- Human override workflows as first-class, logged actions.
+### Phase 4 — Replayable workflow confidence (maturation)
 
-### Phase 5 — Event Bus + Persistence
+- **Intent**: raise confidence that **the same inputs yield the same governed outcomes**—harness culture, integration tests, and operational clarity around orchestration runs—not “shipping more components.”
+- Broaden **automated** checks across planner → engine → orchestrator → skills → emissions; tighten **replay signal** coverage as debt items demand.
+- Treat orchestration as the **governed execution core** of an **AI operations platform** (bounded runs, explicit decisions), not merely a library.
 
-- **Progress**: canonical bus interfaces and a synchronous **in-memory** bus runtime exist; Phase 5 adds **durable** append-only recording, external bus implementations, and persistence depth beyond process memory.
-- Event recording layer (append-only) and event bus abstraction.
-- Correlation/causation tracing across integrations and internal subsystems.
+### Phase 5 — Human governance operations
 
-### Phase 6 — Deterministic Skills Layer
+- **Intent**: mature **operator loops**: override, approval, calibration, and audit narratives anchored on **immutable events** and transition records.
+- First-class **human actions** on timelines; governance UX may be thin (API + logs) before polished UI.
+- **Replay/audit** remain primary—operators must answer **what happened** and **why** without inferring from opaque scores.
 
-- **Progress**: fake deterministic skills (including hard filter and intake) validate contracts and wiring; Phase 6 expands **real** deterministic policy coverage, deduplication, ranking primitives, and gates.
-- Hard filters, deduplication, deterministic ranking primitives, policy gates.
-- Test coverage for all critical deterministic behaviors.
+### Phase 6 — Controlled cognition integration
 
-### Phase 7 — LLM Cognition Layer
+- **Intent**: replace or augment fakes with **real cognition** strictly behind **`skills/llm/`** and **hybrid** gates—signals in, deterministic policy out; **no LLM orchestration**.
+- Structured extraction, summarization, questionnaire artifacts, explainability references; vocabulary may graduate via tech-debt governance.
 
-- Structured extraction, summarization, questionnaire generation, and explainability artifacts.
-- Strict IO contracts; LLM outputs treated as signals, not control.
+### Phase 7 — Deterministic policy & ranking depth
 
-### Phase 8 — Recruiter Memory System
+- **Intent**: deepen **deterministic** recruiter/org policy (hard filters, dedupe, ranking primitives, policy packs) with harness coverage—still **programs control**.
 
-- Preference alignment artifacts and feedback loops.
-- Calibration data capture (human adjustments + evidence references).
+### Phase 8 — Recruiter memory & calibration
 
-### Phase 9 — Replay / Debugging Tooling
+- Preference artifacts, feedback loops, calibration capture (human adjustments + evidence refs)—**governed learning**, not autonomous optimization.
 
-- **Progress**: replay is **signal-driven** in the reference runtime (consistent `DeliveryContext` / transition replay context); Phase 9 adds **automated replay from stored streams**, timeline reconstruction products, and operator-facing investigation workflows.
-- Deterministic replay runner and timeline reconstruction tooling.
-- Investigation workflows: “why did this candidate end up here?”
+### Phase 9 — Durable runtime evolution (events, state, replay products)
 
-### Phase 10 — Telemetry + Architecture Review Tooling
+- **Intent**: **persisted facts** that support **replayable workflow confidence** across restarts and integrations—not “database for its own sake.”
+- Append-only event orientation, durable projections as needed, correlation/causation across channels; **full replay-from-store runners** and timeline products evolve here while staying **debt-tracked** where scope explodes.
 
-- Observability around transitions, event throughput, failure modes, and human overrides.
-- Periodic architecture review checks against ADRs and debt registry.
+### Phase 10 — Replay & investigation tooling (operator-facing)
 
-### Phase 11 — Admin / Recruiter UI
+- Move from **signal-only replay** toward **operator workflows**: “why did this candidate land here?”—deterministic reconstruction from stored envelopes + state, aligned with ADR immutability.
 
-- Human-in-the-loop operations: candidate review, override, calibration, and evidence navigation.
+### Phase 11 — Observability & architecture governance cadence
 
-### Phase 12 — Talent Pool System
+- Telemetry and SLO-friendly signals around transitions, throughput, failures, overrides—plus periodic **ADR/debt** review so the platform **evolves under governance**, not ad-hoc growth.
 
-- Long-term retention, segmenting, and future role matching.
-- Explainable candidate-to-role matching driven by validated signals and evidence references.
+### Phase 12 — Operational maturity & scale
+
+- **Multi-tenant**, operational playbooks, consistency patterns (e.g. outbox, idempotent consumers) where **proven need**—still **bounded** and debt-aligned; **not** a claim of full production readiness by phase label alone.
+
+### Phase 13 — Talent pool & long-horizon matching
+
+- Long-term retention, segmenting, future role matching—**explainable** matching from validated signals and evidence references.
 
 ## Long-Term System Vision
 
+- A **governed AI operations** posture: deterministic control over workflow evolution, with cognition as a **bounded, auditable** subsystem—not uncontrolled autonomy.
 - A reusable evaluation infrastructure beyond recruitment (executive hiring, partner assessment, staffing).
 - Strong auditability and explainability across all recommendations and decisions.
 - Deterministic, replayable workflows that remain stable as LLM capabilities evolve.
