@@ -104,6 +104,10 @@ _BOOT_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ffee")
 _FIXED_CLOCK = datetime(2026, 5, 12, 14, 0, 0, tzinfo=timezone.utc)
 _STUB_AUDIT_TIME = datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)
 
+# Stable ids for the single-aggregate reference vertical slice (bootstrap + API ingress).
+VERTICAL_SLICE_DEFAULT_STATE_ID = uuid5(_BOOT_NS, "vertical_slice.orchestration_state")
+VERTICAL_SLICE_DEFAULT_CANDIDATE_ID = uuid5(_BOOT_NS, "vertical_slice.candidate_subject")
+
 
 def _state_id() -> UUID:
     return uuid5(_BOOT_NS, "vertical_slice.orchestration_state")

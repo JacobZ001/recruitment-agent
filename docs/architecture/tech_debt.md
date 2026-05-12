@@ -224,6 +224,66 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - Keep the inspection layer as **projection-only**: render text / JSON / UI from **recorded facts**; add **structured timeline entries** later as an intermediate representation shared by multiple renderers.
   - Coordinate with **future orchestration replay tooling** and **event envelope payload governance** entries so timelines remain reproducible under schema and policy evolution.
 
+### API runtime singleton (single in-memory world per process)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). All requests share the **same** in-memory event bus, state store, and orchestration aggregate—there is **no** per-request or per-tenant runtime isolation in v1.
+- **Rationale**: **Deterministic-first**, **bounded** vertical-slice validation: a single shared world maximizes reproducibility for demos and integration tests without introducing session factories, pooling, or multi-tenant routing in the API layer yet.
+- **Future impact**: Unsuitable for **multi-candidate** or **multi-session** execution at scale; concurrent clients can interfere with each other’s workflow view; load tests and shared environments need explicit process boundaries or future isolated runtime instances.
+- **Priority**: Medium
+- **Recommended future direction**: Introduce **explicit runtime scopes** (factory or context-owned `VerticalSliceApiRuntime` instances) only when product requirements demand isolation—preserve deterministic wiring and harness-friendly construction; avoid embedding orchestration policy in the API.
+
+### Fixed aggregate identity (single candidate-scoped orchestration instance)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: The reference API assumes the bootstrap **`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`** (and associated single orchestration aggregate). Requests for other candidate ids are rejected (e.g. 404)—there is **no** runtime-created aggregate identity or multi-aggregate registry at the HTTP edge.
+- **Rationale**: Keeps ingress validation and tests **tight** on one explainable path; defers identity lifecycle (create candidate / bind aggregate) to future persistence and governance without broad refactors now.
+- **Future impact**: External systems cannot drive **per-candidate** workflows through the API until aggregate creation, routing, and scope rules exist outside the bootstrap script.
+- **Priority**: Medium
+- **Recommended future direction**: Add **deterministic** aggregate lifecycle operations (create/bind ids, explicit aggregate keys) in **runtime construction** or a thin registry—**not** in route handlers as ad-hoc policy; align with future persistence and audit entries.
+
+### HTTP ingress idempotency and replay-safe retries
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: **`POST /events`** has **no** idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation). Clients cannot rely on deduplication, stable publish outcomes under retries, or ingress-level audit of “same logical submission.”
+- **Rationale**: Sync-first reference boundary prioritizes validated publish semantics over distributed ingress guarantees; idempotency keys, dedupe stores, and ingress audit trails imply infrastructure and policy choices deferred for the slice.
+- **Future impact**: Retries, double-clicks, and proxy duplicates can produce **duplicate workflow signals** or confusing audit narratives unless upstream compensates; compliance-heavy deployments will need **replay-safe** ingress semantics.
+- **Priority**: High
+- **Recommended future direction**: Define **idempotency keys** (header or body), **dedupe policy** (window, scope, outcome mapping), **replay-safe retry** rules, and **ingress audit** records (who/when/key hash)—implemented in **deterministic** layers adjacent to the bus/persistence, not in LLM or autonomous routing; coordinate with **Orchestration side-effect consistency after publish failure** and shared delivery taxonomy.
+
+### Timeline rendering format (plain text vs structured projections)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Inspection (`runtime/inspection/`) and **`GET /timeline/{candidate_id}`** expose **deterministic plain text** timelines only. There is **no** canonical structured timeline schema (JSON rows, typed segments) or alternate renderers (UI components, export formats) in the reference runtime.
+- **Rationale**: Human-readable text is the smallest **read-only** projection for Phase 3 visibility; structured timelines add schema churn before operator and integration contracts stabilize.
+- **Future impact**: Downstream tools cannot consume **machine-stable** timeline entries without parsing text; multiple surfaces may diverge if each invents its own JSON.
+- **Priority**: Medium
+- **Recommended future direction**: Introduce an intermediate **structured timeline model** (immutable facts → entries) shared by **text / JSON / UI** renderers; keep rendering **non-authoritative** and **deterministic**; align with **Inspection event-history provenance and catalog governance**.
+
+### API boundary coupling to bootstrap helpers (`_envelope`, fixed clock)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: The API imports **bootstrap-oriented** helpers (e.g. `_envelope`, `_FIXED_CLOCK`, wiring conveniences from `runtime/bootstrap_vertical_slice.py`) to build `EventEnvelope` instances and keep tests deterministic.
+- **Rationale**: **Bounded** vertical slice: fastest path to a validated ingress without duplicating envelope construction; acceptable while bootstrap remains the single reference composition root.
+- **Future impact**: Production-shaped ingress may accidentally depend on **demo-only** or **script-oriented** helpers; refactors to bootstrap can ripple into HTTP tests without a clear **runtime construction** API.
+- **Priority**: Medium
+- **Recommended future direction**: Extract **stable runtime construction** helpers (envelope factory with injected clock/correlation policy, no demo-only defaults) from bootstrap utilities; keep API as a **thin adapter** that calls those helpers—preserve **no workflow policy in routes**.
+
+### Inspection ingress classification: causation_id heuristic vs explicit provenance
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: **`runtime_emission`** vs external ingress labeling in inspection uses a **heuristic**: presence of **`EventEnvelope.metadata.causation_id`** implies runtime-emitted lineage; **`causation_id=None`** implies external/script ingress. This is **not** a guaranteed provenance taxonomy once external producers also set causation metadata.
+- **Rationale**: Ships **bounded** Phase 3 readability without new envelope fields or migration; aligns with **deterministic-first** inspection as projection-only (see **Inspection event-history provenance and catalog governance**).
+- **Future impact**: Misclassification risk when integrations populate causation for legitimate external submits; audit and operator UIs may show incorrect **source** semantics.
+- **Priority**: Medium
+- **Recommended future direction**: Add **explicit provenance / source metadata** (versioned envelope extensions or first-class fields) for categories such as external ingress, control-plane emission, replay injection—**deterministic** classification in inspection from recorded facts, not inferred solely from causation presence; coordinate with **Shared execution metadata structures**.
+
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-09
