@@ -242,6 +242,24 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Publish a **canonical precedence table** + ack implications in architecture docs; add harness tests across reference implementations; consider explicit ``PublishResult.extensions`` fields for per-status counts instead of inferring from traces alone.
 
+### Candidate multi-state index governance (in-memory state store)
+- **Status**: OPEN
+- **Introduced in**: 2026-05-11
+- **Last reviewed**: 2026-05-11
+- **Current decision**: The in-memory state store builds a ``candidate_id → orchestration_state_id`` index from ``StateLink`` entries whose ``kind`` matches ``candidate`` (case-insensitive). When multiple links or successive writes touch the same candidate id, the index is **last-write-wins** within the store’s deterministic replace path. The **vertical-slice assumption** is **one primary orchestration state per candidate** for the runnable recruiter path.
+- **Rationale**: A single-map index keeps the first runtime small, deterministic, and easy to wire for demos/tests without introducing multi-tenant workflow keys or temporal scoping in v1.
+- **Future impact**: As the product grows, last-write-wins becomes unsafe or ambiguous when:
+  - **Multiple active workflows per candidate** (parallel roles, pipelines, or re-applications) need distinct state identities.
+  - **Talent pool / history semantics** require retaining prior orchestration snapshots as first-class facts rather than silent overwrite.
+  - **Workflow branching** (e.g. alternate paths, experiments) needs stable correlation without collapsing to one live row per candidate.
+  - **Historical orchestration lookup** becomes unclear (“which state id is canonical for this candidate at time T?”) without temporal or lineage metadata.
+- **Priority**: Medium
+- **Recommended future direction**:
+  - **Candidate → multiple state mappings**: explicit composite keys (candidate + job + workflow_version + branch id) or a structured registry table in persistence—not a flat singleton map.
+  - **Temporal indexing**: valid-from/valid-to or as-of queries for snapshots; align with event timelines and replay runners.
+  - **Workflow lineage tracking**: parent/child state ids, fork metadata, and explicit “superseded_by” links for audit trails.
+  - **Projection / read-model separation**: keep write-side ``OrchestrationState`` canonical while materializing query-friendly views (active-by-candidate, history-by-candidate) without overloading the in-memory index contract.
+
 ### Shared confidence abstraction consolidation
 - **Status**: OPEN
 - **Introduced in**: 2026-05-08
