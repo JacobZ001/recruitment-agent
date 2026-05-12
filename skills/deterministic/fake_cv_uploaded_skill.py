@@ -66,7 +66,7 @@ _MAX_DECLARED_BYTES: Final[int] = 50_000_000
 _MAX_PAGES: Final[int] = 500
 _MAX_WORD_ESTIMATE: Final[int] = 200_000
 
-_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-7a3d-9f0e-recruitment00")
+_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-4a3d-8f0e-000000000000")
 
 
 def _execution_id(context: ExecutionContext) -> UUID:

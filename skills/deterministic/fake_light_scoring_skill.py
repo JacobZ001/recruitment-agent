@@ -73,7 +73,7 @@ _MAX_KEYWORD_LEN: Final[int] = 64
 _MAX_PROFILE_FIELDS: Final[int] = 64
 _MAX_DEFAULT_PROFILE_SLOTS: Final[int] = 32
 
-_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-7a3d-9f0e-recruitment02")
+_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-4a3d-8f0e-000000000002")
 
 _DEFAULT_WEIGHTS: Final[Dict[str, float]] = {
     "years": 0.35,

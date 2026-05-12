@@ -65,7 +65,7 @@ _MAX_KEYWORDS: Final[int] = 24
 _MAX_MANDATORY_FIELDS: Final[int] = 32
 _MAX_METRIC_KEYS: Final[int] = 48
 
-_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-7a3d-9f0e-recruitment01")
+_EXECUTION_ID_NAMESPACE: Final[UUID] = UUID("018f3e2a-7c9b-4a3d-8f0e-000000000001")
 
 _ALLOWED_WORK_AUTH: Final[Tuple[str, ...]] = (
     "yes",
