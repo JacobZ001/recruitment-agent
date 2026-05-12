@@ -1,0 +1,89 @@
+# =============================================================================
+# BlueOcean Recruitment Agent — Python / runtime / local tooling
+# Source under schemas/, interfaces/, orchestrator/, runtime/, skills/, docs/, etc.
+# remains tracked; only caches, secrets, and machine-local outputs are excluded.
+# =============================================================================
+
+# --- Python bytecode & builds ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# --- Secrets & local environment (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Test / type / lint caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+coverage.xml
+htmlcov/
+.coverage
+.coverage.*
+.cache/
+
+# --- Logs & local runtime output ---
+*.log
+logs/
+**/logs/
+
+# --- Temporary replay / scratch outputs ---
+replay_output/
+replay_outputs/
+tmp/
+temp/
+*.tmp
+*.bak
+~$*
+
+# --- Local debug session artifacts (NDJSON / Cursor debug mode, etc.) ---
+debug-*.log
+**/debug-*.log
+
+# --- Operating system ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- IDE & editors (keep shared team settings via explicit `git add -f` if needed) ---
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Profiling ---
+*.prof

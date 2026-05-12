@@ -1,0 +1,2 @@
+# Canonical contracts (schemas, interfaces) depend on Pydantic.
+pydantic>=2.0,<3
