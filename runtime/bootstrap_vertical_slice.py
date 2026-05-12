@@ -1,0 +1,469 @@
+"""
+First runnable deterministic recruiter vertical-slice integration bootstrap.
+
+Orchestration bootstrap philosophy
+-----------------------------------
+This module is a **deliberately simple wiring harness**: it composes the transition
+engine, default pipeline registry, :class:`~orchestrator.vertical_slice_planner.VerticalSlicePlanner`,
+:class:`~orchestrator.orchestrator.Orchestrator`, in-memory bus/store, and bounded fake
+skills to prove the **event → validate → skills → state → emit** loop end-to-end. It is
+not a deployment entrypoint—no databases, brokers, LLMs, or async (see ``AGENTS.md``).
+
+Deterministic integration semantics
+-------------------------------------
+Fake and stub skills are **pure and synchronous**; the orchestrator remains the sole
+authority for validated transitions. Orchestrator emissions are captured by a small
+**collector publisher** so state can be committed **before** derived envelopes hit the
+bus—avoiding nested-dispatch seeing a stale store snapshot (see orchestrator ordering in
+``docs/architecture/tech_debt.md``). After each successful run, collected emissions are
+published to the in-memory bus in declaration order.
+
+Replay-safe workflow validation
+-------------------------------
+Callers may set ``ReplayContext`` on deliveries for replay harnesses; this bootstrap uses
+live-mode replay flags by default. State snapshots are deep-copied via
+:class:`~runtime.in_memory_state_store.InMemoryStateStore` so each successful orchestration
+commit replaces the snapshot explicitly.
+
+Why fake (and stub) skills exist
+---------------------------------
+Fake skills validate **control-plane wiring** and contracts before real cognition layers.
+Stub skills here cover planner slots not yet backed by dedicated fake modules
+(``candidate_created``, ``cv_parsed``, ``questionnaire_stage``) with minimal **audit-safe**
+success envelopes so the slice remains runnable without expanding scope.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+from uuid import UUID, uuid4, uuid5
+
+from interfaces.event_bus_interface import (
+    AckDecision,
+    DeliveryContext,
+    DeliveryStatus,
+    EventBusFailure,
+    EventEnvelope,
+    EventEnvelopeMetadata,
+    FailureCategory,
+    HandleAudit,
+    HandleResult,
+    PublishAudit,
+    PublishResult,
+    ReplayContext,
+    SubscriptionSelector,
+    SubscriptionSpec,
+)
+from interfaces.skill_interface import (
+    DeterminismClass,
+    DeterministicBoundary,
+    EvidenceKind,
+    EvidenceRef,
+    ExecutionAudit,
+    ExecutionContext,
+    ExecutionStatus,
+    ExecutionTiming,
+    Skill,
+    SkillExecutionResult,
+    SkillInputEnvelope,
+    SkillKind,
+    SkillMetadata,
+    SkillOutputEnvelope,
+)
+from orchestrator.orchestrator import (
+    OrchestrationContext,
+    OrchestrationExecutionResult,
+    Orchestrator,
+    orchestration_to_handle_result,
+)
+from orchestrator.vertical_slice_planner import (
+    SKILL_CANDIDATE_CREATED,
+    SKILL_CV_PARSED,
+    SKILL_CV_UPLOADED,
+    SKILL_QUESTIONNAIRE_STAGE,
+    VerticalSlicePlanner,
+)
+from runtime.in_memory_event_bus import InMemoryEventBus, SimpleEventSubscription
+from runtime.in_memory_state_store import InMemoryStateStore, InMemoryStateStoreConfig
+from schemas.state_schema import OrchestrationState, PipelinePhase, StateLink
+from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
+from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
+from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
+from skills.deterministic.fake_light_scoring_skill import FakeLightScoringSkill
+from state_machine.transition_engine import TransitionEngine, default_pipeline_registry
+
+_BOOT_NS = UUID("018f3e2a-7c9b-4a3d-8f0e-a11b00c0ffee")
+_FIXED_CLOCK = datetime(2026, 5, 12, 14, 0, 0, tzinfo=timezone.utc)
+_STUB_AUDIT_TIME = datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _state_id() -> UUID:
+    return uuid5(_BOOT_NS, "vertical_slice.orchestration_state")
+
+
+def _candidate_id() -> UUID:
+    return uuid5(_BOOT_NS, "vertical_slice.candidate_subject")
+
+
+def _dump_state_summary(state: OrchestrationState) -> str:
+    if hasattr(state, "model_dump"):
+        d = state.model_dump()
+    else:
+        d = state.dict()
+    return (
+        f"pipeline.phase={d.get('pipeline', {}).get('phase')} "
+        f"transitions={len(d.get('transitions', []))} "
+        f"state_id={d.get('id')}"
+    )
+
+
+def _summarize_skill_result(res: SkillExecutionResult) -> str:
+    meta = res.metadata
+    base = f"{meta.skill_name} status={res.status.value}"
+    if res.output and res.output.payload:
+        p = res.output.payload
+        if "scoring.deep.normalized_score" in p:
+            return f"{base} deep_score={p.get('scoring.deep.normalized_score')}"
+        if "scoring.normalized_score" in p:
+            return f"{base} score={p.get('scoring.normalized_score')}"
+        if "filter.decision" in p:
+            return f"{base} filter={p.get('filter.decision')}"
+        if p.get("stub"):
+            return f"{base} stub_path={p.get('planner_path')}"
+    return base
+
+
+class _EmissionCollector:
+    """
+    Captures orchestrator draft emissions synchronously.
+
+    The real bus is fed **after** the subscriber commits ``OrchestrationState`` so
+    downstream handlers observe the post-transition snapshot.
+    """
+
+    def __init__(self) -> None:
+        self._pending: List[EventEnvelope] = []
+
+    def publish(self, envelope: EventEnvelope) -> PublishResult:
+        self._pending.append(envelope)
+        audit = PublishAudit(publish_id=uuid4(), recorded_at=_FIXED_CLOCK, runtime="bootstrap.collector")
+        return PublishResult(status=DeliveryStatus.ACCEPTED, failure=None, audit=audit)
+
+    def drain(self) -> List[EventEnvelope]:
+        out = list(self._pending)
+        self._pending.clear()
+        return out
+
+
+class _StubVerticalSliceSkill:
+    """Minimal deterministic success skill for planner slots without dedicated fakes yet."""
+
+    metadata: SkillMetadata
+    _runtime_label: str
+
+    def __init__(self, *, skill_name: str, runtime_label: str) -> None:
+        self._runtime_label = runtime_label
+        self.metadata = SkillMetadata(
+            skill_name=skill_name,
+            skill_version="1.0.0",
+            kind=SkillKind.DETERMINISTIC,
+            boundary=DeterministicBoundary(
+                determinism_class=DeterminismClass.PURE_DETERMINISTIC,
+                kind=SkillKind.DETERMINISTIC,
+                requires_input_snapshot=False,
+                requires_output_snapshot=False,
+                requires_model_capture=False,
+            ),
+            description="Vertical-slice bootstrap stub (deterministic noop body).",
+            supports_dry_run=True,
+            supports_replay=True,
+            supports_idempotency=True,
+            tags=["vertical_slice", "stub"],
+        )
+
+    def execute(
+        self, skill_input: SkillInputEnvelope, context: ExecutionContext
+    ) -> SkillExecutionResult:
+        raw = (context.extensions or {}).get("orchestrator_skill_execution_id")
+        exec_id = UUID(str(raw)) if raw else uuid5(_BOOT_NS, f"{self.metadata.skill_name}|stub")
+        timing = ExecutionTiming(
+            started_at=_STUB_AUDIT_TIME,
+            ended_at=_STUB_AUDIT_TIME,
+            duration_ms=0,
+        )
+        audit = ExecutionAudit(
+            execution_id=exec_id,
+            recorded_at=_STUB_AUDIT_TIME,
+            runtime=self._runtime_label,
+            model_info={},
+            extensions={"stub_skill": True},
+        )
+        return SkillExecutionResult(
+            metadata=self.metadata,
+            status=ExecutionStatus.SUCCEEDED,
+            output=SkillOutputEnvelope(
+                payload={
+                    "stub": True,
+                    "ingested_event_id": skill_input.payload.get("ingested_event_id"),
+                    "planner_path": skill_input.payload.get("vertical_slice.planner_path"),
+                },
+                evidence_refs=[
+                    EvidenceRef(
+                        kind=EvidenceKind.STRUCTURED_RECORD,
+                        ref=f"structured://stub/{self.metadata.skill_name}",
+                        created_at=_STUB_AUDIT_TIME,
+                    )
+                ],
+            ),
+            timing=timing,
+            audit=audit,
+            metrics={"stub.executed": 1.0},
+        )
+
+
+def _skill_registry() -> Dict[str, Skill]:
+    return {
+        SKILL_CANDIDATE_CREATED: _StubVerticalSliceSkill(
+            skill_name=SKILL_CANDIDATE_CREATED,
+            runtime_label="runtime.stub.candidate_created",
+        ),
+        SKILL_CV_UPLOADED: FakeCvUploadedSkill(),
+        SKILL_CV_PARSED: _StubVerticalSliceSkill(
+            skill_name=SKILL_CV_PARSED,
+            runtime_label="runtime.stub.cv_parsed",
+        ),
+        FakeHardFilterSkill().metadata.skill_name: FakeHardFilterSkill(),
+        FakeLightScoringSkill().metadata.skill_name: FakeLightScoringSkill(),
+        FakeDeepScoringSkill().metadata.skill_name: FakeDeepScoringSkill(),
+        SKILL_QUESTIONNAIRE_STAGE: _StubVerticalSliceSkill(
+            skill_name=SKILL_QUESTIONNAIRE_STAGE,
+            runtime_label="runtime.stub.questionnaire_stage",
+        ),
+    }
+
+
+def _initial_state(*, state_id: UUID, candidate_id: UUID) -> OrchestrationState:
+    return OrchestrationState(
+        id=state_id,
+        links=[StateLink(kind="candidate", id=candidate_id, source="bootstrap_vertical_slice")],
+    )
+
+
+def _envelope(
+    *,
+    event_type: str,
+    candidate_id: UUID,
+    correlation_id: UUID,
+    occurred_at: datetime,
+    seq: int,
+) -> EventEnvelope:
+    eid = uuid5(_BOOT_NS, f"event:{event_type}:{seq}")
+    return EventEnvelope(
+        event_id=eid,
+        event_type=event_type,
+        occurred_at=occurred_at,
+        subject_id=candidate_id,
+        subject_kind="candidate",
+        payload={"bootstrap": True, "sequence": seq},
+        metadata=EventEnvelopeMetadata(
+            correlation_id=correlation_id,
+            causation_id=None,
+            actor_id="bootstrap_vertical_slice",
+        ),
+    )
+
+
+def _reject_handle(message: str) -> HandleResult:
+    audit = HandleAudit(handling_id=uuid4(), recorded_at=_FIXED_CLOCK, runtime="bootstrap_vertical_slice")
+    return HandleResult(
+        status=DeliveryStatus.REJECTED,
+        ack_decision=AckDecision.DROP,
+        failure=EventBusFailure(
+            category=FailureCategory.VALIDATION_ERROR,
+            message=message,
+            code="bootstrap_vertical_slice.store_precondition",
+        ),
+        audit=audit,
+    )
+
+
+def _fail_handle(message: str) -> HandleResult:
+    audit = HandleAudit(handling_id=uuid4(), recorded_at=_FIXED_CLOCK, runtime="bootstrap_vertical_slice")
+    return HandleResult(
+        status=DeliveryStatus.FAILED,
+        ack_decision=AckDecision.NACK,
+        failure=EventBusFailure(
+            category=FailureCategory.PERMANENT,
+            message=message,
+            code="bootstrap_vertical_slice.store_commit",
+        ),
+        audit=audit,
+    )
+
+
+@dataclass
+class _OrchestrationSubscriber:
+    """Invokes orchestrator, commits state, then fans out collected emissions to the bus."""
+
+    orchestrator: Orchestrator
+    store: InMemoryStateStore
+    state_id: UUID
+    bus: InMemoryEventBus
+    collector: _EmissionCollector
+    last_run: Optional[OrchestrationExecutionResult] = field(default=None, repr=False)
+    run_history: List[OrchestrationExecutionResult] = field(default_factory=list, repr=False)
+
+    def handle(self, envelope: EventEnvelope, context: DeliveryContext) -> HandleResult:
+        cur = self.store.get(self.state_id)
+        if not cur.ok or cur.snapshot is None or cur.meta is None:
+            return _reject_handle("orchestration snapshot missing before handle")
+
+        result = self.orchestrator.handle_event(
+            state=cur.snapshot,
+            envelope=envelope,
+            delivery=context,
+        )
+        self.last_run = result
+        self.run_history.append(result)
+
+        if result.ok and result.new_state is not None:
+            rep = self.store.replace(
+                self.state_id,
+                result.new_state,
+                expected_store_revision=cur.meta.store_revision,
+            )
+            if not rep.ok:
+                return _fail_handle(f"state store replace failed: {rep.failure}")
+
+            for em in self.collector.drain():
+                pr = self.bus.publish(em)
+                if pr.status != DeliveryStatus.ACCEPTED:
+                    return _fail_handle(f"emission publish failed for {em.event_type!r}")
+
+        return orchestration_to_handle_result(result)
+
+
+def run_vertical_slice_bootstrap(*, verbose: bool = True) -> OrchestrationState:
+    """
+    Wire bus + store + orchestrator and drive the default recruiter slice through ``deep_scored``.
+
+    Publishes the primary ingress sequence; ``questionnaire_requested`` is published after
+    ``light_scoring_completed`` once state has advanced (via the emission collector).
+    """
+    state_id = _state_id()
+    candidate_id = _candidate_id()
+    correlation_id = candidate_id
+
+    registry = default_pipeline_registry()
+    engine = TransitionEngine(registry)
+    planner = VerticalSlicePlanner()
+    bus = InMemoryEventBus()
+    collector = _EmissionCollector()
+    store = InMemoryStateStore(
+        InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK),
+    )
+
+    ctx = OrchestrationContext(
+        transition_engine=engine,
+        planner=planner,
+        skills=_skill_registry(),
+        publisher=collector,
+        rule_set_id="default_pipeline_registry",
+        updated_by="bootstrap_vertical_slice",
+    )
+    orchestrator = Orchestrator(ctx)
+
+    sub = _OrchestrationSubscriber(
+        orchestrator=orchestrator,
+        store=store,
+        state_id=state_id,
+        bus=bus,
+        collector=collector,
+    )
+    bus.register_subscription(
+        SimpleEventSubscription(
+            spec=SubscriptionSpec(
+                subscriber_id="vertical_slice.orchestrator",
+                subscription_id="bootstrap.vertical_slice.orchestrator",
+                selector=SubscriptionSelector(subject_kind="candidate"),
+            ),
+            handler=sub,
+        )
+    )
+
+    init = _initial_state(state_id=state_id, candidate_id=candidate_id)
+    created = store.create(init)
+    if not created.ok:
+        raise RuntimeError(f"state store create failed: {created.failure}")
+
+    primary_events = (
+        "candidate_created",
+        "cv_uploaded",
+        "cv_parsed",
+        "hard_filter_passed",
+        "light_scoring_completed",
+        "questionnaire_sent",
+        "questionnaire_completed",
+        "deep_scoring_completed",
+    )
+
+    if verbose:
+        print("=== BlueOcean vertical slice bootstrap (deterministic) ===")
+        print(f"initial {_dump_state_summary(created.snapshot)}")
+
+    seq = 0
+    history_offset = 0
+    for et in primary_events:
+        seq += 1
+        env = _envelope(
+            event_type=et,
+            candidate_id=candidate_id,
+            correlation_id=correlation_id,
+            occurred_at=_FIXED_CLOCK,
+            seq=seq,
+        )
+        pr = bus.publish(env)
+        if verbose:
+            print(f"\n-- publish {et!r} status={pr.status.value} event_id={env.event_id}")
+
+        if pr.status != DeliveryStatus.ACCEPTED:
+            raise RuntimeError(f"publish failed for {et!r}: {pr.failure}")
+
+        snap = store.get(state_id)
+        if not snap.ok or snap.snapshot is None:
+            raise RuntimeError("state missing after publish")
+        if verbose:
+            print(f"   state {_dump_state_summary(snap.snapshot)}")
+
+        new_runs = sub.run_history[history_offset:]
+        history_offset = len(sub.run_history)
+        if verbose and new_runs:
+            for idx, lr in enumerate(new_runs, start=1):
+                tag = f"orchestration_run[{idx}/{len(new_runs)}]"
+                print(f"   --- {tag} ok={lr.ok} ---")
+                if lr.decisions:
+                    for d in lr.decisions[-6:]:
+                        print(f"   decision {d.kind.value}: {d.message} code={d.code}")
+                if lr.skill_results:
+                    print("   skills:")
+                    for sr in lr.skill_results:
+                        print(f"      {_summarize_skill_result(sr)}")
+                if lr.produced_event_ids:
+                    print(f"   emitted_event_ids: {[str(x) for x in lr.produced_event_ids]}")
+
+    final = store.get(state_id)
+    if not final.ok or final.snapshot is None:
+        raise RuntimeError("final state missing")
+    if verbose:
+        print("\n=== final snapshot ===")
+        print(_dump_state_summary(final.snapshot))
+        print(f"terminal pipeline phase: {final.snapshot.pipeline.phase.value!r}")
+        if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
+            print("WARNING: expected deep_scored; check planner/registry alignment.")
+    return final.snapshot
+
+
+if __name__ == "__main__":
+    run_vertical_slice_bootstrap(verbose=True)
