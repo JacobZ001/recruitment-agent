@@ -35,6 +35,7 @@ from runtime.bootstrap_vertical_slice import (
     _FIXED_CLOCK,
 )
 from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
+from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 from schemas.state_schema import OrchestrationState
 
 
@@ -145,7 +146,12 @@ def create_app() -> FastAPI:
             occurred_at=_FIXED_CLOCK,
             seq=seq,
         )
-        merged_payload = _publish_payload_merge(dict(env.payload), body.payload, seq)
+        # Governance payloads use strict Pydantic models (``extra=forbid``). Do not merge
+        # bootstrap/bootstrap-sequence keys from :func:`_envelope` or they invalidate parsing.
+        if body.event_type in GOVERNANCE_EVENT_TYPES:
+            merged_payload = dict(body.payload)
+        else:
+            merged_payload = _publish_payload_merge(dict(env.payload), body.payload, seq)
         env = env.model_copy(update={"payload": merged_payload})
 
         pr = rt.bundle.bus.publish(env)

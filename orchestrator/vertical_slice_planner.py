@@ -70,6 +70,29 @@ for interface symmetry; this implementation ignores ``delivery`` except via futu
 extensions). Replay runs must supply the same envelopes and state snapshots the
 live slice would have observed at each step; the planner does not consult wall-clock
 time or external IO.
+
+Post-evaluation recruiter governance (bounded)
+-----------------------------------------------
+After ``deep_scored``, human progression uses **typed governance ingress** mapped to
+**default_pipeline_registry** edges with **explicit manual triggers** (no broad policy
+engine). Terminal pipeline phases are **``hired``** and **``inactive``** (see registry
+``terminal_states``).
+
+**Valid governance actions by current phase (slice contract)**
+
+- ``recruiter_approve_candidate``: ``deep_scored`` → ``shortlisted`` only (duplicate in
+  other phases → empty plan / orchestrator NOOP).
+- ``recruiter_schedule_interview``: ``shortlisted`` → ``interview_pending`` only.
+- ``recruiter_complete_interview``: ``interview_pending`` → ``interview_completed`` only.
+- ``recruiter_send_offer``: ``interview_completed`` → ``offer_sent`` only.
+- ``recruiter_mark_hired``: ``offer_sent`` → ``hired`` only.
+- ``recruiter_reject_candidate``: any non-terminal phase → ``inactive`` via
+  ``event:candidate_rejected``, except **no-op** when already ``inactive`` or ``hired``.
+
+Wrong-phase governance events produce an **empty plan** (deterministic NOOP; bus
+publish still succeeds). Invalid governance payloads fail parsing → empty plan. Illegal
+transitions are not emitted by the planner; ``recruiter_override_transition`` /
+``recruiter_force_transition`` remain a **separate** bounded escape hatch (whitelist).
 """
 
 from __future__ import annotations
@@ -215,6 +238,14 @@ class VerticalSlicePlanner:
             return self._plan_recruiter_approve_candidate(phase, envelope)
         if et == "recruiter_reject_candidate":
             return self._plan_recruiter_reject_candidate(phase, envelope)
+        if et == "recruiter_schedule_interview":
+            return self._plan_recruiter_schedule_interview(phase, envelope)
+        if et == "recruiter_complete_interview":
+            return self._plan_recruiter_complete_interview(phase, envelope)
+        if et == "recruiter_send_offer":
+            return self._plan_recruiter_send_offer(phase, envelope)
+        if et == "recruiter_mark_hired":
+            return self._plan_recruiter_mark_hired(phase, envelope)
         if et == "recruiter_override_transition":
             return self._plan_recruiter_override_transition(phase, envelope, force_human_override=False)
         if et == "recruiter_force_transition":
@@ -527,6 +558,9 @@ class VerticalSlicePlanner:
             return OrchestrationPlan()
         if phase == PipelinePhase.INACTIVE:
             return OrchestrationPlan()
+        # Terminal success: deterministic NOOP (leaving ``hired`` would require explicit override policy).
+        if phase == PipelinePhase.HIRED:
+            return OrchestrationPlan()
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
@@ -541,6 +575,95 @@ class VerticalSlicePlanner:
                     decision_code="GOVERNANCE_REJECT_CANDIDATE",
                 ),
             ),
+        )
+
+    def _governance_manual_pipeline_step(
+        self,
+        *,
+        phase: PipelinePhase,
+        envelope: EventEnvelope,
+        from_phase: PipelinePhase,
+        to_phase: PipelinePhase,
+        trigger: str,
+        event_type: str,
+        decision_code: str,
+    ) -> OrchestrationPlan:
+        try:
+            gov = parse_governance_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        if phase != from_phase:
+            return OrchestrationPlan()
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=from_phase.value,
+                to_state=to_phase.value,
+                trigger=trigger,
+                human_override=False,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=governance_record_extensions(
+                    event_type=event_type,
+                    gov=gov,
+                    decision_code=decision_code,
+                ),
+            ),
+        )
+
+    def _plan_recruiter_schedule_interview(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``shortlisted_to_interview_pending``."""
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.SHORTLISTED,
+            to_phase=PipelinePhase.INTERVIEW_PENDING,
+            trigger="manual_recruiter_schedule_interview",
+            event_type="recruiter_schedule_interview",
+            decision_code="GOVERNANCE_SCHEDULE_INTERVIEW",
+        )
+
+    def _plan_recruiter_complete_interview(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``interview_pending_to_completed``."""
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.INTERVIEW_PENDING,
+            to_phase=PipelinePhase.INTERVIEW_COMPLETED,
+            trigger="manual_recruiter_complete_interview",
+            event_type="recruiter_complete_interview",
+            decision_code="GOVERNANCE_COMPLETE_INTERVIEW",
+        )
+
+    def _plan_recruiter_send_offer(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``interview_completed_to_offer_sent``."""
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.INTERVIEW_COMPLETED,
+            to_phase=PipelinePhase.OFFER_SENT,
+            trigger="manual_recruiter_send_offer",
+            event_type="recruiter_send_offer",
+            decision_code="GOVERNANCE_SEND_OFFER",
+        )
+
+    def _plan_recruiter_mark_hired(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        """Registry: ``offer_sent_to_hired``."""
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.OFFER_SENT,
+            to_phase=PipelinePhase.HIRED,
+            trigger="manual_recruiter_mark_hired",
+            event_type="recruiter_mark_hired",
+            decision_code="GOVERNANCE_MARK_HIRED",
         )
 
     def _plan_recruiter_override_transition(

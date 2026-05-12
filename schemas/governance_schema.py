@@ -86,6 +86,10 @@ class GovernanceOverrideIngressPayload(GovernanceIngressPayload):
 GOVERNANCE_EVENT_TYPES: Tuple[str, ...] = (
     "recruiter_approve_candidate",
     "recruiter_reject_candidate",
+    "recruiter_schedule_interview",
+    "recruiter_complete_interview",
+    "recruiter_send_offer",
+    "recruiter_mark_hired",
     "recruiter_override_transition",
     "recruiter_force_transition",
 )

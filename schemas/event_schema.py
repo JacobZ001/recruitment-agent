@@ -71,6 +71,10 @@ class EventType(str, Enum):
     # Human governance (immutable ingress; deterministic planner interprets)
     RECRUITER_APPROVE_CANDIDATE = "recruiter_approve_candidate"
     RECRUITER_REJECT_CANDIDATE = "recruiter_reject_candidate"
+    RECRUITER_SCHEDULE_INTERVIEW = "recruiter_schedule_interview"
+    RECRUITER_COMPLETE_INTERVIEW = "recruiter_complete_interview"
+    RECRUITER_SEND_OFFER = "recruiter_send_offer"
+    RECRUITER_MARK_HIRED = "recruiter_mark_hired"
     RECRUITER_OVERRIDE_TRANSITION = "recruiter_override_transition"
     RECRUITER_FORCE_TRANSITION = "recruiter_force_transition"
 

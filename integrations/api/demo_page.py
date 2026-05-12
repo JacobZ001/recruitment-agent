@@ -37,6 +37,10 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
         **gov_payload_approve,
         "reason": "Demo recruiter rejection (deterministic governance ingress).",
     }
+    gov_post = {
+        **gov_payload_approve,
+        "reason": "Demo post-evaluation recruiter action (deterministic governance ingress).",
+    }
 
     skills_block = esc(json.dumps(summaries, indent=2, sort_keys=True))
 
@@ -75,9 +79,14 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
 
   <h2>Governance (via event bus)</h2>
   <p>These buttons POST JSON to <code>/events</code> with typed governance payloads (no direct state mutation).</p>
-  <p>Typical sequence: run the primary progression (e.g. <code>POST /demo/run</code> or stepped <code>POST /events</code>), then approve from <code>deep_scored</code>.</p>
+  <p>After <code>deep_scored</code>: approve → <code>shortlisted</code>, then schedule interview → complete → send offer → mark hired (each step only valid in the matching phase; wrong phase = deterministic NOOP).</p>
+  <p>Typical sequence: <code>POST /demo/run</code> (or stepped <code>POST /events</code>), then use the buttons below in order.</p>
   <button type="button" id="btn-run">POST /demo/run</button>
   <button type="button" id="btn-approve">recruiter_approve_candidate</button>
+  <button type="button" id="btn-schedule">recruiter_schedule_interview</button>
+  <button type="button" id="btn-complete">recruiter_complete_interview</button>
+  <button type="button" id="btn-offer">recruiter_send_offer</button>
+  <button type="button" id="btn-hired">recruiter_mark_hired</button>
   <button type="button" id="btn-reject">recruiter_reject_candidate</button>
   <p id="status"></p>
 
@@ -92,6 +101,7 @@ curl -s -X POST http://127.0.0.1:8000/events -H "Content-Type: application/json"
     const candidateId = {json.dumps(cid)};
     const govApprove = {json.dumps(gov_payload_approve)};
     const govReject = {json.dumps(gov_payload_reject)};
+    const govPost = {json.dumps(gov_post)};
     async function postEvent(eventType, payload) {{
       const r = await fetch('/events', {{
         method: 'POST',
@@ -109,6 +119,10 @@ curl -s -X POST http://127.0.0.1:8000/events -H "Content-Type: application/json"
       location.reload();
     }};
     document.getElementById('btn-approve').onclick = () => postEvent('recruiter_approve_candidate', govApprove);
+    document.getElementById('btn-schedule').onclick = () => postEvent('recruiter_schedule_interview', govPost);
+    document.getElementById('btn-complete').onclick = () => postEvent('recruiter_complete_interview', govPost);
+    document.getElementById('btn-offer').onclick = () => postEvent('recruiter_send_offer', govPost);
+    document.getElementById('btn-hired').onclick = () => postEvent('recruiter_mark_hired', govPost);
     document.getElementById('btn-reject').onclick = () => postEvent('recruiter_reject_candidate', govReject);
   </script>
 </body>

@@ -57,6 +57,34 @@ def test_post_demo_run_twice_returns_409(client: TestClient) -> None:
     assert r2.status_code == 409
 
 
+_GOVERNANCE_PAYLOAD = {
+    "actor_id": "api-test-recruiter",
+    "actor_type": "recruiter",
+    "reason": "API deterministic governance test",
+    "evidence_refs": ["artifact://api/test"],
+}
+
+
+def test_api_post_governance_hire_ladder_updates_phase_and_timeline(client: TestClient) -> None:
+    cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    assert client.post("/demo/run").status_code == 200
+    for et in (
+        "recruiter_approve_candidate",
+        "recruiter_schedule_interview",
+        "recruiter_complete_interview",
+        "recruiter_send_offer",
+        "recruiter_mark_hired",
+    ):
+        r = client.post("/events", json={"event_type": et, "payload": dict(_GOVERNANCE_PAYLOAD)})
+        assert r.status_code == 200
+        assert r.json()["ingress_accepted"] is True
+    st = client.get(f"/state/{cid}").json()
+    assert st["pipeline_phase"] == PipelinePhase.HIRED.value
+    tl = client.get(f"/timeline/{cid}").json()["timeline_text"]
+    assert "GOVERNANCE_MARK_HIRED" in tl
+    assert "final.pipeline.phase=hired" in tl
+
+
 def test_demo_html_contains_profile_phase_timeline_and_scores(client: TestClient) -> None:
     client.post("/demo/run")
     html = client.get("/demo").text
@@ -64,3 +92,5 @@ def test_demo_html_contains_profile_phase_timeline_and_scores(client: TestClient
     assert "deep_scored" in html
     assert "workflow timeline" in html
     assert "hard_filter" in html or "filter decision" in html
+    assert "recruiter_schedule_interview" in html
+    assert "recruiter_mark_hired" in html
