@@ -175,20 +175,20 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 ## Execution Architecture
 
 ### Future orchestration replay tooling
-- **Status**: OPEN
+- **Status**: IN_PROGRESS
 - **Introduced in**: 2026-05-08
-- **Last reviewed**: 2026-05-08
-- **Current decision**: Store immutable events and correlation/causation ids; do not build replay tooling yet.
-- **Rationale**: Tooling is expensive; first stabilize contracts and deterministic state transitions.
-- **Future impact**: Harder debugging/timeline reconstruction at scale without replay automation.
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Immutable events + correlation/causation ids remain the persistence contract target. **Not resolved**: no durable stream “replay runner” or operator-facing replay products yet. **In progress**: synchronous **structural replay harnesses** under ``tests/replay/`` exercise the vertical slice end-to-end (happy path byte-stable JSON equality; deterministic negative-path cases including transition rejection, missing skill registration, ``hard_filter_failed`` closure, and bus handler-exception isolation). These prove orchestrator + bus + transition-engine wiring **before** storage-backed replay.
+- **Rationale**: Tooling is expensive; stabilize contracts and deterministic transitions first. Harness-first replay validates control-plane semantics without implying production persistence.
+- **Future impact**: Until a stream-backed runner exists, cross-process and post-mortem reconstruction still rely on explicit logging discipline; harness coverage does not replace durable timelines.
 - **Priority**: High
-- **Recommended future direction**: Build a “replay runner” that rehydrates `OrchestrationState` from an event stream with strict validation and deterministic logs.
+- **Recommended future direction**: Build a “replay runner” that rehydrates `OrchestrationState` from an **append-only event stream** with strict validation and deterministic logs; extend harness assertions toward **semantic** and **governance** profiles (see “Replay validation evolution”) rather than only full JSON equality.
 
 ### Replay validation evolution (structural vs semantic equality)
 - **Status**: OPEN
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
-- **Current decision**: The vertical-slice replay harness (`tests/replay/test_vertical_slice_replay.py`) intentionally asserts **strict structural replay equality**: canonical ingress is driven twice through independently wired runtimes, and artifacts are compared via **deterministic, byte-stable JSON serialization** of final `OrchestrationState`, full `OrchestrationExecutionResult` histories, bus-published `EventEnvelope` timelines, explicit scoring/filter extracts, and orchestration decision traces. This is the **first architecture-confidence layer** for the synchronous orchestration runtime: it proves stable identifiers, clocks, and bounded execution paths before layering richer semantics.
+- **Current decision**: Phase 3 workflow validation uses **strict structural replay equality** as the default gate: canonical ingress is driven through independently wired runtimes and artifacts are compared via **deterministic, byte-stable JSON serialization** where applicable (`tests/replay/test_vertical_slice_replay.py` happy path; negative-path cases in `tests/replay/test_vertical_slice_negative_paths.py` pin stable failure semantics—transition rejection, missing skill, slice closure on ``hard_filter_failed``, bus synthetic handler failures). This intentionally treats observability-shaped fields as part of the contract **while** harness surface area remains small. **Future**: the same suite must evolve toward **layered** assertions—**structural** (workflow facts), **semantic** (normalized projections / tolerances), **governance/audit** (operator timelines)—so instrumentation can grow without false-positive harness churn (see Future impact below).
 - **Rationale**: Early validation should maximize signal per test run and catch unintended drift in control-plane wiring. Structural equality over full serialized artifacts is the simplest contract when instrumentation surface area is small and deterministic-first semantics are the primary product.
 - **Future impact**:
   - **Observability / tracing metadata** will evolve on timelines **independent of workflow semantics** (spans, host labels, sampling flags). If replay tests remain strict JSON equality over entire execution results, **benign instrumentation changes will fail tests** unrelated to orchestration correctness.
@@ -202,7 +202,7 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Recommended future direction** (preserve **deterministic-first** orchestration, **replay/audit** primacy, **bounded** runtime semantics):
   - Define **explicit replay assertion profiles** (e.g. `structural_strict`, `semantic_workflow`, `audit_timeline`) and map harness tests to profiles as the runtime grows.
   - Partition persisted/captured models into **workflow facts** vs **diagnostic overlays**; tests compare facts by default; overlays opt-in or snapshot selectively.
-  - Add targeted suites for **failure** and **partial-success** paths once planner/registry scenarios exist; keep success-path structural harness as the regression anchor.
+  - Expand **failure** and **partial-success** replay profiles beyond the initial negative-path bundle; keep strict structural harness as the regression anchor until semantic projection helpers land.
   - Coordinate with **schema versioning** and **policy pack versioning** entries: replay fixtures pin `(schema_version, rule_set_id)` and document intentional upgrade breaks vs drift bugs.
   - For future concurrency: specify **ordering contracts** and replay scopes (single aggregate vs multi-tenant isolation)—without implying premature production posture.
 
@@ -296,12 +296,12 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Replay-safe recovery semantics**: deterministic reconciliation jobs and harness-defined rules for “continue from last acknowledged emission” vs. full segment replay.
 
 ### Planner determinism verification harness
-- **Status**: OPEN
+- **Status**: IN_PROGRESS
 - **Introduced in**: 2026-05-11
-- **Last reviewed**: 2026-05-11
-- **Current decision**: `OrchestrationStepPlanner` implementations are **expected** to be deterministic, pure policy code (no LLM routing, no autonomous workflow control). The orchestrator **does not verify** that property; it consumes the plan by contract only.
-- **Rationale**: Centralizing planner analysis in the orchestrator would blur the boundary between execution and policy, and meaningful checks (entropy, IO, clocks) require dedicated harness infrastructure not justified until planner modules multiply and stabilize.
-- **Future impact**: A nondeterministic or environment-coupled planner undermines replay guarantees, audit explainability, and test stability without failing fast at the boundary.
+- **Last reviewed**: 2026-05-12
+- **Current decision**: `OrchestrationStepPlanner` implementations are **expected** to be deterministic, pure policy code (no LLM routing, no autonomous workflow control). The orchestrator **does not verify** that property directly. **Partial coverage**: vertical-slice workflow replay (happy + negative paths) exercises **VerticalSlicePlanner** outputs **indirectly** via orchestration results and transition outcomes under fixed envelopes—strong signal for wiring drift, **not** a substitute for planner-isolated property tests or banned-API lint.
+- **Rationale**: Centralizing planner analysis in the orchestrator would blur the boundary between execution and policy; dedicated planner harnesses were deferred until planner modules multiply. Replay tests now provide an interim integration guardrail.
+- **Future impact**: A nondeterministic or environment-coupled planner still undermines replay guarantees if bugs hide behind coincidentally stable scenarios; dedicated planner tests remain valuable.
 - **Priority**: Low
 - **Recommended future direction**: Add engineering guardrails as planners grow:
   - **Deterministic replay harnesses**: fixed seeds, frozen clocks, recorded envelopes → expect bit-for-bit stable plans or stable normalized plan hashes where appropriate.
