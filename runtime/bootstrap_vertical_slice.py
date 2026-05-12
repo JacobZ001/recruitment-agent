@@ -592,4 +592,4 @@ def run_vertical_slice_bootstrap(
 
 
 if __name__ == "__main__":
-    run_vertical_slice_bootstrap(verbose=True)
+    run_vertical_slice_bootstrap(verbose=True,print_timeline=True)
