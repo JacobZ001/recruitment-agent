@@ -80,3 +80,15 @@ class DemoRunResponse(BaseModel):
 
     message: str
     state_summary: StateSummaryResponse
+
+
+class AdminResetResponse(BaseModel):
+    """Result of ``POST /admin/reset`` (development convenience; no authentication)."""
+
+    status: str = "ok"
+    message: str = "vertical slice reset to bootstrap initial state"
+    store_revision: int
+    pipeline_phase: str
+    sqlite_tables_cleared: bool = Field(
+        description="True when SQLite orchestration tables were truncated before re-seeding.",
+    )

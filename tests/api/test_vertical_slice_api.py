@@ -14,7 +14,7 @@ from schemas.state_schema import PipelinePhase
 
 @pytest.fixture
 def client() -> TestClient:
-    with TestClient(create_app()) as c:
+    with TestClient(create_app(db_path="")) as c:
         yield c
 
 
@@ -88,3 +88,52 @@ def test_post_events_wrong_candidate_returns_404(client: TestClient) -> None:
         },
     )
     assert r.status_code == 404
+
+
+def test_admin_reset_in_memory_restores_new(client: TestClient) -> None:
+    cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    client.post("/events", json={"event_type": "candidate_created"})
+    client.post("/events", json={"event_type": "cv_uploaded"})
+    assert (
+        client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
+    )
+
+    r = client.post("/admin/reset")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["sqlite_tables_cleared"] is False
+    assert body["pipeline_phase"] == PipelinePhase.NEW.value
+
+    assert client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.NEW.value
+
+
+def test_admin_reset_sqlite_truncates_and_restores(tmp_path) -> None:
+    import sqlite3
+
+    db = tmp_path / "reset.db"
+    cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    with TestClient(create_app(db_path=str(db))) as client:
+        client.post("/events", json={"event_type": "candidate_created"})
+        client.post("/events", json={"event_type": "cv_uploaded"})
+        assert (
+            client.get(f"/state/{cid}").json()["pipeline_phase"]
+            == PipelinePhase.CV_RECEIVED.value
+        )
+
+        r = client.post("/admin/reset")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["sqlite_tables_cleared"] is True
+        assert body["pipeline_phase"] == PipelinePhase.NEW.value
+        assert body["store_revision"] == 1
+
+        conn = sqlite3.connect(str(db))
+        assert conn.execute("SELECT COUNT(*) FROM orchestration_state").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM state_transition_audit").fetchone()[0] == 0
+        conn.close()
+
+        client.post("/events", json={"event_type": "candidate_created"})
+        assert (
+            client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.NEW.value
+        )

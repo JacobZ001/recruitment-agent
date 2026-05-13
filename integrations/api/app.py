@@ -8,7 +8,9 @@ No workflow policy or direct state mutation here.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -18,6 +20,7 @@ from fastapi.responses import HTMLResponse
 from integrations.api.demo_page import build_demo_recruiter_html
 from integrations.api.demo_summary import vertical_slice_demo_skill_summaries
 from integrations.api.schemas_http import (
+    AdminResetResponse,
     DemoCandidateResponse,
     DemoRunResponse,
     EventIngressResponse,
@@ -27,6 +30,7 @@ from integrations.api.schemas_http import (
     VerticalSliceIngressEventBody,
 )
 from integrations.api.session import DemoRunPreconditionError, VerticalSliceApiRuntime
+from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from interfaces.event_bus_interface import DeliveryStatus
 from runtime.bootstrap_vertical_slice import (
     VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
@@ -99,10 +103,34 @@ def get_runtime(request: Request) -> VerticalSliceApiRuntime:
     return rt
 
 
-def create_app() -> FastAPI:
+DEFAULT_VERTICAL_SLICE_DB_PATH = "data/app.db"
+
+
+def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
+    """SQLite file path, or ``None`` for in-memory store.
+
+    Unless ``explicit`` is passed to :func:`create_app`, reads ``VERTICAL_SLICE_DB_PATH``:
+    unset → ``data/app.db``; empty string → in-memory.
+    """
+    if explicit is not None:
+        s = explicit.strip()
+        return s if s else None
+    raw = os.environ.get("VERTICAL_SLICE_DB_PATH")
+    if raw is None:
+        return DEFAULT_VERTICAL_SLICE_DB_PATH
+    s = raw.strip()
+    return None if s == "" else s
+
+
+def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.vertical_slice = VerticalSliceApiRuntime()
+        resolved = _resolve_vertical_slice_db_path(db_path)
+        if resolved:
+            Path(resolved).parent.mkdir(parents=True, exist_ok=True)
+            app.state.vertical_slice = VerticalSliceApiRuntime(db_path=resolved)
+        else:
+            app.state.vertical_slice = VerticalSliceApiRuntime()
         yield
 
     app = FastAPI(
@@ -112,12 +140,32 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
+    def health(request: Request) -> HealthResponse:
+        rt = getattr(request.app.state, "vertical_slice", None)
+        if rt is None:
+            runtime_key = "vertical_slice_not_initialized"
+        elif isinstance(rt.bundle.store, SQLiteStateStore):
+            runtime_key = "vertical_slice_sqlite_sync"
+        else:
+            runtime_key = "vertical_slice_in_memory_sync"
         return HealthResponse(
             status="ok",
-            runtime="vertical_slice_in_memory_sync",
+            runtime=runtime_key,
             sync=True,
             auth="none",
+        )
+
+    @app.post("/admin/reset", response_model=AdminResetResponse, tags=["admin"])
+    def admin_reset(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> AdminResetResponse:
+        """Development-only: wipe persisted orchestration rows (SQLite) and restore bootstrap ``NEW`` state."""
+        try:
+            result = rt.dev_reset_to_bootstrap_initial()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return AdminResetResponse(
+            store_revision=result.store_revision,
+            pipeline_phase=result.pipeline_phase,
+            sqlite_tables_cleared=result.sqlite_tables_cleared,
         )
 
     @app.post("/events", response_model=EventIngressResponse)

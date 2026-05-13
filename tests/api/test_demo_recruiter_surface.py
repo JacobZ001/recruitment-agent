@@ -14,7 +14,7 @@ from schemas.state_schema import PipelinePhase
 
 @pytest.fixture
 def client() -> TestClient:
-    with TestClient(create_app()) as c:
+    with TestClient(create_app(db_path="")) as c:
         yield c
 
 

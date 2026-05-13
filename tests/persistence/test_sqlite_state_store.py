@@ -177,3 +177,21 @@ def test_wire_vertical_slice_sqlite_survives_reload(tmp_path) -> None:
     assert fin.ok and fin.snapshot is not None
     assert fin.snapshot.pipeline.phase == PipelinePhase.DEEP_SCORED
     store2.close()
+
+
+def test_wire_vertical_slice_sqlite_second_process_reuses_row(tmp_path) -> None:
+    """Same DB + deterministic ids: second wire must not fail on ALREADY_EXISTS."""
+    db = tmp_path / "restart.db"
+    cfg = InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK)
+    store1 = SQLiteStateStore(str(db), config=cfg)
+    b1 = wire_vertical_slice_runtime(bus=RecordingInMemoryEventBus(), store=store1)
+    sid = b1.state_id
+    store1.close()
+
+    store2 = SQLiteStateStore(str(db), config=cfg)
+    b2 = wire_vertical_slice_runtime(bus=RecordingInMemoryEventBus(), store=store2)
+    assert b2.state_id == sid
+    got = store2.get(sid)
+    assert got.ok and got.snapshot is not None
+    assert got.snapshot.pipeline.phase == PipelinePhase.NEW
+    store2.close()

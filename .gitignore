@@ -46,6 +46,9 @@ htmlcov/
 logs/
 **/logs/
 
+# --- Local SQLite (integrations API default: data/app.db) ---
+data/*.db
+
 # --- Temporary replay / scratch outputs ---
 replay_output/
 replay_outputs/

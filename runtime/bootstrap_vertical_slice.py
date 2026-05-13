@@ -86,7 +86,11 @@ from orchestrator.vertical_slice_planner import (
     VerticalSlicePlanner,
 )
 from runtime.in_memory_event_bus import InMemoryEventBus, SimpleEventSubscription
-from runtime.in_memory_state_store import InMemoryStateStore, InMemoryStateStoreConfig
+from runtime.in_memory_state_store import (
+    InMemoryStateStore,
+    InMemoryStateStoreConfig,
+    StateStoreFailureCode,
+)
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from schemas.state_schema import (
     OrchestrationState,
@@ -374,8 +378,19 @@ def wire_vertical_slice_runtime(
     init = _initial_state(state_id=state_id, candidate_id=candidate_id, occurred_at=_FIXED_CLOCK)
     created = use_store.create(init)
     if not created.ok:
-        raise RuntimeError(f"state store create failed: {created.failure}")
-
+        if (
+            created.failure is not None
+            and created.failure.code == StateStoreFailureCode.ALREADY_EXISTS
+        ):
+            got = use_store.get(state_id)
+            if not got.ok or got.snapshot is None:
+                raise RuntimeError(
+                    f"state store already_exists but get failed: {got.failure}"
+                )
+            # Persisted file (e.g. SQLite): same deterministic aggregate id across restarts.
+        else:
+            raise RuntimeError(f"state store create failed: {created.failure}")
+    
     return VerticalSliceRuntimeBundle(
         bus=use_bus,
         store=use_store,
