@@ -172,6 +172,38 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - **Explainable contextual weighting semantics**: documented formulas and UI-safe labels distinguishing **declared evidence** vs **stage priors** vs **neutral fillers**.
   - **Deterministic workflow-context scoring calibration**: explicit calibration tables (deterministic transforms only) and tests that pin expected scores for canonical fixture payloads.
 
+## Persistence (SQLite)
+
+### SQLite replace uses DELETE + INSERT instead of UPSERT
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``runtime/persistence/sqlite_state_store.py`` implements ``replace`` by deleting the ``orchestration_state`` row for ``state_id``, then re-inserting snapshot + indexes + audit in one transaction. Behavior matches optimistic revision semantics and is correct for the single-row model.
+- **Rationale**: Straightforward correctness over micro-optimization while the SQLite adapter is new.
+- **Future impact**: Extra churn vs a pure ``INSERT ... ON CONFLICT(state_id) DO UPDATE`` path (fewer round-trips, clearer upsert story).
+- **Priority**: Low
+- **Recommended future direction**: Refactor ``replace`` to rely on **UPSERT-only** updates for ``orchestration_state`` while preserving revision monotonicity and candidate/audit rewrite semantics—still transactional; add harness tests if assertion shapes change.
+
+### Transition audit serialization contract
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``state_transition_audit`` rows are derived from ``snapshot.transitions`` with ad-hoc field mapping (``extensions`` as JSON, actor/event columns). The **canonical** source of truth remains ``orchestration_state.snapshot_json``; the audit table is a non-authoritative mirror.
+- **Rationale**: Ship bounded operator/debug visibility without freezing a second schema contract on day one.
+- **Future impact**: Drift between reloaded ``OrchestrationState`` transition models and stored audit columns if ``StateTransitionRecord`` evolves; external tools reading only audit may misinterpret history.
+- **Priority**: Low
+- **Recommended future direction**: Define a **stable serialization boundary** (versioned columns or a single JSON blob per row with a ``record_schema_version``) for persisted transition mirrors; keep snapshot JSON authoritative; document read paths.
+
+### Persistence write concurrency model
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``SQLiteStateStore`` uses ``check_same_thread=False`` on the connection; **no** internal lock. Callers (e.g. FastAPI) are assumed to **serialize** writes to the store or accept undefined interleaving.
+- **Rationale**: Matches the current **single-aggregate** reference API posture; avoids hiding correctness issues behind a store lock before concurrency requirements are explicit.
+- **Future impact**: Concurrent ``replace`` / ``create`` on the same DB from multiple threads can race; last-writer-wins or sqlite errors may surface without a clear product contract.
+- **Priority**: Medium
+- **Recommended future direction**: Document **concurrency guarantees** (per-process, per-aggregate, or “external lock required”); or introduce a small **write lock** / queue abstraction around the store for multi-threaded hosts; consider WAL + timeout policy when load grows.
+
 ## Execution Architecture
 
 ### Future orchestration replay tooling

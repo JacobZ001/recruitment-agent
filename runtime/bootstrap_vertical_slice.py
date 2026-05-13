@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from uuid import UUID, uuid4, uuid5
 
 from interfaces.event_bus_interface import (
@@ -87,6 +87,7 @@ from orchestrator.vertical_slice_planner import (
 )
 from runtime.in_memory_event_bus import InMemoryEventBus, SimpleEventSubscription
 from runtime.in_memory_state_store import InMemoryStateStore, InMemoryStateStoreConfig
+from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from schemas.state_schema import (
     OrchestrationState,
     PipelinePhase,
@@ -286,12 +287,15 @@ PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
 VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES
 
 
+StateStoreLike = Union[InMemoryStateStore, SQLiteStateStore]
+
+
 @dataclass
 class VerticalSliceRuntimeBundle:
     """Wired transition engine + orchestrator + bus/store for integration and replay tests."""
 
     bus: InMemoryEventBus
-    store: InMemoryStateStore
+    store: StateStoreLike
     state_id: UUID
     candidate_id: UUID
     correlation_id: UUID
@@ -304,12 +308,18 @@ def wire_vertical_slice_runtime(
     clock: Optional[Callable[[], datetime]] = None,
     skills: Optional[Mapping[str, Skill]] = None,
     planner: Optional[VerticalSlicePlanner] = None,
+    store: Optional[StateStoreLike] = None,
 ) -> VerticalSliceRuntimeBundle:
     """
     Compose the same runtime as :func:`run_vertical_slice_bootstrap` without publishing events.
 
-    ``clock`` bounds state-store revision timestamps; ingress envelopes use
+    ``clock`` bounds state-store revision timestamps when creating the default
+    :class:`~runtime.in_memory_state_store.InMemoryStateStore`; ingress envelopes use
     :data:`_FIXED_CLOCK` via :func:`_envelope`.
+
+    Pass ``store`` to use :class:`~runtime.persistence.sqlite_state_store.SQLiteStateStore`
+    or a preconfigured in-memory store; when set, ``clock`` is ignored for store creation
+    (the store's own config supplies the clock).
 
     Pass ``skills`` and/or ``planner`` to exercise alternate registries or planner policy
     in harness tests (defaults match the CLI vertical slice).
@@ -324,9 +334,12 @@ def wire_vertical_slice_runtime(
     use_bus = bus or InMemoryEventBus()
     collector = _EmissionCollector()
     tick = clock or (lambda: _FIXED_CLOCK)
-    store = InMemoryStateStore(
-        InMemoryStateStoreConfig(clock=tick),
-    )
+    if store is not None:
+        use_store = store
+    else:
+        use_store = InMemoryStateStore(
+            InMemoryStateStoreConfig(clock=tick),
+        )
 
     skill_map: Dict[str, Skill] = dict(skills) if skills is not None else _skill_registry()
 
@@ -342,7 +355,7 @@ def wire_vertical_slice_runtime(
 
     sub = _OrchestrationSubscriber(
         orchestrator=orchestrator,
-        store=store,
+        store=use_store,
         state_id=state_id,
         bus=use_bus,
         collector=collector,
@@ -359,13 +372,13 @@ def wire_vertical_slice_runtime(
     )
 
     init = _initial_state(state_id=state_id, candidate_id=candidate_id, occurred_at=_FIXED_CLOCK)
-    created = store.create(init)
+    created = use_store.create(init)
     if not created.ok:
         raise RuntimeError(f"state store create failed: {created.failure}")
 
     return VerticalSliceRuntimeBundle(
         bus=use_bus,
-        store=store,
+        store=use_store,
         state_id=state_id,
         candidate_id=candidate_id,
         correlation_id=correlation_id,
@@ -564,7 +577,7 @@ class _OrchestrationSubscriber:
     """Invokes orchestrator, commits state, then fans out collected emissions to the bus."""
 
     orchestrator: Orchestrator
-    store: InMemoryStateStore
+    store: StateStoreLike
     state_id: UUID
     bus: InMemoryEventBus
     collector: _EmissionCollector

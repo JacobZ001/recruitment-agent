@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Optional
 from uuid import UUID
 
 from orchestrator.vertical_slice_planner import VerticalSlicePlanner
@@ -11,6 +12,8 @@ from runtime.bootstrap_vertical_slice import (
     drive_vertical_slice_primary_sequence,
     wire_vertical_slice_runtime,
 )
+from runtime.in_memory_state_store import InMemoryStateStoreConfig
+from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from runtime.recording_event_bus import RecordingInMemoryEventBus
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
@@ -27,11 +30,19 @@ class VerticalSliceApiRuntime:
     ``VERTICAL_SLICE_DEFAULT_CANDIDATE_ID``.
     """
 
-    def __init__(self) -> None:
-        self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
-            bus=RecordingInMemoryEventBus(),
-            planner=VerticalSlicePlanner(demo_skill_context=True),
-        )
+    def __init__(self, *, db_path: Optional[str] = None) -> None:
+        if db_path is not None:
+            sql_store = SQLiteStateStore(db_path, config=InMemoryStateStoreConfig())
+            self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
+                bus=RecordingInMemoryEventBus(),
+                planner=VerticalSlicePlanner(demo_skill_context=True),
+                store=sql_store,
+            )
+        else:
+            self.bundle = wire_vertical_slice_runtime(
+                bus=RecordingInMemoryEventBus(),
+                planner=VerticalSlicePlanner(demo_skill_context=True),
+            )
         self._seq = 0
         self._lock = threading.Lock()
 
