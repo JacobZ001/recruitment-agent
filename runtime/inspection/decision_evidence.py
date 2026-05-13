@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from interfaces.event_bus_interface import EventEnvelope
 from interfaces.skill_interface import EvidenceRef, SkillExecutionResult
 from orchestrator.orchestrator import OrchestrationExecutionResult
+from orchestrator.vertical_slice_planner import (
+    SKILL_DEEP_SCORING,
+    SKILL_HARD_FILTER,
+    SKILL_LIGHT_SCORING,
+)
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
 
@@ -40,12 +45,66 @@ def _evidence_ref_strings(refs: Optional[Sequence[EvidenceRef]], *, limit: int) 
     return out
 
 
-def skill_decision_summary_parts(sr: SkillExecutionResult) -> Dict[str, Any]:
+def _decision_summary_from_orchestration_extensions(
+    sr: SkillExecutionResult, ex: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """If ``OrchestrationState.extensions`` holds persisted decision keys for this skill, build summary."""
+    name = sr.metadata.skill_name
+    parts: Dict[str, Any] = {
+        "skill_name": name,
+        "status": sr.status.value,
+    }
+    if name == SKILL_HARD_FILTER and "decision.hard_filter_pass" in ex:
+        parts["decision.summary"] = (
+            f"filter computed_pass={ex.get('decision.hard_filter_pass')!r} (from snapshot)"
+        )
+        refs = ex.get("decision.evidence_refs")
+        if isinstance(refs, list) and refs:
+            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+        return parts
+
+    if name == SKILL_LIGHT_SCORING and "decision.light_score" in ex:
+        parts["score.summary"] = (
+            f"kind=light normalized={ex.get('decision.light_score')!r} "
+            f"confidence_numeric={ex.get('decision.light_confidence')!r} (from snapshot)"
+        )
+        refs = ex.get("decision.evidence_refs")
+        if isinstance(refs, list) and refs:
+            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+        return parts
+
+    if name == SKILL_DEEP_SCORING and "decision.deep_score" in ex:
+        parts["score.summary"] = (
+            f"kind=deep normalized={ex.get('decision.deep_score')!r} "
+            f"confidence_numeric={ex.get('decision.deep_confidence')!r} (from snapshot)"
+        )
+        refs = ex.get("decision.evidence_refs")
+        if isinstance(refs, list) and refs:
+            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+        return parts
+
+    return None
+
+
+def skill_decision_summary_parts(
+    sr: SkillExecutionResult,
+    *,
+    state_snapshot: Optional[OrchestrationState] = None,
+) -> Dict[str, Any]:
     """
     Compact, stable key/value summary for one skill execution (for navigation APIs).
 
     Keys are inspection-oriented strings; values are JSON-serializable where possible.
+    When ``state_snapshot`` is set, reads persisted ``decision.*`` keys from
+    ``OrchestrationState.extensions`` first, then falls back to skill output shape.
     """
+    if state_snapshot is not None:
+        from_snap = _decision_summary_from_orchestration_extensions(
+            sr, dict(state_snapshot.extensions or {})
+        )
+        if from_snap is not None:
+            return from_snap
+
     name = sr.metadata.skill_name
     parts: Dict[str, Any] = {
         "skill_name": name,
@@ -106,9 +165,13 @@ def skill_decision_summary_parts(sr: SkillExecutionResult) -> Dict[str, Any]:
     return parts
 
 
-def skill_decision_timeline_lines(sr: SkillExecutionResult) -> List[str]:
+def skill_decision_timeline_lines(
+    sr: SkillExecutionResult,
+    *,
+    state_snapshot: Optional[OrchestrationState] = None,
+) -> List[str]:
     """Human-readable indented lines (deterministic order) for embedding in timelines."""
-    parts = skill_decision_summary_parts(sr)
+    parts = skill_decision_summary_parts(sr, state_snapshot=state_snapshot)
     lines: List[str] = []
     if "decision.summary" in parts:
         lines.append(f"           decision.summary={parts['decision.summary']}")
@@ -228,9 +291,15 @@ def governance_ingress_index(
     return out
 
 
-def skills_contributing_by_run(run: OrchestrationExecutionResult) -> List[Dict[str, Any]]:
-    """Per-run list of skill summary parts (deterministic order: skill_results sequence)."""
-    return [skill_decision_summary_parts(sr) for sr in run.skill_results]
+def skills_contributing_by_run(
+    run: OrchestrationExecutionResult,
+    *,
+    persisted_snapshot: Optional[OrchestrationState] = None,
+) -> List[Dict[str, Any]]:
+    return [
+        skill_decision_summary_parts(sr, state_snapshot=persisted_snapshot)
+        for sr in run.skill_results
+    ]
 
 
 def build_vertical_slice_operator_navigation(
@@ -249,7 +318,9 @@ def build_vertical_slice_operator_navigation(
         "final.pipeline.phase": final_state.pipeline.phase.value,
         "transition_trail": transition_trail_rows(final_state),
         "governance_ingress_index": governance_ingress_index(run_history=run_history, envelope_by_id=by_id),
-        "runs_skill_summaries": [skills_contributing_by_run(r) for r in run_history],
+        "runs_skill_summaries": [
+            skills_contributing_by_run(r, persisted_snapshot=final_state) for r in run_history
+        ],
     }
 
 

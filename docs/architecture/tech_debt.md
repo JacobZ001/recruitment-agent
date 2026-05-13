@@ -204,6 +204,48 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Document **concurrency guarantees** (per-process, per-aggregate, or “external lock required”); or introduce a small **write lock** / queue abstraction around the store for multi-threaded hosts; consider WAL + timeout policy when load grows.
 
+## Decision persistence
+
+### Decision namespace structure
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``OrchestrationState.extensions`` holds flat keys such as ``decision.*``, ``inactive.*``, and ``governance.*`` without a formal namespace contract or collision policy.
+- **Rationale**: Ship persisted evaluation signals quickly on top of the existing extensions escape hatch.
+- **Future impact**: Unstructured growth and accidental key collisions across producers (skills, planner, governance).
+- **Priority**: Medium
+- **Recommended future direction**: Define typed logical namespaces or a versioned schema contract for extension keys (prefix rules, allowlists, or nested typed sub-documents).
+
+### Decision evidence lineage
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``decision.evidence_refs`` merges refs across pipeline steps into one deduped list; source skill/step is not recorded.
+- **Rationale**: Keeps snapshot shape small and avoids extra columns while proving end-to-end persistence.
+- **Future impact**: Operators and audits cannot tell which skill emitted which ref without correlating run history manually.
+- **Priority**: Medium
+- **Recommended future direction**: Add per-step or per-skill attribution (e.g. ``decision.evidence_sources`` mapping ref → producer, or structured entries per transition).
+
+### Decision-to-transition linkage
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: Decision fields live on the aggregate snapshot and are copied into ``StateTransitionRecord.extensions`` for the committing transition, but there is no explicit link (e.g. id) tying a given decision key set to a specific transition or event id beyond ordering.
+- **Rationale**: Reuse the same flat merge for audit rows and snapshot without a second linkage model.
+- **Future impact**: Harder targeted audit/debug (“which transition wrote this score?”) under concurrent or replay tooling.
+- **Priority**: Low
+- **Recommended future direction**: Introduce explicit lineage (transition id, ingested ``event_id``, or step index) on decision blobs or transition extensions.
+
+### Decision overwrite semantics
+- **Status**: OPEN
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``decision.light_score`` / ``decision.deep_score`` (and confidences) coexist; no documented rule for which layer is authoritative for downstream consumers.
+- **Rationale**: Light and deep are different stages; both remain visible for inspection.
+- **Future impact**: UI or policy may disagree on “the” candidate score without an explicit precedence contract.
+- **Priority**: Low
+- **Recommended future direction**: Document and enforce precedence (e.g. deep overrides light for display/ranking) or split into versioned stage records instead of a single flat key set.
+
 ## Execution Architecture
 
 ### Future orchestration replay tooling

@@ -97,7 +97,7 @@ transitions are not emitted by the planner; ``recruiter_override_transition`` /
 
 from __future__ import annotations
 
-from typing import Any, Dict, FrozenSet, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
@@ -109,7 +109,12 @@ from .orchestrator import (
     ProposedTransition,
     SkillInvocationSpec,
 )
-from interfaces.skill_interface import SkillInputEnvelope
+from interfaces.skill_interface import (
+    ConfidenceLevel,
+    ExecutionStatus,
+    SkillExecutionResult,
+    SkillInputEnvelope,
+)
 from schemas.governance_schema import (
     governance_record_extensions,
     parse_governance_ingress,
@@ -703,3 +708,122 @@ class VerticalSlicePlanner:
                 ),
             ),
         )
+
+
+_MAX_PERSISTED_DECISION_EVIDENCE_REFS = 48
+
+
+def _evidence_ref_strings_from_skill_result(res: SkillExecutionResult) -> List[str]:
+    out = res.output
+    if out is None or not out.evidence_refs:
+        return []
+    return [str(r.ref) for r in out.evidence_refs[:_MAX_PERSISTED_DECISION_EVIDENCE_REFS]]
+
+
+def _confidence_numeric_from_skill_result(
+    res: SkillExecutionResult, *, prefer_deep_payload_score: bool
+) -> Optional[float]:
+    out = res.output
+    if out is None:
+        return None
+    pl = out.payload or {}
+    if prefer_deep_payload_score and pl.get("scoring.deep.confidence_score") is not None:
+        return float(pl["scoring.deep.confidence_score"])
+    c = out.confidence
+    if c is not None and c.score is not None:
+        return float(c.score)
+    if c is not None and c.level is not None:
+        lv = c.level
+        if lv == ConfidenceLevel.LOW:
+            return 0.25
+        if lv == ConfidenceLevel.MEDIUM:
+            return 0.5
+        if lv == ConfidenceLevel.HIGH:
+            return 0.75
+    return None
+
+
+def skill_result_to_vertical_slice_decision_extensions(
+    skill_name: str, res: SkillExecutionResult
+) -> Dict[str, Any]:
+    """
+    Flat ``OrchestrationState.extensions`` keys for vertical-slice scoring skills.
+
+    Called by the orchestrator after skills execute so values reflect
+    :class:`~interfaces.skill_interface.SkillExecutionResult` outputs.
+    """
+    out: Dict[str, Any] = {}
+    if res.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL_SUCCESS):
+        return out
+    if res.output is None:
+        return out
+    pl = res.output.payload or {}
+
+    if skill_name == SKILL_HARD_FILTER:
+        if "filter.computed_pass" in pl:
+            out["decision.hard_filter_pass"] = bool(pl["filter.computed_pass"])
+        refs = _evidence_ref_strings_from_skill_result(res)
+        if refs:
+            out["_evidence_refs_partial"] = refs
+        return out
+
+    if skill_name == SKILL_LIGHT_SCORING:
+        if "scoring.normalized_score" in pl:
+            out["decision.light_score"] = float(pl["scoring.normalized_score"])
+        cn = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+        if cn is not None:
+            out["decision.light_confidence"] = cn
+        refs = _evidence_ref_strings_from_skill_result(res)
+        if refs:
+            out["_evidence_refs_partial"] = refs
+        return out
+
+    if skill_name == SKILL_DEEP_SCORING:
+        if "scoring.deep.normalized_score" in pl:
+            out["decision.deep_score"] = float(pl["scoring.deep.normalized_score"])
+        cn = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=True)
+        if cn is not None:
+            out["decision.deep_confidence"] = cn
+        refs = _evidence_ref_strings_from_skill_result(res)
+        if refs:
+            out["_evidence_refs_partial"] = refs
+        return out
+
+    return out
+
+
+def merge_vertical_slice_decision_snapshot_extensions(
+    skills: Sequence[SkillInvocationSpec],
+    skill_results: Sequence[SkillExecutionResult],
+    *,
+    prior_extensions: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Merge per-skill decision keys into one dict for ``OrchestrationState.extensions``.
+
+    Evidence refs from prior snapshot extensions are preserved (dedupe, cap), then
+    refs from this plan's skills are appended.
+    """
+    merged: Dict[str, Any] = {}
+    evidence_ordered: List[str] = []
+
+    prior = prior_extensions or {}
+    prev_refs = prior.get("decision.evidence_refs")
+    if isinstance(prev_refs, list):
+        for r in prev_refs:
+            s = str(r)
+            if s not in evidence_ordered:
+                evidence_ordered.append(s)
+
+    for spec, res in zip(skills, skill_results):
+        part = skill_result_to_vertical_slice_decision_extensions(spec.skill_name, res)
+        refs = part.pop("_evidence_refs_partial", None)
+        if isinstance(refs, list):
+            for r in refs:
+                if r not in evidence_ordered:
+                    evidence_ordered.append(r)
+        merged.update(part)
+
+    if evidence_ordered:
+        merged["decision.evidence_refs"] = evidence_ordered[:_MAX_PERSISTED_DECISION_EVIDENCE_REFS]
+    return merged

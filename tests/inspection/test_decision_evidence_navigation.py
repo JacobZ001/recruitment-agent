@@ -105,6 +105,34 @@ def test_skill_decision_timeline_lines_include_score_summary() -> None:
     assert any("evidence.refs=" in ln for ln in lines)
 
 
+def test_skill_decision_summary_prefers_snapshot_extensions() -> None:
+    sr = SkillExecutionResult(
+        metadata=_light_meta(),
+        status=ExecutionStatus.SUCCEEDED,
+        output=SkillOutputEnvelope(
+            payload={
+                "scoring.kind": "light",
+                "scoring.normalized_score": 0.01,
+            },
+        ),
+        timing=ExecutionTiming(),
+        audit=ExecutionAudit(execution_id=uuid4()),
+    )
+    state = OrchestrationState(
+        id=uuid4(),
+        links=[],
+        extensions={
+            "decision.light_score": 0.88,
+            "decision.light_confidence": 0.66,
+            "decision.evidence_refs": ["persisted://ref"],
+        },
+    )
+    p = skill_decision_summary_parts(sr, state_snapshot=state)
+    assert "from snapshot" in p["score.summary"]
+    assert "0.88" in p["score.summary"]
+    assert p.get("evidence.refs") == ["persisted://ref"]
+
+
 def test_transition_trail_rows_include_governance_codes() -> None:
     tr = StateTransitionRecord(
         state_domain=StateDomain.PIPELINE,

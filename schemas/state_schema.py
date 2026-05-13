@@ -375,7 +375,13 @@ class OrchestrationState(_SchemaBase):
 
     extensions: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Forward-compatible expansion point for cross-cutting fields.",
+        description=(
+            "Forward-compatible expansion point for cross-cutting fields. "
+            "Vertical-slice scoring persistence (flat keys, JSON-serializable): "
+            "decision.hard_filter_pass (bool), decision.light_score, decision.light_confidence, "
+            "decision.deep_score, decision.deep_confidence (numbers in [0,1]), "
+            "decision.evidence_refs (list[str])."
+        ),
     )
 
     @field_validator("schema_version")

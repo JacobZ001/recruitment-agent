@@ -164,7 +164,7 @@ def render_vertical_slice_timeline_text(
             )
 
         for sr in run.skill_results:
-            lines.extend(_format_skill_block(sr))
+            lines.extend(_format_skill_block(sr, final_state=final_state))
 
         if run.produced_event_ids:
             emit_labels = _emission_types_from_decisions(run)
@@ -210,8 +210,10 @@ def _governance_ingress_note(envelope: Optional[EventEnvelope]) -> Optional[str]
     )
 
 
-def _format_skill_block(sr: SkillExecutionResult) -> List[str]:
+def _format_skill_block(
+    sr: SkillExecutionResult, *, final_state: Optional[OrchestrationState] = None
+) -> List[str]:
     meta = sr.metadata
     lines = [f"    skill | {meta.skill_name} | status={sr.status.value}"]
-    lines.extend(skill_decision_timeline_lines(sr))
+    lines.extend(skill_decision_timeline_lines(sr, state_snapshot=final_state))
     return lines

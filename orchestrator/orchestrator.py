@@ -444,10 +444,13 @@ def _commit_transition(
     matched_rule_id: str,
     updated_by: str,
     occurred_at: datetime,
+    snapshot_extensions: Optional[Dict[str, Any]] = None,
 ) -> OrchestrationState:
     ext: Dict[str, Any] = {"matched_rule_id": matched_rule_id}
     if proposed.record_extensions:
         ext = {**ext, **proposed.record_extensions}
+    if snapshot_extensions:
+        ext = {**ext, **snapshot_extensions}
     record = StateTransitionRecord(
         state_domain=proposed.state_domain,
         from_state=proposed.from_state,
@@ -460,6 +463,9 @@ def _commit_transition(
     )
     new_transitions: List[StateTransitionRecord] = list(state.transitions) + [record]
     new_audit = _model_copy(state.audit, updated_at=occurred_at, updated_by=updated_by)
+    new_snap_ext = (
+        {**dict(state.extensions), **snapshot_extensions} if snapshot_extensions else dict(state.extensions)
+    )
 
     if proposed.state_domain == StateDomain.PIPELINE:
         new_pipeline = _model_copy(
@@ -473,6 +479,7 @@ def _commit_transition(
             pipeline=new_pipeline,  # type: ignore[arg-type]
             transitions=new_transitions,
             audit=new_audit,  # type: ignore[arg-type]
+            extensions=new_snap_ext,  # type: ignore[arg-type]
         )
 
     if proposed.state_domain == StateDomain.DECISION:
@@ -485,6 +492,7 @@ def _commit_transition(
             decision=new_decision,  # type: ignore[arg-type]
             transitions=new_transitions,
             audit=new_audit,  # type: ignore[arg-type]
+            extensions=new_snap_ext,  # type: ignore[arg-type]
         )
 
     new_comm = _model_copy(
@@ -496,6 +504,7 @@ def _commit_transition(
         communication=new_comm,  # type: ignore[arg-type]
         transitions=new_transitions,
         audit=new_audit,  # type: ignore[arg-type]
+        extensions=new_snap_ext,  # type: ignore[arg-type]
     )
 
 
@@ -762,9 +771,22 @@ class Orchestrator:
                     transition_result=tv,
                 )
 
+        decision_snapshot_extensions: Dict[str, Any] = {}
+        if plan.skills:
+            from orchestrator.vertical_slice_planner import merge_vertical_slice_decision_snapshot_extensions
+
+            decision_snapshot_extensions = merge_vertical_slice_decision_snapshot_extensions(
+                plan.skills, skill_results, prior_extensions=dict(state.extensions)
+            )
+
         occurred_at = envelope.occurred_at
         if plan.proposed_transition is None:
             new_state = _touch_audit(state, updated_by=self._ctx.updated_by, occurred_at=occurred_at)
+            if decision_snapshot_extensions:
+                new_state = _model_copy(
+                    new_state,
+                    extensions={**new_state.extensions, **decision_snapshot_extensions},  # type: ignore[arg-type]
+                )
             if not plan.skills and not plan.emissions:
                 decisions.append(
                     OrchestrationDecisionRecord(
@@ -782,6 +804,7 @@ class Orchestrator:
                 matched_rule_id=tv.matched_rule_id,
                 updated_by=self._ctx.updated_by,
                 occurred_at=occurred_at,
+                snapshot_extensions=decision_snapshot_extensions or None,
             )
             decisions.append(
                 OrchestrationDecisionRecord(

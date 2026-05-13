@@ -18,12 +18,14 @@ def vertical_slice_demo_skill_summaries(bundle: VerticalSliceRuntimeBundle) -> D
     hard: Optional[Dict[str, Any]] = None
     light: Optional[Dict[str, Any]] = None
     deep: Optional[Dict[str, Any]] = None
+    got = bundle.store.get(bundle.state_id)
+    snap = got.snapshot if got.ok and got.snapshot is not None else None
     for run in bundle.subscriber.run_history:
         if not run.ok:
             continue
         for sr in run.skill_results:
             name = sr.metadata.skill_name
-            parts = skill_decision_summary_parts(sr)
+            parts = skill_decision_summary_parts(sr, state_snapshot=snap)
             if name == SKILL_HARD_FILTER:
                 hard = parts
             elif name == SKILL_LIGHT_SCORING:
