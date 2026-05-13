@@ -12,6 +12,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 ## Registry entry format
 
 - **Status**: OPEN | IN_PROGRESS | RESOLVED | SUPERSEDED
+- **Scope**: which subsystem this touches (use one primary label from the legend below; optional `+` for a tight secondary, e.g. `API+Persistence`).
+- **Revisit when**: explicit trigger to reopen the work—milestone, dependency, risk symptom, or product stage—not “eventually”.
 - **Introduced in**: date or milestone (e.g. 2026-05-08 / v0.1)
 - **Last reviewed**: date
 - **Owner** (optional): team/person
@@ -21,10 +23,29 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: High | Medium | Low
 - **Recommended future direction**
 
+### Scope legend (pick one primary per entry)
+
+| Scope | Typical paths / concerns |
+| ----- | ------------------------- |
+| **Contracts** | `schemas/`, payload/versioning, cross-layer identifiers |
+| **Orchestrator** | `orchestrator/`, plan/commit/emission ordering, side effects |
+| **TransitionEngine** | `state_machine/`, registries, validation rules |
+| **Persistence** | `runtime/persistence/`, snapshot/audit durability, SQLite semantics |
+| **Bus** | `runtime/in_memory_event_bus.py`, publish/dispatch/handler semantics |
+| **Skills** | `skills/`, execution contracts, deterministic fakes |
+| **API** | `integrations/api/`, HTTP ingress, process-wide runtime wiring |
+| **Inspection** | `runtime/inspection/`, timelines, catalogs, read-only projections |
+| **Governance** | `recruiter_*` ingress, human override paths, governance schemas |
+| **Replay** | harnesses, replay runners, assertion profiles (may span tests + runtime) |
+| **Ops** | concurrency, scaling posture, operational docs—not product workflow |
+| **DX** | developer ergonomics, refactors that unblock velocity without changing semantics |
+
 ## Contract Evolution
 
 ### Typed payload contracts (events + skill IO)
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep `payload: Dict[str, Any]` in event payloads and skill IO envelopes for v1.
@@ -38,6 +59,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Event envelope payload governance
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-09
 - **Last reviewed**: 2026-05-09
 - **Current decision**: Keep event envelopes and payloads generic (`Dict[str, Any]`) for v1, but treat payload shape stability and hygiene as an explicit governance concern.
@@ -55,6 +78,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Interface and schema versioning strategy
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Use lightweight, explicit version fields (e.g., `schema_version` / `interface_version`) with conservative backward compatibility, and avoid building heavy version negotiation infrastructure in v1.
@@ -74,6 +99,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Potential migration from `Dict[str, Any]` to stricter structures (`extensions` governance)
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When extensions sprawl threatens harness coverage
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Use explicit `extensions: Dict[str, Any]` as the forward-compatible escape hatch.
@@ -84,6 +111,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Timezone-aware datetime handling
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: Before external system date correlation or compliance reporting
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Some schemas still use naive UTC timestamp defaults for v1.
@@ -94,6 +123,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Typed profile links instead of `List[str]`
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When intake requires typed profile URLs
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep `external_profile_urls: List[str]` in `Identity`.
@@ -104,6 +135,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Typed recruiter feedback adjustments
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When recruiter calibration product hardens
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep `RecruiterFeedback.adjustments: Dict[str, Any]`.
@@ -114,6 +147,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Canonical workflow decision and rejection vocabulary governance
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Fake deterministic vertical-slice skills (e.g. ``skills/deterministic/fake_hard_filter_skill.py``, ``skills/deterministic/fake_cv_uploaded_skill.py``) emit **local, machine-oriented reason codes** and **planner-aligned decision semantics** inside skill ``payload`` / ``extensions`` without a shared, versioned workflow ontology. The first vertical slice **intentionally** allows these **bounded local vocabularies** so runtime wiring, harness tests, and explainable pass/fail paths can iterate quickly before cognition layers land.
@@ -134,6 +169,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Centralized scoring policy governance
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Fake deterministic scoring (e.g. ``skills/deterministic/fake_light_scoring_skill.py``) applies **local, bounded weighting policies** and **local normalized score semantics** (factor definitions, weight vectors, clamping rules) embedded in each skill module. The vertical slice **intentionally** keeps policy local so orchestration validation, harness tests, and explainable numeric outputs can ship before org-wide calibration and policy infrastructure exist.
@@ -155,6 +192,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Workflow-context-aware scoring priors
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Fake deep scoring (``skills/deterministic/fake_deep_scoring_skill.py``) applies **deterministic workflow-stage priors**—for example, when questionnaire fields are omitted it assumes a **bounded default questionnaire component** and records a **stage prior** signal—so the vertical slice can simulate “richer post-questionnaire cognition” without wiring full questionnaire payloads into every harness case.
@@ -176,6 +215,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### SQLite replace uses DELETE + INSERT instead of UPSERT
 - **Status**: OPEN
+- **Scope**: Persistence
+- **Revisit when**: When tuning SQLite write path or adding multi-writer stress tests
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``runtime/persistence/sqlite_state_store.py`` implements ``replace`` by deleting the ``orchestration_state`` row for ``state_id``, then re-inserting snapshot + indexes + audit in one transaction. Behavior matches optimistic revision semantics and is correct for the single-row model.
@@ -186,6 +227,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Transition audit serialization contract
 - **Status**: OPEN
+- **Scope**: Persistence
+- **Revisit when**: When external tools read audit table without snapshot
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``state_transition_audit`` rows are derived from ``snapshot.transitions`` with ad-hoc field mapping (``extensions`` as JSON, actor/event columns). The **canonical** source of truth remains ``orchestration_state.snapshot_json``; the audit table is a non-authoritative mirror.
@@ -196,6 +239,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Persistence write concurrency model
 - **Status**: OPEN
+- **Scope**: Persistence+Ops
+- **Revisit when**: When API runs multi-threaded or multi-worker against SQLite
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``SQLiteStateStore`` uses ``check_same_thread=False`` on the connection; **no** internal lock. Callers (e.g. FastAPI) are assumed to **serialize** writes to the store or accept undefined interleaving.
@@ -208,6 +253,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Decision namespace structure
 - **Status**: OPEN
+- **Scope**: Persistence+Contracts
+- **Revisit when**: When extension keys multiply or second producer writes decision.*
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``OrchestrationState.extensions`` holds flat keys such as ``decision.*``, ``inactive.*``, and ``governance.*`` without a formal namespace contract or collision policy.
@@ -218,6 +265,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Decision evidence lineage
 - **Status**: OPEN
+- **Scope**: Persistence
+- **Revisit when**: When operator UI needs per-skill evidence attribution
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``decision.evidence_refs`` merges refs across pipeline steps into one deduped list; source skill/step is not recorded.
@@ -228,6 +277,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Decision-to-transition linkage
 - **Status**: OPEN
+- **Scope**: Persistence+Orchestrator
+- **Revisit when**: When audit tooling needs transition-scoped decision facts
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Decision fields live on the aggregate snapshot and are copied into ``StateTransitionRecord.extensions`` for the committing transition, but there is no explicit link (e.g. id) tying a given decision key set to a specific transition or event id beyond ordering.
@@ -238,6 +289,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Decision overwrite semantics
 - **Status**: OPEN
+- **Scope**: Persistence
+- **Revisit when**: When UI/API must show single authoritative score
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``decision.light_score`` / ``decision.deep_score`` (and confidences) coexist; no documented rule for which layer is authoritative for downstream consumers.
@@ -250,16 +303,20 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Future orchestration replay tooling
 - **Status**: IN_PROGRESS
+- **Scope**: Replay
+- **Revisit when**: When scheduling durable stream replay runner or operator MVP
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-12
-- **Current decision**: Immutable events + correlation/causation ids remain the persistence contract target. **Not resolved**: no durable stream “replay runner” or operator-facing replay products yet. **In progress**: synchronous **structural replay harnesses** under ``tests/replay/`` exercise the vertical slice end-to-end (happy path byte-stable JSON equality; deterministic negative-path cases including transition rejection, missing skill registration, ``hard_filter_failed`` closure, and bus handler-exception isolation). These prove orchestrator + bus + transition-engine wiring **before** storage-backed replay.
-- **Rationale**: Tooling is expensive; stabilize contracts and deterministic transitions first. Harness-first replay validates control-plane semantics without implying production persistence.
+- **Current decision**: Immutable events + correlation/causation ids remain the persistence contract target. **Not resolved**: no durable stream “replay runner” or operator-facing replay products yet. **In progress**: synchronous **structural replay harnesses** under ``tests/replay/`` exercise the vertical slice end-to-end (happy path byte-stable JSON equality; deterministic negative-path cases including transition rejection, missing skill registration, ``hard_filter_failed`` closure, and bus handler-exception isolation). **Additional coverage**: ``tests/persistence/`` exercises SQLite snapshot round-trips (including decision extensions) so replay-relevant state survives process boundaries **without** implying a full append-only event replay product yet. These prove orchestrator + bus + transition-engine wiring **before** storage-backed **event-stream** replay.
+- **Rationale**: Tooling is expensive; stabilize contracts and deterministic transitions first. Harness-first replay validates control-plane semantics **without** conflating “harness + snapshot persistence exists” with “durable ingress/event stream is solved.”
 - **Future impact**: Until a stream-backed runner exists, cross-process and post-mortem reconstruction still rely on explicit logging discipline; harness coverage does not replace durable timelines.
 - **Priority**: High
 - **Recommended future direction**: Build a “replay runner” that rehydrates `OrchestrationState` from an **append-only event stream** with strict validation and deterministic logs; extend harness assertions toward **semantic** and **governance** profiles (see “Replay validation evolution”) rather than only full JSON equality.
 
 ### Replay validation evolution (structural vs semantic equality)
 - **Status**: OPEN
+- **Scope**: Replay
+- **Revisit when**: When strict JSON replay tests churn on observability metadata
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Vertical-slice harness validation uses **strict structural replay equality** as the default gate: canonical ingress is driven through independently wired runtimes and artifacts are compared via **deterministic, byte-stable JSON serialization** where applicable (`tests/replay/test_vertical_slice_replay.py` happy path; negative-path cases in `tests/replay/test_vertical_slice_negative_paths.py` pin stable failure semantics—transition rejection, missing skill, slice closure on ``hard_filter_failed``, bus synthetic handler failures). This intentionally treats observability-shaped fields as part of the contract **while** harness surface area remains small. **Future**: the same suite must evolve toward **layered** assertions—**structural** (workflow facts), **semantic** (normalized projections / tolerances), **governance/audit** (operator timelines)—so instrumentation can grow without false-positive harness churn (see Future impact below).
@@ -282,10 +339,12 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Inspection event-history provenance and catalog governance
 - **Status**: OPEN
+- **Scope**: Inspection
+- **Revisit when**: When defining canonical event-history read model or envelope provenance
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``runtime/inspection/`` renders **read-only**, deterministic human-readable timelines from supplied artifacts (``OrchestrationExecutionResult`` history + envelope catalogs). **Unified catalog** wiring merges **primary scripted ingress** envelopes with envelopes captured from the full **published stream** when available (e.g. ``tests/replay/recording_bus.RecordingInMemoryEventBus.recorded_envelopes``), so nested orchestration runs triggered by **runtime-emitted** events (e.g. ``questionnaire_requested``) resolve ``event_type`` in inspection output. ``RecordingInMemoryEventBus`` remains **test instrumentation**, not a canonical production event-history store. **Ingress classification** for display uses a **heuristic**: ``ingest.kind=runtime_emission`` when ``EventEnvelope.metadata.causation_id`` is present (orchestrator emissions set causation to the parent ingest); **external** bootstrap ingress uses ``causation_id=None``. The default reference ``InMemoryEventBus`` does **not** retain publish history—callers without a recorded stream may pass an explicit envelope catalog or accept incomplete labeling for emitted-only ingests.
-- **Rationale**: Inspection must stay **non-authoritative**: it interprets recorded facts and merges catalogs for developer/operator clarity **without** embedding orchestration policy or mutating runtime state. A durable event store is intentionally deferred; bounded merge + causation-based labeling ships **reference-slice** operator visibility **before** persistence contracts exist.
+- **Rationale**: Inspection must stay **non-authoritative**: it interprets recorded facts and merges catalogs for developer/operator clarity **without** embedding orchestration policy or mutating runtime state. **Orchestration snapshot** persistence (e.g. SQLite ``snapshot_json``) can exist independently of inspection; a **durable append-only event / ingress stream** and canonical event-history read models remain intentionally deferred. Bounded merge + causation-based labeling ships **reference-slice** operator visibility **before** those event-store contracts exist.
 - **Future impact**:
   - **Incomplete catalogs**: plain runtime without recorded envelopes (or without explicit catalog injection) may lack emitted-event envelopes—timeline reconstruction can miss labels even when orchestration runs succeeded.
   - **Heuristic brittleness**: ``causation_id`` may **not** cleanly separate **external integration** ingress from **runtime emission** once external producers also populate causation links—classification could drift without explicit provenance fields.
@@ -298,11 +357,13 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - Keep the inspection layer as **projection-only**: render text / JSON / UI from **recorded facts**; add **structured timeline entries** later as an intermediate representation shared by multiple renderers.
   - Coordinate with **future orchestration replay tooling** and **event envelope payload governance** entries so timelines remain reproducible under schema and policy evolution.
 
-### API runtime singleton (single in-memory world per process)
+### API runtime singleton (single process, shared runtime)
 - **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: When Stage B requires per-session or multi-tenant runtime isolation
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
-- **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). All requests share the **same** in-memory event bus, state store, and orchestration aggregate—there is **no** per-request or per-tenant runtime isolation in v1.
+- **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). All requests share the **same** in-memory event bus and **one** orchestration aggregate (deterministic bootstrap ids). The **snapshot store** may be **in-memory** or **SQLite-backed** (e.g. ``VERTICAL_SLICE_DB_PATH`` / default ``data/app.db``); there is **no** per-request or per-tenant runtime isolation in v1.
 - **Rationale**: **Deterministic-first**, **bounded** vertical-slice validation: a single shared world maximizes reproducibility for demos and integration tests without introducing session factories, pooling, or multi-tenant routing in the API layer yet.
 - **Future impact**: Unsuitable for **multi-candidate** or **multi-session** execution at scale; concurrent clients can interfere with each other’s workflow view; load tests and shared environments need explicit process boundaries or future isolated runtime instances.
 - **Priority**: Medium
@@ -310,16 +371,20 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Fixed aggregate identity (single candidate-scoped orchestration instance)
 - **Status**: OPEN
+- **Scope**: API+Persistence
+- **Revisit when**: When Stage B ships multi-candidate HTTP or aggregate registry
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: The reference API assumes the bootstrap **`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`** (and associated single orchestration aggregate). Requests for other candidate ids are rejected (e.g. 404)—there is **no** runtime-created aggregate identity or multi-aggregate registry at the HTTP edge.
-- **Rationale**: Keeps ingress validation and tests **tight** on one explainable path; defers identity lifecycle (create candidate / bind aggregate) to future persistence and governance without broad refactors now.
+- **Rationale**: Keeps ingress validation and tests **tight** on one explainable path; defers **multi-aggregate lifecycle** (create candidate / bind aggregate / route at HTTP edge) until Stage B wiring exists. **Snapshot persistence for the wired aggregate** (SQLite) is orthogonal: it does not by itself add new candidate identities or a registry at the API boundary.
 - **Future impact**: External systems cannot drive **per-candidate** workflows through the API until aggregate creation, routing, and scope rules exist outside the bootstrap script.
 - **Priority**: Medium
 - **Recommended future direction**: Add **deterministic** aggregate lifecycle operations (create/bind ids, explicit aggregate keys) in **runtime construction** or a thin registry—**not** in route handlers as ad-hoc policy; align with future persistence and audit entries.
 
 ### HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: Before external integrator or Stage B ingress hardening (whichever first)
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: **`POST /events`** has **no** idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation). Clients cannot rely on deduplication, stable publish outcomes under retries, or ingress-level audit of “same logical submission.”
@@ -330,6 +395,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Timeline rendering format (plain text vs structured projections)
 - **Status**: OPEN
+- **Scope**: Inspection+API
+- **Revisit when**: When consumers need machine-stable timeline JSON
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Inspection (`runtime/inspection/`) and **`GET /timeline/{candidate_id}`** expose **deterministic plain text** timelines only. There is **no** canonical structured timeline schema (JSON rows, typed segments) or alternate renderers (UI components, export formats) in the reference runtime.
@@ -340,6 +407,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### API boundary coupling to bootstrap helpers (`_envelope`, fixed clock)
 - **Status**: OPEN
+- **Scope**: API+DX
+- **Revisit when**: When extracting stable envelope factory from bootstrap
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: The API imports **bootstrap-oriented** helpers (e.g. `_envelope`, `_FIXED_CLOCK`, wiring conveniences from `runtime/bootstrap_vertical_slice.py`) to build `EventEnvelope` instances and keep tests deterministic.
@@ -350,6 +419,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Inspection ingress classification: causation_id heuristic vs explicit provenance
 - **Status**: OPEN
+- **Scope**: Inspection
+- **Revisit when**: When external producers set causation_id on ingress
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: **`runtime_emission`** vs external ingress labeling in inspection uses a **heuristic**: presence of **`EventEnvelope.metadata.causation_id`** implies runtime-emitted lineage; **`causation_id=None`** implies external/script ingress. This is **not** a guaranteed provenance taxonomy once external producers also set causation metadata.
@@ -360,6 +431,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Governance semantic partitioning (shared stream vs read-model clarity)
 - **Status**: OPEN
+- **Scope**: Governance
+- **Revisit when**: When read-models split governance vs operational streams
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: First bounded governance ingress (``recruiter_*`` events) rides the **same** append-only publish/handle path as operational ingress and orchestration-derived envelopes. Timelines and replay harnesses treat them as typed ``event_type`` facts without a separate governance channel or persisted partition yet.
@@ -370,6 +443,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Governance authority semantics (``human_override`` / force paths)
 - **Status**: OPEN
+- **Scope**: Governance
+- **Revisit when**: When expanding human_override edge matrix
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: ``recruiter_force_transition`` sets ``ProposedTransition.human_override`` as a **bounded audit signal**; transitions still pass through ``TransitionEngine.validate`` with the same registry rules—**no** open-ended skip-validation path.
@@ -380,6 +455,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Governance identity lineage (opaque ``actor_id``)
 - **Status**: OPEN
+- **Scope**: Governance
+- **Revisit when**: When delegation / impersonation enters product scope
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Governance payloads use a **minimal** stable ``actor_id`` string plus ``actor_type`` (see ``schemas/governance_schema.py``). No delegation chain, impersonation metadata, or multi-step review graph.
@@ -390,6 +467,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Governance policy modularization (planner-local vs packs)
 - **Status**: OPEN
+- **Scope**: Governance+Orchestrator
+- **Revisit when**: When vertical_slice_planner.py governance section exceeds reviewable size
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Bounded governance transitions and whitelist rules live **inline** in ``orchestrator/vertical_slice_planner.py`` next to the rest of slice policy.
@@ -400,6 +479,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Governance lifecycle policy centralization
 - **Status**: OPEN
+- **Scope**: Governance+Orchestrator
+- **Revisit when**: When recruiter action matrix needs single source of truth
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Recruiter **lifecycle governance** semantics remain **explicitly distributed**: ``orchestrator/vertical_slice_planner.py`` maps ingress ``event_type`` + ``PipelinePhase`` → ``ProposedTransition`` (including wrong-phase / terminal **empty plans** for deterministic NOOPs); ``state_machine/transition_engine.py`` / ``default_pipeline_registry()`` own **edge legality** and **allowed triggers**; ``schemas/governance_schema.py`` constrains **ingress payload shape**; HTTP/adapters must not contaminate those payloads (``extra=forbid``). This is **acceptable** for the current **bounded vertical slice**: each layer stays small, testable, and replay-stable without a second source of truth.
@@ -414,6 +495,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Shared delivery semantics taxonomy (event bus + handlers)
 - **Status**: OPEN
+- **Scope**: Bus+Contracts
+- **Revisit when**: When second bus implementation or broker adapter lands
 - **Introduced in**: 2026-05-09
 - **Last reviewed**: 2026-05-09
 - **Current decision**: Keep delivery/ack semantics minimal and interface-scoped in v1 (e.g., `accepted/failed/rejected/skipped` + `ack/nack/drop`) without implementing broker-specific behavior.
@@ -431,6 +514,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Shared execution metadata structures
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When cross-layer trace linking breaks in production incidents
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep execution metadata (trace/request/correlation/causation ids, actor ids, event/execution ids, tags) defined per interface/schema layer, with explicit fields and `extensions` as the escape hatch.
@@ -441,6 +526,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Future shared timing/audit abstractions
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When correlating skill timing vs envelope time becomes blocking
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Timing and audit fields are currently modeled independently per contract (events, state, skills) with only minimal alignment.
@@ -451,6 +538,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Deterministic runtime clock governance (fake skills + slice execution)
 - **Status**: OPEN
+- **Scope**: Skills
+- **Revisit when**: When mixing real and fake skills in one run needs unified logical clock
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
 - **Current decision**: Vertical-slice **fake** deterministic skills (e.g. ``skills/deterministic/fake_cv_uploaded_skill.py``) use **module-local deterministic reference clocks** for fields such as skill ``ExecutionTiming`` / ``ExecutionAudit.recorded_at`` and related evidence timestamps, instead of wall-clock or orchestrator-supplied logical time.
@@ -469,6 +558,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Future shared failure taxonomy consolidation
 - **Status**: OPEN
+- **Scope**: Contracts+Ops
+- **Revisit when**: When SLO/alerting needs unified failure codes
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Maintain localized failure enums/taxonomies (events vs. messaging vs. skill execution) to avoid prematurely locking in semantics.
@@ -479,6 +570,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Potential async skill execution migration
 - **Status**: OPEN
+- **Scope**: Orchestrator+Skills
+- **Revisit when**: When first long-running integration skill is specified
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep skill execution synchronous at the contract level (bounded call returning a result), and represent longer workflows via event-driven orchestration rather than async skill interfaces.
@@ -489,13 +582,15 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Orchestration side-effect consistency after publish failure
 - **Status**: OPEN
+- **Scope**: Orchestrator
+- **Revisit when**: When adding outbox or atomic emit+state commit
 - **Introduced in**: 2026-05-11
-- **Last reviewed**: 2026-05-11
+- **Last reviewed**: 2026-05-12
 - **Current decision**: The synchronous orchestrator applies validated state transitions and runs skills **before** it attempts to publish derived events; publish outcomes are checked only after those steps. On publish failure, the returned `OrchestrationExecutionResult` does not commit a new `OrchestrationState`, but **skills may already have executed** and any external side effects from skills are outside the orchestrator's rollback scope.
-- **Rationale**: This ordering is an intentional, bounded tradeoff for the first **single-process vertical-slice** runtime: it prioritizes a runnable `event → validate → skills → state → emit` path without introducing transactional persistence, outbox writers, or distributed consistency machinery in the control plane yet.
+- **Rationale**: This ordering is an intentional, bounded tradeoff for the first **single-process vertical-slice** runtime: it prioritizes a runnable `event → validate → skills → state → emit` path **without** introducing **atomic** coupling between (a) **bus publish outcomes** and (b) **durable snapshot commits**—i.e. no transactional outbox, no single ACID unit across “emit envelope” + “persist derived state,” and no distributed consistency machinery in the control plane yet. SQLite can still transactionally persist **snapshots** in the store layer; the gap is **cross-layer** atomicity with emissions.
 - **Future impact**: Operators and replay tooling may observe **partial effects** (e.g., skill side effects or prior successful publishes in a multi-emission batch) when emission fails mid-flight, complicating audit narratives and recovery unless callers compensate explicitly.
 - **Priority**: Medium
-- **Recommended future direction**: Harden cross-layer consistency as the stack gains persistence:
+- **Recommended future direction**: Harden cross-layer consistency as **snapshot persistence** and **ingress volume** grow (SQLite today does not remove publish-vs-store ordering risks):
   - **Transactional outbox**: record intended emissions atomically with state commits; publish from the outbox with idempotent consumers.
   - **Durable event store**: append-only log as the source of truth for “what was emitted,” aligned with correlation/causation ids.
   - **Exactly-once / eventual consistency strategies**: idempotent event handlers, dedupe keys, and documented dual-write semantics where full ACID across bus + DB is unavailable.
@@ -503,9 +598,11 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Planner determinism verification harness
 - **Status**: IN_PROGRESS
+- **Scope**: Orchestrator+Replay
+- **Revisit when**: When second planner module lands or CI adds banned-API lint
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-12
-- **Current decision**: `OrchestrationStepPlanner` implementations are **expected** to be deterministic, pure policy code (no LLM routing, no autonomous workflow control). The orchestrator **does not verify** that property directly. **Partial coverage**: vertical-slice workflow replay (happy + negative paths) exercises **VerticalSlicePlanner** outputs **indirectly** via orchestration results and transition outcomes under fixed envelopes—strong signal for wiring drift, **not** a substitute for planner-isolated property tests or banned-API lint.
+- **Current decision**: `OrchestrationStepPlanner` implementations are **expected** to be deterministic, pure policy code (no LLM routing, no autonomous workflow control). The orchestrator **does not verify** that property directly. **Partial coverage**: vertical-slice workflow replay (happy + negative paths) plus **SQLite persistence tests** (e.g. ``tests/persistence/test_sqlite_state_store.py``) exercise **VerticalSlicePlanner** outputs **indirectly** via orchestration results, transition outcomes, and reloaded snapshots under fixed envelopes—strong signal for wiring drift, **not** a substitute for planner-isolated property tests or banned-API lint.
 - **Rationale**: Centralizing planner analysis in the orchestrator would blur the boundary between execution and policy; dedicated planner harnesses were deferred until planner modules multiply. Replay tests now provide an interim integration guardrail.
 - **Future impact**: A nondeterministic or environment-coupled planner still undermines replay guarantees if bugs hide behind coincidentally stable scenarios; dedicated planner tests remain valuable.
 - **Priority**: Low
@@ -517,6 +614,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Conditional questionnaire workflow branching (vertical slice planner)
 - **Status**: OPEN
+- **Scope**: Orchestrator
+- **Revisit when**: When product requires questionnaire bypass or alternate templates
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: The first vertical-slice planner (``orchestrator/vertical_slice_planner.py``) wires a **fixed** questionnaire leg after light scoring: deterministic transitions and emissions always advance along ``light_scored`` → ``questionnaire_pending`` → ``questionnaire_sent`` → ``questionnaire_completed`` before deep scoring. There is **no** conditional bypass, alternate questionnaire template routing, or role-specific graph selection in v1.
@@ -535,6 +634,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Recursive publish / re-entrancy governance (in-memory event bus)
 - **Status**: OPEN
+- **Scope**: Bus
+- **Revisit when**: When handlers emit nested publishes in production wiring
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: The synchronous in-memory bus does not detect or forbid nested ``publish()`` calls from within subscriber handlers; ordering and partial dispatch traces depend on call patterns at runtime.
@@ -548,6 +649,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Dispatch backpressure handling (event bus runtime)
 - **Status**: OPEN
+- **Scope**: Bus+Ops
+- **Revisit when**: When multi-subscriber latency becomes measured problem
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: In-memory dispatch applies only fixed numeric caps (subscriptions registered, max handler dispatches per publish); there is no cooperative **slow consumer** or load-shedding signal beyond bounded counts.
@@ -558,6 +661,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Publish aggregate status precedence governance (event bus)
 - **Status**: OPEN
+- **Scope**: Bus+Contracts
+- **Revisit when**: When second bus impl must match publish aggregation semantics
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: The in-memory bus aggregates subscriber ``HandleResult.status`` values into a single ``PublishResult.status`` using an implementation-defined precedence (currently: any ``failed`` wins, else any ``rejected``, else all ``skipped`` → ``skipped``, else ``accepted``).
@@ -568,6 +673,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Candidate multi-state index governance (in-memory state store)
 - **Status**: OPEN
+- **Scope**: Persistence
+- **Revisit when**: When multiple active orchestrations per candidate are required
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: The in-memory state store builds a ``candidate_id → orchestration_state_id`` index from ``StateLink`` entries whose ``kind`` matches ``candidate`` (case-insensitive). When multiple links or successive writes touch the same candidate id, the index is **last-write-wins** within the store’s deterministic replace path. The **vertical-slice assumption** is **one primary orchestration state per candidate** for the runnable recruiter path.
@@ -586,6 +693,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Shared confidence abstraction consolidation
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When 2+ stable confidence semantics converge
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Keep confidence concepts local to each contract layer (e.g., candidate confidence vs. skill execution confidence) until the semantics stabilize.
@@ -596,6 +705,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Evidence reference standardization (domain + execution)
 - **Status**: OPEN
+- **Scope**: Contracts+Persistence
+- **Revisit when**: When evidence storage / viewer MVP ships
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Allow evidence references to remain heterogeneous while storage/provenance decisions evolve (e.g., `List[str]` in domain records; structured evidence objects in some execution contracts).
@@ -611,6 +722,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Shared domain vocabulary package (enums + stable string vocab)
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When schema drift from string vocab hurts integrations
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Enums exist per schema module without a shared vocabulary package; some fields intentionally remain free-form `str` to avoid premature enum fragmentation.
@@ -621,6 +734,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Event naming convention governance
 - **Status**: OPEN
+- **Scope**: Contracts
+- **Revisit when**: When event type proliferation complicates replay docs
 - **Introduced in**: 2026-05-09
 - **Last reviewed**: 2026-05-09
 - **Current decision**: Avoid prematurely enum’ing all event types, but require deterministic, reviewable naming conventions for event identifiers.
@@ -639,6 +754,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Shared abstraction over-centralization risk
 - **Status**: OPEN
+- **Scope**: DX
+- **Revisit when**: When planning large cross-package refactors
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Prefer bounded duplication over premature “shared everything” abstractions. Shared packages must be earned by repeated, stable usage.
@@ -655,6 +772,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Automatic `updated_at` handling via service/orchestrator layer
 - **Status**: OPEN
+- **Scope**: Orchestrator+DX
+- **Revisit when**: When audit reports show stale updated_at in production
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Schemas default timestamps but do not auto-mutate; services must set `updated_at`.
@@ -667,6 +786,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Future read-model separation
 - **Status**: OPEN
+- **Scope**: Ops
+- **Revisit when**: When query load or UI projections justify CQRS split
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Candidate aggregate may contain optional snapshots/refs; no dedicated read models yet.
@@ -677,6 +798,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Future event sourcing optimization
 - **Status**: OPEN
+- **Scope**: Persistence+Ops
+- **Revisit when**: When event volume forces partition/index strategy
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: Model event schema for auditability, not throughput.
@@ -689,6 +812,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Potential future state transition typing improvements
 - **Status**: OPEN
+- **Scope**: TransitionEngine+Contracts
+- **Revisit when**: When multi-domain transitions need stricter typing
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-08
 - **Current decision**: `StateTransitionRecord` supports multiple domains using `state_domain` + validated `from_state`/`to_state` strings.
@@ -699,6 +824,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Extraction of default transition registries from the engine module
 - **Status**: OPEN
+- **Scope**: TransitionEngine+DX
+- **Revisit when**: When engine file size blocks rule pack reviews
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: Keep `default_pipeline_registry()` (and similar defaults) co-located with `transition_engine.py` for early discoverability.
@@ -709,6 +836,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ### Transition registry modularization (multi-domain rule packs)
 - **Status**: OPEN
+- **Scope**: TransitionEngine
+- **Revisit when**: When composing multiple rule packs with merge tests
 - **Introduced in**: 2026-05-11
 - **Last reviewed**: 2026-05-11
 - **Current decision**: Use one immutable `TransitionRegistry` type with a flat sorted rule tuple; compose multiple domains in a single registry instance when needed.
