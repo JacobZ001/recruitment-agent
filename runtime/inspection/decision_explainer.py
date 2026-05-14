@@ -7,9 +7,11 @@ to human-readable ``ranking_decision`` payloads for timelines and tooling.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
+
+_MAX_EVIDENCE_REFS = 6
 
 _EXPLANATIONS: Dict[tuple[str, str], str] = {
     ("light", "top_k"): "Shortlisted immediately after light scoring (top bucket).",
@@ -42,6 +44,56 @@ def build_ranking_decision_dict(extensions: Dict[str, Any]) -> Optional[Dict[str
             "explanation": explanation,
         }
     }
+
+
+def evidence_refs_from_extensions(ex: Mapping[str, Any]) -> Optional[List[str]]:
+    refs = ex.get("decision.evidence_refs")
+    if isinstance(refs, list) and refs:
+        return [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+    return None
+
+
+def format_hard_filter_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
+    """Single-line summary from persisted ``decision.hard_filter_pass`` (snapshot only)."""
+    if "decision.hard_filter_pass" not in ex:
+        return None
+    return f"filter computed_pass={ex.get('decision.hard_filter_pass')!r} (from snapshot)"
+
+
+def format_light_scoring_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
+    """Single-line summary from persisted light score keys (snapshot only)."""
+    if "decision.light_score" not in ex:
+        return None
+    return (
+        f"kind=light normalized={ex.get('decision.light_score')!r} "
+        f"confidence_numeric={ex.get('decision.light_confidence')!r} (from snapshot)"
+    )
+
+
+def format_deep_scoring_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
+    """Single-line summary from persisted deep score keys (snapshot only)."""
+    if "decision.deep_score" not in ex:
+        return None
+    return (
+        f"kind=deep normalized={ex.get('decision.deep_score')!r} "
+        f"confidence_numeric={ex.get('decision.deep_confidence')!r} (from snapshot)"
+    )
+
+
+def build_decision_summary_text(ex: Mapping[str, Any]) -> str:
+    """
+    Human-readable aggregate of persisted ``decision.*`` keys (read-only; no skill payloads).
+    """
+    bits: List[str] = []
+    for fn in (
+        format_hard_filter_from_extensions,
+        format_light_scoring_from_extensions,
+        format_deep_scoring_from_extensions,
+    ):
+        s = fn(ex)
+        if s:
+            bits.append(s)
+    return " ".join(bits)
 
 
 def ranking_timeline_lines_for_transition(tr: StateTransitionRecord) -> List[str]:

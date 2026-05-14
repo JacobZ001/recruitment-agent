@@ -9,20 +9,67 @@ from typing import Any, Dict
 from runtime.bootstrap_vertical_slice import vertical_slice_timeline_text
 from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
 
-from integrations.api.demo_summary import vertical_slice_demo_skill_summaries
+from integrations.api.candidate_view import build_candidate_view
 from integrations.api.session import VerticalSliceApiRuntime
+
+
+def _format_candidate_view_html(view: Dict[str, Any]) -> str:
+    """Render composed candidate projection as HTML (no raw JSON dump)."""
+
+    def esc(x: Any) -> str:
+        return html.escape(str(x), quote=True)
+
+    if not view:
+        return "<p><em>No orchestration snapshot loaded.</em></p>"
+
+    parts: list[str] = []
+    parts.append(f"<p><strong>Stage</strong>: {esc(view.get('stage'))}</p>")
+    st = view.get("status")
+    if isinstance(st, dict):
+        parts.append(f"<p><strong>Status</strong>: {esc(st.get('kind'))}</p>")
+    else:
+        parts.append(f"<p><strong>Status</strong>: {esc(st)}</p>")
+    parts.append(f"<p><strong>Summary</strong>: {esc(view.get('summary'))}</p>")
+
+    scores = view.get("scores") or {}
+    if scores:
+        parts.append("<h3>Scores</h3><ul>")
+        for key, val in scores.items():
+            if isinstance(val, dict):
+                inner = ", ".join(f"{esc(sk)}={esc(sv)}" for sk, sv in val.items())
+                parts.append(f"<li><strong>{esc(key)}</strong>: {inner}</li>")
+            else:
+                parts.append(f"<li><strong>{esc(key)}</strong>: {esc(val)}</li>")
+        parts.append("</ul>")
+
+    ranking = view.get("ranking") or {}
+    if ranking:
+        parts.append("<h3>Ranking</h3><ul>")
+        for rk, rv in ranking.items():
+            parts.append(f"<li><strong>{esc(rk)}</strong>: {esc(rv)}</li>")
+        parts.append("</ul>")
+
+    actions = view.get("next_actions") or []
+    if actions:
+        parts.append("<h3>Suggested next actions</h3><ol>")
+        for a in actions:
+            parts.append(f"<li>{esc(a)}</li>")
+        parts.append("</ol>")
+
+    return "\n  ".join(parts)
 
 
 def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
     profile = DEMO_CANDIDATE_DISPLAY
-    summaries = vertical_slice_demo_skill_summaries(rt.bundle)
     timeline = vertical_slice_timeline_text(rt.bundle)
     cid = str(rt.candidate_id)
 
     got = rt.bundle.store.get(rt.bundle.state_id)
     phase = ""
+    view_body: Dict[str, Any] = {}
     if got.ok and got.snapshot is not None:
         phase = got.snapshot.pipeline.phase.value
+        view_body = build_candidate_view(got.snapshot)
 
     def esc(x: Any) -> str:
         return html.escape(str(x), quote=True)
@@ -42,7 +89,7 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
         "reason": "Demo post-evaluation recruiter action (deterministic governance ingress).",
     }
 
-    skills_block = esc(json.dumps(summaries, indent=2, sort_keys=True))
+    skills_block = _format_candidate_view_html(view_body)
 
     inactive_note = ""
     if got.ok and got.snapshot is not None:
@@ -78,8 +125,8 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
   {inactive_note}
   <p><strong>Default candidate id</strong>: <code>{esc(cid)}</code></p>
 
-  <h2>Score / filter summaries (from last skill runs)</h2>
-  <pre>{skills_block}</pre>
+  <h2>Recruiter view (same shape as GET /candidate/&lt;id&gt;)</h2>
+  {skills_block}
 
   <h2>Workflow timeline</h2>
   <pre>{esc(timeline)}</pre>

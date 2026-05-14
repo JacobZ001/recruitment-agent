@@ -885,6 +885,30 @@ Summary (v2 cleanup):
 - Ranking decisions are **implicit** in the planner (chained secondary transition on the same envelope as ``light_scoring_completed`` / ``deep_scoring_completed``).
 - For explainability, **persist and surface** ``ranking.branch`` and ``ranking.stage`` on transition records and snapshot ``OrchestrationState.extensions`` (same merge pattern as ``inactive.*``); timelines and inspection read these keys only.
 
+### Candidate view ``next_actions`` (static)
+- **Status**: OPEN
+- **Scope**: API read model (`integrations/api/candidate_view.py`)
+- **Revisit when**: Transition engine exposes a stable, machine-readable list of allowed ingresses or next valid triggers per phase
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``build_candidate_view`` uses a **static** phase→hint string list for recruiter UX in the vertical-slice demo only (marked with an in-code TODO).
+- **Rationale**: Avoid encoding transition policy twice next to the engine; product-facing hints stay explicitly non-authoritative until derived from the engine.
+- **Future impact**: ``next_actions`` may drift from actual allowed transitions if the graph changes without updating the static map.
+- **Priority**: Low
+- **Recommended future direction**: Derive next actions from the transition engine (or a single published capability artifact) and regression-test against the graph.
+
+### Candidate view explanation vs snapshot boundary
+- **Status**: OPEN
+- **Scope**: API read model (`integrations/api/candidate_view.py`) + inspection explainer
+- **Revisit when**: Audit/replay requirements demand bit-stable human copy on old snapshots
+- **Introduced in**: 2026-05-12
+- **Last reviewed**: 2026-05-12
+- **Current decision**: ``ranking.explanation`` and aggregate ``summary`` strings are **derived at read time** (from persisted ``ranking.*`` / ``decision.*`` keys plus :mod:`runtime.inspection.decision_explainer`), not stored as separate snapshot fields.
+- **Rationale**: Keeps the projection thin and avoids duplicating prose in ``OrchestrationState.extensions`` while explanations remain small and deterministic.
+- **Future impact**: If explanation copy or mapping logic changes, **historical API/timeline text can disagree** with what operators saw at commit time unless old behavior is preserved or versioned.
+- **Priority**: Low
+- **Recommended future direction**: Optionally persist explanation strings in ``snapshot.extensions`` at commit time for audit-stable display, or version explainer outputs behind an explicit schema/revision flag.
+
 ### Legacy governance event types
 - **Status**: OPEN
 - **Scope**: Governance+TransitionEngine

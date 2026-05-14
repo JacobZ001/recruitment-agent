@@ -17,10 +17,12 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from integrations.api.candidate_view import build_candidate_view
 from integrations.api.demo_page import build_demo_recruiter_html
 from integrations.api.demo_summary import vertical_slice_demo_skill_summaries
 from integrations.api.schemas_http import (
     AdminResetResponse,
+    CandidateViewResponse,
     DemoCandidateResponse,
     DemoRunResponse,
     EventIngressResponse,
@@ -257,14 +259,20 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     def get_demo_candidate(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoCandidateResponse:
         return _demo_candidate_response(rt)
 
-    @app.get("/candidate/{candidate_id}", response_model=DemoCandidateResponse)
-    def get_candidate_demo_profile(
+    @app.get("/candidate/{candidate_id}", response_model=CandidateViewResponse)
+    def get_candidate_view(
         candidate_id: UUID,
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
-    ) -> DemoCandidateResponse:
+    ) -> CandidateViewResponse:
         if candidate_id != rt.candidate_id:
             raise HTTPException(status_code=404, detail="candidate_id not found for this runtime")
-        return _demo_candidate_response(rt)
+
+        got = rt.bundle.store.get_for_candidate(candidate_id)
+        if not got.ok or got.snapshot is None:
+            raise HTTPException(status_code=404, detail="no orchestration state for candidate")
+
+        body = build_candidate_view(got.snapshot)
+        return CandidateViewResponse(candidate_id=str(candidate_id), **body)
 
     @app.post("/demo/run", response_model=DemoRunResponse)
     def post_demo_run(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoRunResponse:

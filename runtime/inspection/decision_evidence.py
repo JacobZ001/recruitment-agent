@@ -19,6 +19,13 @@ from orchestrator.vertical_slice_planner import (
 )
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
+from runtime.inspection.decision_explainer import (
+    evidence_refs_from_extensions,
+    format_deep_scoring_from_extensions,
+    format_hard_filter_from_extensions,
+    format_light_scoring_from_extensions,
+)
+
 
 _MAX_RATIONALE_CHARS = 200
 _MAX_REASON_CODES = 6
@@ -54,33 +61,34 @@ def _decision_summary_from_orchestration_extensions(
         "skill_name": name,
         "status": sr.status.value,
     }
-    if name == SKILL_HARD_FILTER and "decision.hard_filter_pass" in ex:
-        parts["decision.summary"] = (
-            f"filter computed_pass={ex.get('decision.hard_filter_pass')!r} (from snapshot)"
-        )
-        refs = ex.get("decision.evidence_refs")
-        if isinstance(refs, list) and refs:
-            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+    if name == SKILL_HARD_FILTER:
+        summary = format_hard_filter_from_extensions(ex)
+        if summary is None:
+            return None
+        parts["decision.summary"] = summary
+        refs = evidence_refs_from_extensions(ex)
+        if refs is not None:
+            parts["evidence.refs"] = refs
         return parts
 
-    if name == SKILL_LIGHT_SCORING and "decision.light_score" in ex:
-        parts["score.summary"] = (
-            f"kind=light normalized={ex.get('decision.light_score')!r} "
-            f"confidence_numeric={ex.get('decision.light_confidence')!r} (from snapshot)"
-        )
-        refs = ex.get("decision.evidence_refs")
-        if isinstance(refs, list) and refs:
-            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+    if name == SKILL_LIGHT_SCORING:
+        summary = format_light_scoring_from_extensions(ex)
+        if summary is None:
+            return None
+        parts["score.summary"] = summary
+        refs = evidence_refs_from_extensions(ex)
+        if refs is not None:
+            parts["evidence.refs"] = refs
         return parts
 
-    if name == SKILL_DEEP_SCORING and "decision.deep_score" in ex:
-        parts["score.summary"] = (
-            f"kind=deep normalized={ex.get('decision.deep_score')!r} "
-            f"confidence_numeric={ex.get('decision.deep_confidence')!r} (from snapshot)"
-        )
-        refs = ex.get("decision.evidence_refs")
-        if isinstance(refs, list) and refs:
-            parts["evidence.refs"] = [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
+    if name == SKILL_DEEP_SCORING:
+        summary = format_deep_scoring_from_extensions(ex)
+        if summary is None:
+            return None
+        parts["score.summary"] = summary
+        refs = evidence_refs_from_extensions(ex)
+        if refs is not None:
+            parts["evidence.refs"] = refs
         return parts
 
     return None

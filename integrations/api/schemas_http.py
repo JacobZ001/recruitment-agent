@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -77,6 +77,24 @@ class DemoCandidateResponse(BaseModel):
         default=None,
         description="From orchestration snapshot extensions when present (e.g. after ranking reject).",
     )
+
+
+class CandidateViewStatus(BaseModel):
+    """Aggregate lifecycle bucket: ``active`` | ``inactive`` | ``hired`` (derived from pipeline phase only)."""
+
+    kind: str
+
+
+class CandidateViewResponse(BaseModel):
+    """Recruiter-facing projection from orchestration snapshot (composed read model)."""
+
+    candidate_id: str
+    stage: str
+    status: CandidateViewStatus
+    summary: str
+    scores: Dict[str, Any] = Field(default_factory=dict)
+    ranking: Dict[str, Any] = Field(default_factory=dict)
+    next_actions: List[str] = Field(default_factory=list)
 
 
 class DemoRunResponse(BaseModel):
