@@ -69,10 +69,14 @@ class DemoCandidateResponse(BaseModel):
     """Demo fixture profile plus current slice snapshot (inspection-oriented, not a domain aggregate)."""
 
     candidate_id: str
-    profile: Dict[str, Any]
+    profile: Dict[str, Any] = Field(default_factory=dict)
     pipeline_phase: Optional[str] = None
     state_summary: Optional[StateSummaryResponse] = None
     skill_summaries: Dict[str, Any] = Field(default_factory=dict)
+    inactive_reason: Optional[str] = Field(
+        default=None,
+        description="From orchestration snapshot extensions when present (e.g. after ranking reject).",
+    )
 
 
 class DemoRunResponse(BaseModel):

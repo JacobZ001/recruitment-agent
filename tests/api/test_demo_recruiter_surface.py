@@ -39,14 +39,14 @@ def test_get_candidate_wrong_id_returns_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_post_demo_run_advances_to_deep_scored(client: TestClient) -> None:
+def test_post_demo_run_advances_to_shortlisted(client: TestClient) -> None:
     r = client.post("/demo/run")
     assert r.status_code == 200
     body = r.json()
-    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.DEEP_SCORED.value
+    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.SHORTLISTED.value
 
     cand = client.get("/demo/candidate").json()
-    assert cand["pipeline_phase"] == PipelinePhase.DEEP_SCORED.value
+    assert cand["pipeline_phase"] == PipelinePhase.SHORTLISTED.value
     hf = cand["skill_summaries"].get("hard_filter") or {}
     assert "decision.summary" in hf or "filter.decision" in str(hf)
 
@@ -69,11 +69,10 @@ def test_api_post_governance_hire_ladder_updates_phase_and_timeline(client: Test
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     assert client.post("/demo/run").status_code == 200
     for et in (
-        "recruiter_approve_candidate",
         "recruiter_schedule_interview",
         "recruiter_complete_interview",
         "recruiter_send_offer",
-        "recruiter_mark_hired",
+        "candidate_accept_offer",
     ):
         r = client.post("/events", json={"event_type": et, "payload": dict(_GOVERNANCE_PAYLOAD)})
         assert r.status_code == 200
@@ -81,7 +80,7 @@ def test_api_post_governance_hire_ladder_updates_phase_and_timeline(client: Test
     st = client.get(f"/state/{cid}").json()
     assert st["pipeline_phase"] == PipelinePhase.HIRED.value
     tl = client.get(f"/timeline/{cid}").json()["timeline_text"]
-    assert "GOVERNANCE_MARK_HIRED" in tl
+    assert "CANDIDATE_ACCEPT_OFFER" in tl
     assert "final.pipeline.phase=hired" in tl
 
 
@@ -89,8 +88,8 @@ def test_demo_html_contains_profile_phase_timeline_and_scores(client: TestClient
     client.post("/demo/run")
     html = client.get("/demo").text
     assert "Alex Morgan" in html
-    assert "deep_scored" in html
+    assert "shortlisted" in html
     assert "workflow timeline" in html
     assert "hard_filter" in html or "filter decision" in html
     assert "recruiter_schedule_interview" in html
-    assert "recruiter_mark_hired" in html
+    assert "candidate_accept_offer" in html

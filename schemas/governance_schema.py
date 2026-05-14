@@ -84,14 +84,22 @@ class GovernanceOverrideIngressPayload(GovernanceIngressPayload):
 
 
 GOVERNANCE_EVENT_TYPES: Tuple[str, ...] = (
-    "recruiter_approve_candidate",
+    # Current vocabulary
+    "recruiter_shortlist_candidate",
     "recruiter_reject_candidate",
     "recruiter_schedule_interview",
     "recruiter_complete_interview",
     "recruiter_send_offer",
-    "recruiter_mark_hired",
+    "recruiter_reconsider_candidate",
+    "candidate_accept_offer",
+    "candidate_decline_offer",
     "recruiter_override_transition",
     "recruiter_force_transition",
+    # Legacy aliases — **deprecated**; retained for replay compatibility only.
+    # - ``recruiter_approve_candidate``: use ``recruiter_shortlist_candidate``.
+    # - ``recruiter_mark_hired``: use ``candidate_accept_offer`` / ``event:offer_accepted``.
+    "recruiter_approve_candidate",
+    "recruiter_mark_hired",
 )
 
 

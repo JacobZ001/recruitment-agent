@@ -20,8 +20,8 @@ from tests.replay.test_vertical_slice_negative_paths import (
 )
 
 
-def test_happy_path_timeline_deterministic_twice_auto_catalog_includes_emitted_ingest() -> None:
-    """Unified catalog (primary + recorded stream) resolves nested workflow ingests."""
+def test_happy_path_timeline_deterministic_twice_auto_catalog() -> None:
+    """Timeline text is stable; primary path shows light scoring then questionnaire (no ranking ingest)."""
     bus_a = RecordingInMemoryEventBus()
     bus_b = RecordingInMemoryEventBus()
     bundle_a = wire_vertical_slice_runtime(bus=bus_a)
@@ -32,10 +32,12 @@ def test_happy_path_timeline_deterministic_twice_auto_catalog_includes_emitted_i
     text_a = vertical_slice_timeline_text(bundle_a)
     text_b = vertical_slice_timeline_text(bundle_b)
     assert text_a == text_b
-    assert "deep_scored" in text_a
-    assert "final.pipeline.phase=deep_scored" in text_a
-    assert "ingest.event_type=questionnaire_requested" in text_a
-    assert "ingest.kind=runtime_emission" in text_a
+    assert "shortlisted" in text_a
+    assert "final.pipeline.phase=shortlisted" in text_a
+    assert "ingest.event_type=light_scoring_completed" in text_a
+    assert "ranking.branch=mid_m" in text_a
+    assert "ranking.stage=light" in text_a
+    assert "ranking_completed" not in text_a
 
 
 def test_happy_path_explicit_recorded_stream_matches_auto_catalog() -> None:

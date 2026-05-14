@@ -273,6 +273,13 @@ class OrchestrationPlan(_OrchestratorBase):
     """
 
     proposed_transition: Optional[ProposedTransition] = None
+    secondary_proposed_transition: Optional[ProposedTransition] = Field(
+        default=None,
+        description=(
+            "Optional second pipeline commit for the same ingested envelope, validated "
+            "after the primary transition commits (e.g. light/deep scoring + immediate ranking)."
+        ),
+    )
     skills: Tuple[SkillInvocationSpec, ...] = Field(default_factory=tuple)
     emissions: Tuple[OrchestrationEmissionDraft, ...] = Field(default_factory=tuple)
 
@@ -463,9 +470,29 @@ def _commit_transition(
     )
     new_transitions: List[StateTransitionRecord] = list(state.transitions) + [record]
     new_audit = _model_copy(state.audit, updated_at=occurred_at, updated_by=updated_by)
-    new_snap_ext = (
-        {**dict(state.extensions), **snapshot_extensions} if snapshot_extensions else dict(state.extensions)
-    )
+    inactive_from_record: Dict[str, Any] = {}
+    ranking_from_record: Dict[str, Any] = {}
+    if proposed.record_extensions:
+        inactive_from_record = {
+            k: v
+            for k, v in proposed.record_extensions.items()
+            if isinstance(k, str) and k.startswith("inactive.")
+        }
+        ranking_from_record = {
+            k: v
+            for k, v in proposed.record_extensions.items()
+            if isinstance(k, str) and k.startswith("ranking.")
+        }
+    new_snap_ext = dict(state.extensions)
+    for k, v in inactive_from_record.items():
+        if v is None:
+            new_snap_ext.pop(k, None)
+        else:
+            new_snap_ext[k] = v
+    for k, v in ranking_from_record.items():
+        new_snap_ext[k] = v
+    if snapshot_extensions:
+        new_snap_ext = {**new_snap_ext, **snapshot_extensions}
 
     if proposed.state_domain == StateDomain.PIPELINE:
         new_pipeline = _model_copy(
@@ -685,11 +712,17 @@ class Orchestrator:
                 kind=OrchestrationDecisionKind.PLAN_ACCEPTED,
                 message="Planner produced a bounded orchestration plan",
                 code="plan",
-                extensions={"skills": len(plan.skills), "emissions": len(plan.emissions), "has_transition": plan.proposed_transition is not None},
+                extensions={
+                    "skills": len(plan.skills),
+                    "emissions": len(plan.emissions),
+                    "has_transition": plan.proposed_transition is not None,
+                    "has_secondary_transition": plan.secondary_proposed_transition is not None,
+                },
             )
         )
 
         tv: Optional[TransitionValidationResult] = None
+        tv_secondary: Optional[TransitionValidationResult] = None
         if plan.proposed_transition is not None:
             pt = plan.proposed_transition
             current = _current_domain_snapshot(state, pt.state_domain)
@@ -813,6 +846,65 @@ class Orchestrator:
                     code=plan.proposed_transition.to_state,
                 )
             )
+
+            if plan.secondary_proposed_transition is not None:
+                pt2 = plan.secondary_proposed_transition
+                current2 = _current_domain_snapshot(new_state, pt2.state_domain)
+                if current2 != pt2.from_state:
+                    return _fail(
+                        OrchestrationFailureCode.STATE_MISMATCH,
+                        "Secondary plan from_state does not match post-primary aggregate snapshot",
+                        details={
+                            "domain": pt2.state_domain.value,
+                            "expected_from": pt2.from_state,
+                            "actual": current2,
+                        },
+                        transition_result=tv,
+                    )
+                tctx2 = TransitionContext(
+                    state_domain=pt2.state_domain,
+                    from_state=pt2.from_state,
+                    to_state=pt2.to_state,
+                    trigger=pt2.trigger,
+                    actor=pt2.transition_actor,
+                    event_id=envelope.event_id,
+                    human_override=pt2.human_override,
+                    rule_set_id=self._ctx.rule_set_id,
+                    replay=_build_transition_replay(delivery),
+                )
+                tv_secondary = self._ctx.transition_engine.validate(tctx2)
+                if not tv_secondary.ok:
+                    return _fail(
+                        OrchestrationFailureCode.TRANSITION_REJECTED,
+                        "Transition engine rejected secondary proposed transition",
+                        details={"rejections": [_pydantic_dump(r) for r in tv_secondary.rejections]},
+                        transition_result=tv_secondary,
+                    )
+                decisions.append(
+                    OrchestrationDecisionRecord(
+                        kind=OrchestrationDecisionKind.TRANSITION_VALIDATED,
+                        message="Transition engine accepted secondary proposed transition",
+                        code=tv_secondary.matched_rule_id,
+                    )
+                )
+                assert tv_secondary.matched_rule_id is not None
+                new_state = _commit_transition(
+                    new_state,
+                    envelope=envelope,
+                    proposed=pt2,
+                    matched_rule_id=tv_secondary.matched_rule_id,
+                    updated_by=self._ctx.updated_by,
+                    occurred_at=occurred_at,
+                    snapshot_extensions=None,
+                )
+                decisions.append(
+                    OrchestrationDecisionRecord(
+                        kind=OrchestrationDecisionKind.STATE_COMMITTED,
+                        message="Committed secondary validated transition to orchestration state snapshot",
+                        code=pt2.to_state,
+                    )
+                )
+                tv = tv_secondary
 
         if self._ctx.publisher is not None:
             for emission_index, draft in enumerate(plan.emissions):

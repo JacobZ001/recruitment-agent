@@ -845,3 +845,66 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Future impact**: Large monolithic registries become harder to review, diff, and assign ownership; cross-pack conflicts (duplicate `rule_id`, overlapping edges) need explicit policy.
 - **Priority**: Medium
 - **Recommended future direction**: Introduce composable registry builders (merge with deterministic conflict rules), namespace `rule_id` prefixes per pack, and harness tests for merge semantics and replay alignment with `rule_set_id`.
+
+## Post-Workflow-Alignment Stabilization
+
+### Placeholder ranking policy
+- **Status**: OPEN
+- **Scope**: Skills+Orchestrator
+- **Revisit when**: When multi-candidate ranking is needed for production shortlisting or automated scoring
+- **Introduced in**: 2026-05-14
+- **Last reviewed**: 2026-05-14
+- **Current decision**: The reference vertical slice uses a placeholder policy (`runtime/vertical_slice_ranking.py`): single-candidate, deterministic branch resolution (`ranking.branch` override + fixed defaults).
+- **Rationale**: Enables initial orchestration and replay while deferring the design and testing of multi-candidate/collection-aware ranking.
+- **Future impact**: Not scalable to pools or real automation; integration of TOP_K/collection-based policy will require additional state and contract changes.
+- **Priority**: Medium
+- **Recommended future direction**: Replace with collection-aware ranking policy and deterministic contract for shortlisting; validate with harness and promote typed ranking envelopes once in scope.
+
+### `ranking_completed` event (deprecated)
+
+Summary (v2 cleanup):
+
+- **Deprecated**: was used as an intermediate orchestration event on the bus.
+- **Replaced by**: direct planner decision (same ingest) for clarity and determinism.
+- **Removal**: enum / timeline skip logic to be fully removed in v2 once replay fixtures allow.
+
+- **Status**: SUPERSEDED (envelope type retained for schema/replay of old recordings only)
+- **Scope**: Orchestrator+Planner+Bus
+- **Revisit when**: v2 removal of `EventType.RANKING_COMPLETED` and scrub of historical tapes
+- **Introduced in**: 2026-05-14
+- **Last reviewed**: 2026-05-14
+- **Current decision**: Ranking is a **direct planner decision** chained in the same ingest as ``light_scoring_completed`` / ``deep_scoring_completed`` via ``OrchestrationPlan.secondary_proposed_transition`` (validated and committed immediately after the primary transition). The orchestrator **does not** publish ``ranking_completed``. API ingress allowlists no longer include it; inspection timelines **skip** runs whose sole ingest was ``ranking_completed`` so primary lines read ``light_scoring_completed`` → ``questionnaire_pending`` (etc.) without an intermediate envelope row.
+- **Rationale**: ``ranking_completed`` was an intermediate orchestration event; in-process chaining reduces bus noise and keeps replay deterministic with fewer subscriber runs for the same pipeline outcome.
+- **Future impact**: Old event catalogs or tests that published ``ranking_completed`` explicitly must migrate; enum value remains until v2.
+- **Priority**: Low
+- **Recommended future direction**: Remove ``ranking_completed`` from ``EventType`` and delete timeline skip logic once no replay fixtures depend on it.
+
+**Ranking decision visibility**
+
+- ``ranking_completed`` was removed for clarity (no duplicate ingest for the same planner outcome).
+- Ranking decisions are **implicit** in the planner (chained secondary transition on the same envelope as ``light_scoring_completed`` / ``deep_scoring_completed``).
+- For explainability, **persist and surface** ``ranking.branch`` and ``ranking.stage`` on transition records and snapshot ``OrchestrationState.extensions`` (same merge pattern as ``inactive.*``); timelines and inspection read these keys only.
+
+### Legacy governance event types
+- **Status**: OPEN
+- **Scope**: Governance+TransitionEngine
+- **Revisit when**: v2 breaking-change window, or when all pipelines and events migrate to new ingress types
+- **Introduced in**: 2026-05-14
+- **Last reviewed**: 2026-05-14
+- **Current decision**: `recruiter_approve_candidate` and `recruiter_mark_hired` remain in allowlists and the transition registry for replay compatibility.
+- **Rationale**: Ensures legacy events are replayable during migration and audit.
+- **Future impact**: Causes migration/maintenance burden as new events (`recruiter_shortlist_candidate`, `candidate_accept_offer`, `event:offer_accepted`) become canonical.
+- **Priority**: Low
+- **Recommended future direction**: Remove legacy event types in a v2 breaking-change window; enforce new ingress and update transition registry accordingly.
+
+### `inactive` phase recoverability and audit
+- **Status**: OPEN
+- **Scope**: TransitionEngine+Governance
+- **Revisit when**: When terminal state handling changes, or audit semantics are expanded
+- **Introduced in**: 2026-05-14
+- **Last reviewed**: 2026-05-14
+- **Current decision**: `inactive` is not a strict terminal phase; transition graph and planner allow `manual_recruiter_reconsider` back to `shortlisted`.
+- **Rationale**: Supports recoverability while maintaining a verifiable audit trail.
+- **Future impact**: Snapshot `extensions` keys such as `inactive.reason` are diagnostic; audit/source-of-truth is transition record history (`StateTransitionRecord` + governance extensions). Diagnostic keys may be cleared on recovery by policy.
+- **Priority**: Medium
+- **Recommended future direction**: Continue to rely on explicit transition/audit history for canonical reasons; consider stricter conventions for extension clearing and messaging when leaving `inactive`.

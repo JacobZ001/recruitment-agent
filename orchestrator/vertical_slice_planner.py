@@ -1,98 +1,20 @@
 """
 Deterministic vertical-slice workflow policy for recruiter orchestration.
 
-Purpose
--------
-Map canonical bus :class:`~interfaces.event_bus_interface.EventEnvelope` records
-plus the current :class:`~schemas.state_schema.OrchestrationState` snapshot into an
-:class:`~orchestrator.orchestrator.OrchestrationPlan` (transitions, bounded skills,
-and optional emissions). This module is **policy only**: it does not execute plans,
-call the transition engine, publish events, or touch persistence.
+Maps bus :class:`~interfaces.event_bus_interface.EventEnvelope` records and the current
+:class:`~schemas.state_schema.OrchestrationState` into an :class:`OrchestrationPlan`.
+Policy only: no execution, persistence, or transition validation (orchestrator + engine).
 
-Boundaries
-----------
-- **In scope**: explicit event → plan tables, idempotent-ish handling of duplicate
-  ingress signals, stable skill name strings, ``event:<name>`` triggers aligned with
-  ``state_machine.transition_engine`` naming rules, ``human_override`` passthrough
-  from envelope extensions/payload for governance compatibility.
-- **Out of scope**: LLM calls, scoring math, ranking, autonomous routing, mutation of
-  ``OrchestrationState``, transition validation (the orchestrator + engine own that),
-  clocks/randomness, async.
+**System path**: CV intake through hard filter and scoring; **ranking** after light and deep
+scoring is a **direct planner decision** (chained pipeline transition in the same ingest;
+``runtime.vertical_slice_ranking.resolve_ranking_branch``). No ``ranking_completed`` bus event.
 
-Deterministic workflow policy philosophy
------------------------------------------
-Programs decide *what should happen next* given typed facts (event + state snapshot).
-The planner never interprets CV content or scores; it only names **which** registered
-skills to invoke and **which** graph edge to request. Bounded behavior: each path
-returns a small fixed upper bound of skills and emissions.
+**Human path**: interview scheduling/completion, ``recruiter_send_offer`` from post-evaluation
+phases only (see ``_SEND_OFFER_FROM_PHASES``), candidate offer accept/decline, recruiter reject and
+reconsider out of ``inactive``. ``hired`` is terminal; ``inactive`` is recoverable.
 
-Scoring stage progression semantics
------------------------------------
-**Light scoring** (early pipeline): when ``light_scoring_completed`` arrives in
-``hard_filter_passed``, the slice advances to ``light_scored`` and schedules the
-questionnaire leg (emission ``questionnaire_requested``)—mirroring
-``hard_filter_passed_to_light_scored`` in the default transition registry.
-
-**Deep scoring** (post-questionnaire): ``deep_scoring_completed`` is modeled as the
-**completion of the deep scoring gate after questionnaire work**, i.e. the edge
-``questionnaire_completed`` → ``deep_scored`` (registry rule
-``questionnaire_completed_to_deep_scored``). Entering ``deep_scored`` is distinct
-from **shortlisting** (``deep_scored`` → ``shortlisted``), which is a separate
-registry edge and is **not** bound to ``deep_scoring_completed`` in this slice
-unless a future explicit event path is added.
-
-Questionnaire stage semantics
------------------------------
-The default pipeline registry advances the questionnaire **leg** as three edges:
-``light_scored`` → ``questionnaire_pending`` → ``questionnaire_sent`` →
-``questionnaire_completed``. The slice binds ingress events to those edges so
-``questionnaire_completed`` (schema ``questionnaire_completed``) is reachable before
-``deep_scoring_completed`` can fire: deep scoring is strictly **after** the
-questionnaire phase snapshot is ``questionnaire_completed``.
-
-
-Relationship to orchestrator / transition engine
-------------------------------------------------
-:class:`~orchestrator.orchestrator.Orchestrator` calls ``plan(...)`` then validates
-``ProposedTransition`` via :class:`state_machine.transition_engine.TransitionEngine`.
-This planner therefore **must** emit triggers and from/to pairs that exist in the
-wired registry (typically ``default_pipeline_registry()``). One deliberate semantic
-compression exists for ``hard_filter_failed`` (see ``plan`` implementation notes).
-``deep_scoring_completed`` is aligned with ``questionnaire_completed_to_deep_scored``,
-not ``deep_scored_to_shortlisted``. Questionnaire ingress events mirror
-``light_scored_to_questionnaire_pending``, ``questionnaire_pending_to_sent``, and
-``questionnaire_sent_to_completed`` so the deep scoring hop is reachable in order.
-
-Replay expectations
----------------------
-The planner is pure in ``state`` + ``envelope`` + ``delivery`` (delivery is accepted
-for interface symmetry; this implementation ignores ``delivery`` except via future
-extensions). Replay runs must supply the same envelopes and state snapshots the
-live slice would have observed at each step; the planner does not consult wall-clock
-time or external IO.
-
-Post-evaluation recruiter governance (bounded)
------------------------------------------------
-After ``deep_scored``, human progression uses **typed governance ingress** mapped to
-**default_pipeline_registry** edges with **explicit manual triggers** (no broad policy
-engine). Terminal pipeline phases are **``hired``** and **``inactive``** (see registry
-``terminal_states``).
-
-**Valid governance actions by current phase (slice contract)**
-
-- ``recruiter_approve_candidate``: ``deep_scored`` → ``shortlisted`` only (duplicate in
-  other phases → empty plan / orchestrator NOOP).
-- ``recruiter_schedule_interview``: ``shortlisted`` → ``interview_pending`` only.
-- ``recruiter_complete_interview``: ``interview_pending`` → ``interview_completed`` only.
-- ``recruiter_send_offer``: ``interview_completed`` → ``offer_sent`` only.
-- ``recruiter_mark_hired``: ``offer_sent`` → ``hired`` only.
-- ``recruiter_reject_candidate``: any non-terminal phase → ``inactive`` via
-  ``event:candidate_rejected``, except **no-op** when already ``inactive`` or ``hired``.
-
-Wrong-phase governance events produce an **empty plan** (deterministic NOOP; bus
-publish still succeeds). Invalid governance payloads fail parsing → empty plan. Illegal
-transitions are not emitted by the planner; ``recruiter_override_transition`` /
-``recruiter_force_transition`` remain a **separate** bounded escape hatch (whitelist).
+**Inactive metadata**: ``inactive.*`` keys on :class:`ProposedTransition.record_extensions`
+merge into aggregate ``OrchestrationState.extensions`` on commit (see orchestrator).
 """
 
 from __future__ import annotations
@@ -104,7 +26,6 @@ from pydantic import ValidationError
 from interfaces.event_bus_interface import DeliveryContext, EventEnvelope
 
 from .orchestrator import (
-    OrchestrationEmissionDraft,
     OrchestrationPlan,
     ProposedTransition,
     SkillInvocationSpec,
@@ -123,6 +44,7 @@ from schemas.governance_schema import (
 from schemas.state_schema import DecisionActorType, OrchestrationState, PipelinePhase, StateActor, StateDomain
 
 from runtime.demo_candidate_fixture import merge_demo_profile_into_skill_payload
+from runtime.vertical_slice_ranking import resolve_ranking_branch
 
 
 # Stable skill identifiers — must match keys in the orchestrator skill registry wiring.
@@ -137,14 +59,61 @@ SKILL_QUESTIONNAIRE_STAGE = "recruitment.vertical_slice.questionnaire_stage"
 # Bounded whitelist: explicit governance transitions must match default_pipeline_registry edges.
 _ALLOWED_GOVERNANCE_OVERRIDE_TRIPLES: FrozenSet[Tuple[str, str, str]] = frozenset(
     {
-        (PipelinePhase.DEEP_SCORED.value, PipelinePhase.SHORTLISTED.value, "manual_recruiter_approve"),
+        (
+            PipelinePhase.DEEP_SCORED.value,
+            PipelinePhase.SHORTLISTED.value,
+            "manual_recruiter_shortlist_candidate",
+        ),
+        (
+            PipelinePhase.DEEP_SCORED.value,
+            PipelinePhase.SHORTLISTED.value,
+            "manual_recruiter_approve",
+        ),
         (
             PipelinePhase.SHORTLISTED.value,
             PipelinePhase.INTERVIEW_PENDING.value,
             "manual_recruiter_schedule_interview",
         ),
+        (
+            PipelinePhase.INTERVIEW_COMPLETED.value,
+            PipelinePhase.INTERVIEW_PENDING.value,
+            "manual_recruiter_schedule_interview",
+        ),
     }
 )
+
+# Phases where ``manual_recruiter_send_offer`` may advance to ``offer_sent`` (registry-aligned).
+_SEND_OFFER_FROM_PHASES: FrozenSet[PipelinePhase] = frozenset(
+    {
+        PipelinePhase.DEEP_SCORED,
+        PipelinePhase.SHORTLISTED,
+        PipelinePhase.INTERVIEW_PENDING,
+        PipelinePhase.INTERVIEW_COMPLETED,
+    }
+)
+
+
+def ranking_record_extensions(*, stage: str, branch: str) -> Dict[str, Any]:
+    """Audit/snapshot keys for deterministic ranking branch (vertical slice)."""
+    return {"ranking.stage": stage, "ranking.branch": branch}
+
+
+def inactive_snapshot_extensions(
+    *,
+    reason: str,
+    source_phase: str,
+    event_type: str,
+    governance_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Keys merged into orchestration snapshot ``extensions`` on inactive transitions."""
+    out: Dict[str, Any] = {
+        "inactive.reason": reason,
+        "inactive.source_phase": source_phase,
+        "inactive.event_type": event_type,
+    }
+    if governance_reason is not None:
+        out["inactive.governance_reason"] = governance_reason
+    return out
 
 
 def _event_trigger(name: str) -> str:
@@ -240,9 +209,13 @@ class VerticalSlicePlanner:
         if et == "deep_scoring_completed":
             return self._plan_deep_scoring_completed(phase, envelope, planner_path="deep_scoring_completed")
         if et == "recruiter_approve_candidate":
-            return self._plan_recruiter_approve_candidate(phase, envelope)
+            return self._plan_recruiter_shortlist_candidate(phase, envelope, legacy_event_type=True)
+        if et == "recruiter_shortlist_candidate":
+            return self._plan_recruiter_shortlist_candidate(phase, envelope, legacy_event_type=False)
         if et == "recruiter_reject_candidate":
             return self._plan_recruiter_reject_candidate(phase, envelope)
+        if et == "candidate_rejected":
+            return self._plan_candidate_rejected(phase, envelope)
         if et == "recruiter_schedule_interview":
             return self._plan_recruiter_schedule_interview(phase, envelope)
         if et == "recruiter_complete_interview":
@@ -251,6 +224,12 @@ class VerticalSlicePlanner:
             return self._plan_recruiter_send_offer(phase, envelope)
         if et == "recruiter_mark_hired":
             return self._plan_recruiter_mark_hired(phase, envelope)
+        if et == "candidate_accept_offer":
+            return self._plan_candidate_accept_offer(phase, envelope)
+        if et == "candidate_decline_offer":
+            return self._plan_candidate_decline_offer(phase, envelope)
+        if et == "recruiter_reconsider_candidate":
+            return self._plan_recruiter_reconsider_candidate(phase, envelope)
         if et == "recruiter_override_transition":
             return self._plan_recruiter_override_transition(phase, envelope, force_human_override=False)
         if et == "recruiter_force_transition":
@@ -353,18 +332,20 @@ class VerticalSlicePlanner:
     def _plan_hard_filter_failed(self, phase: PipelinePhase, envelope: EventEnvelope) -> OrchestrationPlan:
         if phase != PipelinePhase.CV_PARSED:
             return OrchestrationPlan()
-        # Semantic event is ``hard_filter_failed``; the default pipeline registry only
-        # authorizes ``manual_inactive`` / ``event:candidate_rejected`` for the ``*`` ->
-        # inactive edge. We use ``manual_inactive`` as a deterministic control-plane alias
-        # for slice closure (registry extension / typed trigger mapping is deferred).
+        src = phase.value
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
                 from_state=PipelinePhase.CV_PARSED.value,
                 to_state=PipelinePhase.INACTIVE.value,
-                trigger="manual_inactive",
+                trigger=_event_trigger("hard_filter_failed"),
                 human_override=_human_override(envelope),
                 transition_actor=_system_actor(envelope),
+                record_extensions=inactive_snapshot_extensions(
+                    reason="hard_filter_failed",
+                    source_phase=src,
+                    event_type="hard_filter_failed",
+                ),
             ),
             skills=(
                 SkillInvocationSpec(
@@ -384,14 +365,65 @@ class VerticalSlicePlanner:
     ) -> OrchestrationPlan:
         if phase != PipelinePhase.HARD_FILTER_PASSED:
             return OrchestrationPlan()
-        emissions: Tuple[OrchestrationEmissionDraft, ...] = (
-            OrchestrationEmissionDraft(
-                event_type="questionnaire_requested",
-                payload={"reason": "post_light_scoring_gate"},
-                subject_id=envelope.subject_id,
-                subject_kind=envelope.subject_kind or "candidate",
+        payload = dict(envelope.payload or {})
+        branch = resolve_ranking_branch(payload=payload, stage="light")
+        actor = _system_actor(envelope)
+        skills_list: List[SkillInvocationSpec] = [
+            SkillInvocationSpec(
+                skill_name=SKILL_LIGHT_SCORING,
+                input=self._skill_input(planner_path=planner_path, envelope=envelope),
+                required=True,
             ),
-        )
+        ]
+        if branch == "mid_m":
+            skills_list.append(
+                SkillInvocationSpec(
+                    skill_name=SKILL_QUESTIONNAIRE_STAGE,
+                    input=self._skill_input(
+                        planner_path="light_scoring_completed(mid_m_ranking)",
+                        envelope=envelope,
+                    ),
+                    required=False,
+                ),
+            )
+        secondary: ProposedTransition
+        if branch == "top_k":
+            secondary = ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.LIGHT_SCORED.value,
+                to_state=PipelinePhase.SHORTLISTED.value,
+                trigger="system_ranking_top_k",
+                human_override=False,
+                transition_actor=actor,
+                record_extensions=ranking_record_extensions(stage="light", branch="top_k"),
+            )
+        elif branch == "mid_m":
+            secondary = ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.LIGHT_SCORED.value,
+                to_state=PipelinePhase.QUESTIONNAIRE_PENDING.value,
+                trigger="system_ranking_mid_m",
+                human_override=False,
+                transition_actor=actor,
+                record_extensions=ranking_record_extensions(stage="light", branch="mid_m"),
+            )
+        else:
+            secondary = ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.LIGHT_SCORED.value,
+                to_state=PipelinePhase.INACTIVE.value,
+                trigger="system_ranking_reject",
+                human_override=False,
+                transition_actor=actor,
+                record_extensions={
+                    **ranking_record_extensions(stage="light", branch="reject"),
+                    **inactive_snapshot_extensions(
+                        reason="ranking_reject_after_light_scoring",
+                        source_phase=PipelinePhase.LIGHT_SCORED.value,
+                        event_type="light_scoring_completed",
+                    ),
+                },
+            )
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
@@ -399,16 +431,10 @@ class VerticalSlicePlanner:
                 to_state=PipelinePhase.LIGHT_SCORED.value,
                 trigger=_event_trigger("light_scoring_completed"),
                 human_override=_human_override(envelope),
-                transition_actor=_system_actor(envelope),
+                transition_actor=actor,
             ),
-            skills=(
-                SkillInvocationSpec(
-                    skill_name=SKILL_LIGHT_SCORING,
-                    input=self._skill_input(planner_path=planner_path, envelope=envelope),
-                    required=True,
-                ),
-            ),
-            emissions=emissions,
+            secondary_proposed_transition=secondary,
+            skills=tuple(skills_list),
         )
 
     def _plan_questionnaire_requested(
@@ -498,17 +524,40 @@ class VerticalSlicePlanner:
     def _plan_deep_scoring_completed(
         self, phase: PipelinePhase, envelope: EventEnvelope, *, planner_path: str
     ) -> OrchestrationPlan:
-        """
-        Deep scoring **completion** in the slice: leave ``questionnaire_completed`` and
-        enter ``deep_scored`` (see ``questionnaire_completed_to_deep_scored`` in the
-        default pipeline registry).
-
-        This is intentionally **not** the ``deep_scored`` → ``shortlisted`` hop; that
-        progression is reserved for a separate explicit control-plane event in a
-        fuller workflow.
-        """
         if phase != PipelinePhase.QUESTIONNAIRE_COMPLETED:
             return OrchestrationPlan()
+        payload = dict(envelope.payload or {})
+        branch = resolve_ranking_branch(payload=payload, stage="deep")
+        if branch == "mid_m":
+            branch = "top_k"
+        actor = _system_actor(envelope)
+        if branch == "top_k":
+            secondary = ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.DEEP_SCORED.value,
+                to_state=PipelinePhase.SHORTLISTED.value,
+                trigger="system_ranking_top_k",
+                human_override=False,
+                transition_actor=actor,
+                record_extensions=ranking_record_extensions(stage="deep", branch="top_k"),
+            )
+        else:
+            secondary = ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.DEEP_SCORED.value,
+                to_state=PipelinePhase.INACTIVE.value,
+                trigger="system_ranking_reject",
+                human_override=False,
+                transition_actor=actor,
+                record_extensions={
+                    **ranking_record_extensions(stage="deep", branch="reject"),
+                    **inactive_snapshot_extensions(
+                        reason="ranking_reject_after_deep_scoring",
+                        source_phase=PipelinePhase.DEEP_SCORED.value,
+                        event_type="deep_scoring_completed",
+                    ),
+                },
+            )
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
@@ -516,8 +565,9 @@ class VerticalSlicePlanner:
                 to_state=PipelinePhase.DEEP_SCORED.value,
                 trigger=_event_trigger("deep_scoring_completed"),
                 human_override=_human_override(envelope),
-                transition_actor=_system_actor(envelope),
+                transition_actor=actor,
             ),
+            secondary_proposed_transition=secondary,
             skills=(
                 SkillInvocationSpec(
                     skill_name=SKILL_DEEP_SCORING,
@@ -527,28 +577,30 @@ class VerticalSlicePlanner:
             ),
         )
 
-    def _plan_recruiter_approve_candidate(
-        self, phase: PipelinePhase, envelope: EventEnvelope
+    def _plan_recruiter_shortlist_candidate(
+        self, phase: PipelinePhase, envelope: EventEnvelope, *, legacy_event_type: bool
     ) -> OrchestrationPlan:
-        """Registry: ``deep_scored_to_shortlisted`` (deterministic recruiter approval)."""
         try:
             gov = parse_governance_ingress(dict(envelope.payload or {}))
         except ValidationError:
             return OrchestrationPlan()
         if phase != PipelinePhase.DEEP_SCORED:
             return OrchestrationPlan()
+        et = "recruiter_approve_candidate" if legacy_event_type else "recruiter_shortlist_candidate"
+        trig = "manual_recruiter_approve" if legacy_event_type else "manual_recruiter_shortlist_candidate"
+        dc = "GOVERNANCE_APPROVE_CANDIDATE_LEGACY" if legacy_event_type else "GOVERNANCE_SHORTLIST_CANDIDATE"
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
                 from_state=PipelinePhase.DEEP_SCORED.value,
                 to_state=PipelinePhase.SHORTLISTED.value,
-                trigger="manual_recruiter_approve",
+                trigger=trig,
                 human_override=False,
                 transition_actor=_human_actor_from_governance(gov.actor_id),
                 record_extensions=governance_record_extensions(
-                    event_type="recruiter_approve_candidate",
+                    event_type=et,
                     gov=gov,
-                    decision_code="GOVERNANCE_APPROVE_CANDIDATE",
+                    decision_code=dc,
                 ),
             ),
         )
@@ -556,29 +608,37 @@ class VerticalSlicePlanner:
     def _plan_recruiter_reject_candidate(
         self, phase: PipelinePhase, envelope: EventEnvelope
     ) -> OrchestrationPlan:
-        """Registry: ``any_to_inactive`` with ``event:candidate_rejected``."""
         try:
             gov = parse_governance_ingress(dict(envelope.payload or {}))
         except ValidationError:
             return OrchestrationPlan()
         if phase == PipelinePhase.INACTIVE:
             return OrchestrationPlan()
-        # Terminal success: deterministic NOOP (leaving ``hired`` would require explicit override policy).
         if phase == PipelinePhase.HIRED:
             return OrchestrationPlan()
+        src = phase.value
+        rec = governance_record_extensions(
+            event_type="recruiter_reject_candidate",
+            gov=gov,
+            decision_code="GOVERNANCE_REJECT_CANDIDATE",
+        )
+        rec.update(
+            inactive_snapshot_extensions(
+                reason="recruiter_rejected",
+                source_phase=src,
+                event_type="recruiter_reject_candidate",
+                governance_reason=gov.reason,
+            )
+        )
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
                 from_state=phase.value,
                 to_state=PipelinePhase.INACTIVE.value,
-                trigger="event:candidate_rejected",
+                trigger="manual_recruiter_reject",
                 human_override=False,
                 transition_actor=_human_actor_from_governance(gov.actor_id),
-                record_extensions=governance_record_extensions(
-                    event_type="recruiter_reject_candidate",
-                    gov=gov,
-                    decision_code="GOVERNANCE_REJECT_CANDIDATE",
-                ),
+                record_extensions=rec,
             ),
         )
 
@@ -592,6 +652,7 @@ class VerticalSlicePlanner:
         trigger: str,
         event_type: str,
         decision_code: str,
+        extra_record_extensions: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationPlan:
         try:
             gov = parse_governance_ingress(dict(envelope.payload or {}))
@@ -599,6 +660,13 @@ class VerticalSlicePlanner:
             return OrchestrationPlan()
         if phase != from_phase:
             return OrchestrationPlan()
+        rec = governance_record_extensions(
+            event_type=event_type,
+            gov=gov,
+            decision_code=decision_code,
+        )
+        if extra_record_extensions:
+            rec = {**rec, **extra_record_extensions}
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
@@ -607,19 +675,14 @@ class VerticalSlicePlanner:
                 trigger=trigger,
                 human_override=False,
                 transition_actor=_human_actor_from_governance(gov.actor_id),
-                record_extensions=governance_record_extensions(
-                    event_type=event_type,
-                    gov=gov,
-                    decision_code=decision_code,
-                ),
+                record_extensions=rec,
             ),
         )
 
     def _plan_recruiter_schedule_interview(
         self, phase: PipelinePhase, envelope: EventEnvelope
     ) -> OrchestrationPlan:
-        """Registry: ``shortlisted_to_interview_pending``."""
-        return self._governance_manual_pipeline_step(
+        first = self._governance_manual_pipeline_step(
             phase=phase,
             envelope=envelope,
             from_phase=PipelinePhase.SHORTLISTED,
@@ -627,6 +690,17 @@ class VerticalSlicePlanner:
             trigger="manual_recruiter_schedule_interview",
             event_type="recruiter_schedule_interview",
             decision_code="GOVERNANCE_SCHEDULE_INTERVIEW",
+        )
+        if first.proposed_transition is not None:
+            return first
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.INTERVIEW_COMPLETED,
+            to_phase=PipelinePhase.INTERVIEW_PENDING,
+            trigger="manual_recruiter_schedule_interview",
+            event_type="recruiter_schedule_interview",
+            decision_code="GOVERNANCE_SCHEDULE_INTERVIEW_NEXT_ROUND",
         )
 
     def _plan_recruiter_complete_interview(
@@ -646,11 +720,14 @@ class VerticalSlicePlanner:
     def _plan_recruiter_send_offer(
         self, phase: PipelinePhase, envelope: EventEnvelope
     ) -> OrchestrationPlan:
-        """Registry: ``interview_completed_to_offer_sent``."""
+        if phase in (PipelinePhase.OFFER_SENT, PipelinePhase.HIRED):
+            return OrchestrationPlan()
+        if phase not in _SEND_OFFER_FROM_PHASES:
+            return OrchestrationPlan()
         return self._governance_manual_pipeline_step(
             phase=phase,
             envelope=envelope,
-            from_phase=PipelinePhase.INTERVIEW_COMPLETED,
+            from_phase=phase,
             to_phase=PipelinePhase.OFFER_SENT,
             trigger="manual_recruiter_send_offer",
             event_type="recruiter_send_offer",
@@ -660,7 +737,7 @@ class VerticalSlicePlanner:
     def _plan_recruiter_mark_hired(
         self, phase: PipelinePhase, envelope: EventEnvelope
     ) -> OrchestrationPlan:
-        """Registry: ``offer_sent_to_hired``."""
+        """Legacy governance path; prefer ``candidate_accept_offer`` + ``event:offer_accepted``."""
         return self._governance_manual_pipeline_step(
             phase=phase,
             envelope=envelope,
@@ -668,7 +745,106 @@ class VerticalSlicePlanner:
             to_phase=PipelinePhase.HIRED,
             trigger="manual_recruiter_mark_hired",
             event_type="recruiter_mark_hired",
-            decision_code="GOVERNANCE_MARK_HIRED",
+            decision_code="GOVERNANCE_MARK_HIRED_LEGACY",
+        )
+
+    def _plan_candidate_accept_offer(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        if phase != PipelinePhase.OFFER_SENT:
+            return OrchestrationPlan()
+        try:
+            gov = parse_governance_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        rec = governance_record_extensions(
+            event_type="candidate_accept_offer",
+            gov=gov,
+            decision_code="CANDIDATE_ACCEPT_OFFER",
+        )
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.OFFER_SENT.value,
+                to_state=PipelinePhase.HIRED.value,
+                trigger=_event_trigger("offer_accepted"),
+                human_override=False,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=rec,
+            ),
+        )
+
+    def _plan_candidate_decline_offer(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        if phase != PipelinePhase.OFFER_SENT:
+            return OrchestrationPlan()
+        try:
+            gov = parse_governance_ingress(dict(envelope.payload or {}))
+        except ValidationError:
+            return OrchestrationPlan()
+        rec = governance_record_extensions(
+            event_type="candidate_decline_offer",
+            gov=gov,
+            decision_code="CANDIDATE_DECLINE_OFFER",
+        )
+        rec.update(
+            inactive_snapshot_extensions(
+                reason="offer_declined",
+                source_phase=PipelinePhase.OFFER_SENT.value,
+                event_type="candidate_decline_offer",
+                governance_reason=gov.reason,
+            )
+        )
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.OFFER_SENT.value,
+                to_state=PipelinePhase.INACTIVE.value,
+                trigger=_event_trigger("offer_declined"),
+                human_override=False,
+                transition_actor=_human_actor_from_governance(gov.actor_id),
+                record_extensions=rec,
+            ),
+        )
+
+    def _plan_recruiter_reconsider_candidate(
+        self, phase: PipelinePhase, envelope: EventEnvelope
+    ) -> OrchestrationPlan:
+        return self._governance_manual_pipeline_step(
+            phase=phase,
+            envelope=envelope,
+            from_phase=PipelinePhase.INACTIVE,
+            to_phase=PipelinePhase.SHORTLISTED,
+            trigger="manual_recruiter_reconsider",
+            event_type="recruiter_reconsider_candidate",
+            decision_code="GOVERNANCE_RECONSIDER_CANDIDATE",
+            extra_record_extensions={
+                "inactive.reason": None,
+                "inactive.source_phase": None,
+                "inactive.event_type": None,
+                "inactive.governance_reason": None,
+            },
+        )
+
+    def _plan_candidate_rejected(self, phase: PipelinePhase, envelope: EventEnvelope) -> OrchestrationPlan:
+        if phase in (PipelinePhase.INACTIVE, PipelinePhase.HIRED):
+            return OrchestrationPlan()
+        src = phase.value
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=phase.value,
+                to_state=PipelinePhase.INACTIVE.value,
+                trigger=_event_trigger("candidate_rejected"),
+                human_override=False,
+                transition_actor=_system_actor(envelope),
+                record_extensions=inactive_snapshot_extensions(
+                    reason="recruiter_rejected",
+                    source_phase=src,
+                    event_type="candidate_rejected",
+                ),
+            ),
         )
 
     def _plan_recruiter_override_transition(

@@ -14,6 +14,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+from interfaces.event_bus_interface import EventEnvelope
+
 from orchestrator.orchestrator import OrchestrationExecutionResult
 from runtime.bootstrap_vertical_slice import (
     PRIMARY_VERTICAL_SLICE_EVENT_TYPES,
@@ -59,22 +61,21 @@ def test_vertical_slice_replay_twice_identical() -> None:
     assert final_a is not None and final_b is not None
     assert isinstance(final_a, OrchestrationState) and isinstance(final_b, OrchestrationState)
 
-    assert final_a.pipeline.phase == PipelinePhase.DEEP_SCORED
-    assert final_b.pipeline.phase == PipelinePhase.DEEP_SCORED
+    assert final_a.pipeline.phase == PipelinePhase.SHORTLISTED
+    assert final_b.pipeline.phase == PipelinePhase.SHORTLISTED
 
-    assert len(final_a.transitions) == 8
-    assert len(final_b.transitions) == 8
+    assert len(final_a.transitions) == 9
+    assert len(final_b.transitions) == 9
 
-    # One orchestration run per ingress publish, plus one nested run for emitted
-    # ``questionnaire_requested`` after ``light_scoring_completed``.
-    assert len(bundle_a.subscriber.run_history) == 9
-    assert len(bundle_b.subscriber.run_history) == 9
+    # One orchestration run per primary ingress publish (ranking is chained, no extra bus ingests).
+    assert len(bundle_a.subscriber.run_history) == len(PRIMARY_VERTICAL_SLICE_EVENT_TYPES)
+    assert len(bundle_b.subscriber.run_history) == len(PRIMARY_VERTICAL_SLICE_EVENT_TYPES)
 
     assert _json_dict(final_a) == _json_dict(final_b)
 
     assert _runs_payload(bundle_a.subscriber.run_history) == _runs_payload(bundle_b.subscriber.run_history)
 
-    assert len(bus_a.recorded_envelopes) == len(PRIMARY_VERTICAL_SLICE_EVENT_TYPES) + 1
+    assert len(bus_a.recorded_envelopes) == len(PRIMARY_VERTICAL_SLICE_EVENT_TYPES)
     assert len(bus_b.recorded_envelopes) == len(bus_a.recorded_envelopes)
     assert _envelopes_payload(bus_a.recorded_envelopes) == _envelopes_payload(bus_b.recorded_envelopes)
 

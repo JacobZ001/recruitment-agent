@@ -66,12 +66,16 @@ def _demo_candidate_response(rt: VerticalSliceApiRuntime) -> DemoCandidateRespon
             got.snapshot,
             store_revision=got.meta.store_revision,
         )
+    inactive_reason: Optional[str] = None
+    if got.ok and got.snapshot is not None:
+        inactive_reason = got.snapshot.extensions.get("inactive.reason")
     return DemoCandidateResponse(
         candidate_id=str(rt.candidate_id),
         profile=dict(DEMO_CANDIDATE_DISPLAY),
         pipeline_phase=phase,
         state_summary=state_summary,
         skill_summaries=vertical_slice_demo_skill_summaries(rt.bundle),
+        inactive_reason=inactive_reason,
     )
 
 

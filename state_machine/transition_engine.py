@@ -553,68 +553,145 @@ class TransitionEngine:
 
 def default_pipeline_registry() -> TransitionRegistry:
     """
-    Default pipeline phase edges (conservative, linear-ish progression).
+    Recruiter pipeline edges (deterministic; validated by :class:`TransitionEngine`).
 
-    Extend or replace in application wiring; kept explicit for determinism.
+    Automated ranking uses ``system_ranking_*`` triggers; human lifecycle uses
+    ``manual_*`` and ``event:offer_*``; ``inactive`` is not terminal (``hired`` is).
     """
     from schemas.state_schema import PipelinePhase
 
     p = PipelinePhase
+
+    # ``manual_recruiter_send_offer`` only after evaluation + shortlist/interview posture.
+    send_from = (
+        p.DEEP_SCORED,
+        p.SHORTLISTED,
+        p.INTERVIEW_PENDING,
+        p.INTERVIEW_COMPLETED,
+    )
+
     rules: List[TransitionRule] = [
         TransitionRule(
             rule_id="pipeline.new_to_cv_received",
             state_domain=StateDomain.PIPELINE,
             from_state=p.NEW.value,
             to_state=p.CV_RECEIVED.value,
+            allowed_triggers=("event:cv_uploaded",),
         ),
         TransitionRule(
             rule_id="pipeline.cv_received_to_cv_parsed",
             state_domain=StateDomain.PIPELINE,
             from_state=p.CV_RECEIVED.value,
             to_state=p.CV_PARSED.value,
+            allowed_triggers=("event:cv_parsed",),
         ),
         TransitionRule(
             rule_id="pipeline.cv_parsed_to_hard_filter_passed",
             state_domain=StateDomain.PIPELINE,
             from_state=p.CV_PARSED.value,
             to_state=p.HARD_FILTER_PASSED.value,
+            allowed_triggers=("event:hard_filter_passed",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.cv_parsed_to_inactive_filter_failed",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.CV_PARSED.value,
+            to_state=p.INACTIVE.value,
+            allowed_triggers=("event:hard_filter_failed", "manual_inactive"),
         ),
         TransitionRule(
             rule_id="pipeline.hard_filter_passed_to_light_scored",
             state_domain=StateDomain.PIPELINE,
             from_state=p.HARD_FILTER_PASSED.value,
             to_state=p.LIGHT_SCORED.value,
+            allowed_triggers=("event:light_scoring_completed",),
         ),
         TransitionRule(
-            rule_id="pipeline.light_scored_to_questionnaire_pending",
+            rule_id="pipeline.light_scored_to_shortlisted_rank_top_k",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.LIGHT_SCORED.value,
+            to_state=p.SHORTLISTED.value,
+            allowed_triggers=("system_ranking_top_k",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.light_scored_to_questionnaire_pending_legacy",
             state_domain=StateDomain.PIPELINE,
             from_state=p.LIGHT_SCORED.value,
             to_state=p.QUESTIONNAIRE_PENDING.value,
+            allowed_triggers=("event:questionnaire_requested",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.light_scored_to_questionnaire_pending_rank_mid_m",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.LIGHT_SCORED.value,
+            to_state=p.QUESTIONNAIRE_PENDING.value,
+            allowed_triggers=("system_ranking_mid_m",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.light_scored_to_inactive_rank_reject",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.LIGHT_SCORED.value,
+            to_state=p.INACTIVE.value,
+            allowed_triggers=("system_ranking_reject",),
         ),
         TransitionRule(
             rule_id="pipeline.questionnaire_pending_to_sent",
             state_domain=StateDomain.PIPELINE,
             from_state=p.QUESTIONNAIRE_PENDING.value,
             to_state=p.QUESTIONNAIRE_SENT.value,
+            allowed_triggers=("event:questionnaire_sent",),
         ),
         TransitionRule(
             rule_id="pipeline.questionnaire_sent_to_completed",
             state_domain=StateDomain.PIPELINE,
             from_state=p.QUESTIONNAIRE_SENT.value,
             to_state=p.QUESTIONNAIRE_COMPLETED.value,
+            allowed_triggers=("event:questionnaire_completed",),
         ),
         TransitionRule(
             rule_id="pipeline.questionnaire_completed_to_deep_scored",
             state_domain=StateDomain.PIPELINE,
             from_state=p.QUESTIONNAIRE_COMPLETED.value,
             to_state=p.DEEP_SCORED.value,
+            allowed_triggers=("event:deep_scoring_completed",),
         ),
         TransitionRule(
-            rule_id="pipeline.deep_scored_to_shortlisted",
+            rule_id="pipeline.deep_scored_to_inactive_rank_reject",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.DEEP_SCORED.value,
+            to_state=p.INACTIVE.value,
+            allowed_triggers=("system_ranking_reject",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.deep_scored_to_shortlisted_rank_top_k",
             state_domain=StateDomain.PIPELINE,
             from_state=p.DEEP_SCORED.value,
             to_state=p.SHORTLISTED.value,
-            allowed_triggers=("manual_recruiter_approve",),
+            allowed_triggers=("system_ranking_top_k",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.deep_scored_to_shortlisted_manual",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.DEEP_SCORED.value,
+            to_state=p.SHORTLISTED.value,
+            allowed_triggers=(
+                "manual_recruiter_shortlist_candidate",
+                "manual_recruiter_approve",
+            ),
+        ),
+        TransitionRule(
+            rule_id="pipeline.inactive_to_shortlisted_reconsider",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.INACTIVE.value,
+            to_state=p.SHORTLISTED.value,
+            allowed_triggers=("manual_recruiter_reconsider",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.interview_completed_to_interview_pending_next_round",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.INTERVIEW_COMPLETED.value,
+            to_state=p.INTERVIEW_PENDING.value,
+            allowed_triggers=("manual_recruiter_schedule_interview",),
         ),
         TransitionRule(
             rule_id="pipeline.shortlisted_to_interview_pending",
@@ -631,28 +708,40 @@ def default_pipeline_registry() -> TransitionRegistry:
             allowed_triggers=("manual_recruiter_complete_interview",),
         ),
         TransitionRule(
-            rule_id="pipeline.interview_completed_to_offer_sent",
-            state_domain=StateDomain.PIPELINE,
-            from_state=p.INTERVIEW_COMPLETED.value,
-            to_state=p.OFFER_SENT.value,
-            allowed_triggers=("manual_recruiter_send_offer",),
-        ),
-        TransitionRule(
             rule_id="pipeline.offer_sent_to_hired",
             state_domain=StateDomain.PIPELINE,
             from_state=p.OFFER_SENT.value,
             to_state=p.HIRED.value,
-            allowed_triggers=("manual_recruiter_mark_hired",),
+            allowed_triggers=("event:offer_accepted", "manual_recruiter_mark_hired"),
         ),
         TransitionRule(
-            rule_id="pipeline.any_to_inactive",
+            rule_id="pipeline.offer_sent_to_inactive_offer_declined",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.OFFER_SENT.value,
+            to_state=p.INACTIVE.value,
+            allowed_triggers=("event:offer_declined",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.any_to_inactive_reject",
             state_domain=StateDomain.PIPELINE,
             from_state="*",
             to_state=p.INACTIVE.value,
-            allowed_triggers=("event:candidate_rejected", "manual_inactive"),
+            allowed_triggers=("event:candidate_rejected", "manual_recruiter_reject"),
         ),
     ]
+
+    for sf in send_from:
+        rules.append(
+            TransitionRule(
+                rule_id=f"pipeline.{sf.value}_to_offer_sent_send_offer",
+                state_domain=StateDomain.PIPELINE,
+                from_state=sf.value,
+                to_state=p.OFFER_SENT.value,
+                allowed_triggers=("manual_recruiter_send_offer",),
+            )
+        )
+
     terminals: Dict[StateDomain, FrozenSet[str]] = {
-        StateDomain.PIPELINE: frozenset({p.HIRED.value, p.INACTIVE.value}),
+        StateDomain.PIPELINE: frozenset({p.HIRED.value}),
     }
     return TransitionRegistry(rules=tuple(rules), terminal_states=terminals)

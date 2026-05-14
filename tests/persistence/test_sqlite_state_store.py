@@ -175,7 +175,7 @@ def test_wire_vertical_slice_sqlite_survives_reload(tmp_path) -> None:
     store2 = SQLiteStateStore(str(db), config=cfg)
     fin = store2.get(sid)
     assert fin.ok and fin.snapshot is not None
-    assert fin.snapshot.pipeline.phase == PipelinePhase.DEEP_SCORED
+    assert fin.snapshot.pipeline.phase == PipelinePhase.SHORTLISTED
     store2.close()
 
 
@@ -220,4 +220,40 @@ def test_sqlite_full_pipeline_decision_extensions_survive_reload(tmp_path) -> No
     ex2 = reloaded.snapshot.extensions
     assert ex2.get("decision.light_score") is not None
     assert ex2.get("decision.deep_score") is not None
+    store2.close()
+
+
+def test_sqlite_inactive_reason_survives_reload(tmp_path) -> None:
+    db = tmp_path / "inactive.db"
+    cfg = InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK)
+    store = SQLiteStateStore(str(db), config=cfg)
+    bundle = wire_vertical_slice_runtime(bus=RecordingInMemoryEventBus(), store=store)
+    drive_vertical_slice_primary_sequence(bundle)
+    from tests.governance.test_vertical_slice_governance import _gov_envelope
+
+    seq = 900
+    bundle.bus.publish(
+        _gov_envelope(
+            event_type="recruiter_reject_candidate",
+            seq=seq,
+            candidate_id=bundle.candidate_id,
+            correlation_id=bundle.correlation_id,
+            payload={
+                "actor_id": "r1",
+                "actor_type": "recruiter",
+                "reason": "not a fit",
+                "evidence_refs": [],
+            },
+        )
+    )
+    sid = bundle.state_id
+    fin = store.get(sid)
+    assert fin.ok and fin.snapshot is not None
+    assert fin.snapshot.extensions.get("inactive.reason") == "recruiter_rejected"
+    store.close()
+
+    store2 = SQLiteStateStore(str(db), config=cfg)
+    reloaded = store2.get(sid)
+    assert reloaded.ok and reloaded.snapshot is not None
+    assert reloaded.snapshot.extensions.get("inactive.reason") == "recruiter_rejected"
     store2.close()

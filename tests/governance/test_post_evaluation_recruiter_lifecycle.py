@@ -63,11 +63,10 @@ def test_hire_ladder_governance_through_hired() -> None:
     drive_vertical_slice_primary_sequence(bundle)
     seq = 200
     for et in (
-        "recruiter_approve_candidate",
         "recruiter_schedule_interview",
         "recruiter_complete_interview",
         "recruiter_send_offer",
-        "recruiter_mark_hired",
+        "candidate_accept_offer",
     ):
         _publish(bundle, et, seq)
         seq += 1
@@ -75,33 +74,44 @@ def test_hire_ladder_governance_through_hired() -> None:
     assert snap is not None
     assert snap.pipeline.phase == PipelinePhase.HIRED
     codes = [(tr.extensions or {}).get("governance.decision_code") for tr in snap.transitions]
-    assert "GOVERNANCE_APPROVE_CANDIDATE" in codes
     assert "GOVERNANCE_SCHEDULE_INTERVIEW" in codes
     assert "GOVERNANCE_COMPLETE_INTERVIEW" in codes
     assert "GOVERNANCE_SEND_OFFER" in codes
-    assert "GOVERNANCE_MARK_HIRED" in codes
+    assert "CANDIDATE_ACCEPT_OFFER" in codes
 
 
 def test_reject_from_shortlisted_to_inactive() -> None:
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
     drive_vertical_slice_primary_sequence(bundle)
-    _publish(bundle, "recruiter_approve_candidate", 210)
     _publish(bundle, "recruiter_reject_candidate", 211)
     snap = bundle.store.get(bundle.state_id).snapshot
     assert snap is not None
     assert snap.pipeline.phase == PipelinePhase.INACTIVE
 
 
-def test_invalid_schedule_from_deep_scored_is_noop() -> None:
+def test_invalid_schedule_from_questionnaire_pending_is_noop() -> None:
+    from tests.replay.test_vertical_slice_negative_paths import _publish as publish_tuple
+
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
-    drive_vertical_slice_primary_sequence(bundle)
-    phase_before = bundle.store.get(bundle.state_id).snapshot.pipeline.phase
-    assert phase_before == PipelinePhase.DEEP_SCORED
+    publish_tuple(
+        bundle,
+        (
+            "candidate_created",
+            "cv_uploaded",
+            "cv_parsed",
+            "hard_filter_passed",
+            "light_scoring_completed",
+        ),
+    )
+    got = bundle.store.get(bundle.state_id)
+    assert got.ok and got.snapshot is not None
+    phase_before = got.snapshot.pipeline.phase
+    assert phase_before == PipelinePhase.QUESTIONNAIRE_PENDING
     _publish(bundle, "recruiter_schedule_interview", 220)
     snap = bundle.store.get(bundle.state_id).snapshot
-    assert snap.pipeline.phase == PipelinePhase.DEEP_SCORED
+    assert snap.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
     last = bundle.subscriber.run_history[-1]
     assert last.ok
     assert any(d.kind == OrchestrationDecisionKind.NOOP for d in last.decisions)
@@ -123,7 +133,6 @@ def test_duplicate_schedule_interview_is_noop() -> None:
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
     drive_vertical_slice_primary_sequence(bundle)
-    _publish(bundle, "recruiter_approve_candidate", 240)
     _publish(bundle, "recruiter_schedule_interview", 241)
     _publish(bundle, "recruiter_schedule_interview", 242)
     snap = bundle.store.get(bundle.state_id).snapshot
@@ -138,11 +147,10 @@ def test_reject_from_hired_is_noop() -> None:
     drive_vertical_slice_primary_sequence(bundle)
     seq = 250
     for et in (
-        "recruiter_approve_candidate",
         "recruiter_schedule_interview",
         "recruiter_complete_interview",
         "recruiter_send_offer",
-        "recruiter_mark_hired",
+        "candidate_accept_offer",
     ):
         _publish(bundle, et, seq)
         seq += 1
@@ -157,11 +165,10 @@ def test_governance_hire_ladder_replay_parity() -> None:
         drive_vertical_slice_primary_sequence(bundle)
         seq = 300
         for et in (
-            "recruiter_approve_candidate",
             "recruiter_schedule_interview",
             "recruiter_complete_interview",
             "recruiter_send_offer",
-            "recruiter_mark_hired",
+            "candidate_accept_offer",
         ):
             _publish(bundle, et, seq)
             seq += 1

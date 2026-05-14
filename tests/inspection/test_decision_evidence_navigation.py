@@ -210,4 +210,4 @@ def test_timeline_contains_decision_summary_and_navigation() -> None:
         run_history=bundle.subscriber.run_history,
         envelope_catalog=merged,
     )
-    assert "final.pipeline.phase=deep_scored" in nav_txt
+    assert "final.pipeline.phase=shortlisted" in nav_txt

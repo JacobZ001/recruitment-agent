@@ -287,8 +287,10 @@ PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
     "deep_scoring_completed",
 )
 
-# API / integration allowlist = primary progression + bounded governance ingress.
-VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES
+# API / integration allowlist = primary progression + governance + bounded system ingress.
+VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = (
+    PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES + ("candidate_rejected",)
+)
 
 
 StateStoreLike = Union[InMemoryStateStore, SQLiteStateStore]
@@ -525,8 +527,8 @@ def drive_vertical_slice_primary_sequence(
         print("\n=== final snapshot ===")
         print(_dump_state_summary(final.snapshot))
         print(f"terminal pipeline phase: {final.snapshot.pipeline.phase.value!r}")
-        if final.snapshot.pipeline.phase != PipelinePhase.DEEP_SCORED:
-            print("WARNING: expected deep_scored; check planner/registry alignment.")
+        if final.snapshot.pipeline.phase != PipelinePhase.SHORTLISTED:
+            print("WARNING: expected shortlisted; check planner/registry alignment.")
     if print_timeline:
         if timeline_envelopes is not None:
             print(vertical_slice_timeline_text(bundle, timeline_envelopes))
@@ -636,10 +638,10 @@ def run_vertical_slice_bootstrap(
     timeline_envelopes: Optional[Sequence[EventEnvelope]] = None,
 ) -> OrchestrationState:
     """
-    Wire bus + store + orchestrator and drive the default recruiter slice through ``deep_scored``.
+    Wire bus + store + orchestrator and drive the default recruiter slice through ``shortlisted``.
 
-    Publishes the primary ingress sequence; ``questionnaire_requested`` is published after
-    ``light_scoring_completed`` once state has advanced (via the emission collector).
+    Publishes the primary ingress sequence; ranking after light and deep scoring is applied
+    inside the planner on the same ingest (no separate ``ranking_completed`` publish).
     """
     bundle = wire_vertical_slice_runtime()
     return drive_vertical_slice_primary_sequence(

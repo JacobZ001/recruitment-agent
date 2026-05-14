@@ -65,10 +65,14 @@ def _gov_envelope(
     )
 
 
-def test_governance_approve_candidate_advances_to_shortlisted() -> None:
+def test_governance_legacy_approve_is_noop_when_pipeline_already_shortlisted() -> None:
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
     drive_vertical_slice_primary_sequence(bundle)
+    snap0 = bundle.store.get(bundle.state_id).snapshot
+    assert snap0 is not None
+    assert snap0.pipeline.phase == PipelinePhase.SHORTLISTED
+    n0 = len(snap0.transitions)
     env = _gov_envelope(
         event_type="recruiter_approve_candidate",
         seq=50,
@@ -81,8 +85,7 @@ def test_governance_approve_candidate_advances_to_shortlisted() -> None:
     snap = bundle.store.get(bundle.state_id).snapshot
     assert snap is not None
     assert snap.pipeline.phase == PipelinePhase.SHORTLISTED
-    codes = [(tr.extensions or {}).get("governance.decision_code") for tr in snap.transitions]
-    assert "GOVERNANCE_APPROVE_CANDIDATE" in codes
+    assert len(snap.transitions) == n0
 
 
 def test_governance_reject_candidate_to_inactive() -> None:
@@ -109,14 +112,6 @@ def test_governance_override_transition_shortlisted_to_interview_pending() -> No
     bus = RecordingInMemoryEventBus()
     bundle = wire_vertical_slice_runtime(bus=bus)
     drive_vertical_slice_primary_sequence(bundle)
-    env_appr = _gov_envelope(
-        event_type="recruiter_approve_candidate",
-        seq=52,
-        candidate_id=bundle.candidate_id,
-        correlation_id=bundle.correlation_id,
-        payload=dict(_GOV_BASE),
-    )
-    assert bus.publish(env_appr).status.value == "accepted"
     payload = {
         **_GOV_BASE,
         "requested_from_phase": PipelinePhase.SHORTLISTED.value,
@@ -182,7 +177,7 @@ def test_governance_invalid_payload_is_noop() -> None:
     assert pr.status.value == "accepted"
     snap = bundle.store.get(bundle.state_id).snapshot
     assert snap is not None
-    assert snap.pipeline.phase == PipelinePhase.DEEP_SCORED
+    assert snap.pipeline.phase == PipelinePhase.SHORTLISTED
 
 
 def test_governance_timeline_contains_audit_lines() -> None:
@@ -195,7 +190,7 @@ def test_governance_timeline_contains_audit_lines() -> None:
         "override_rationale": "Escalation narrative " + ("x" * 120),
     }
     env = _gov_envelope(
-        event_type="recruiter_approve_candidate",
+        event_type="recruiter_reject_candidate",
         seq=62,
         candidate_id=bundle.candidate_id,
         correlation_id=bundle.correlation_id,
@@ -205,7 +200,7 @@ def test_governance_timeline_contains_audit_lines() -> None:
     text = vertical_slice_timeline_text(bundle)
     assert "governance.ingress" in text
     assert "governance.decision_code=" in text
-    assert "GOVERNANCE_APPROVE_CANDIDATE" in text
+    assert "GOVERNANCE_REJECT_CANDIDATE" in text
     assert "governance.evidence.refs=" in text
     assert "artifact://review/a" in text
     assert "governance.override_rationale=" in text
@@ -218,7 +213,7 @@ def test_governance_replay_twice_identical() -> None:
     def drive(bundle: Any) -> None:
         drive_vertical_slice_primary_sequence(bundle)
         env = _gov_envelope(
-            event_type="recruiter_approve_candidate",
+            event_type="recruiter_schedule_interview",
             seq=70,
             candidate_id=bundle.candidate_id,
             correlation_id=bundle.correlation_id,
@@ -245,9 +240,9 @@ def test_governance_force_transition_sets_human_override_flag() -> None:
     drive_vertical_slice_primary_sequence(bundle)
     payload = {
         **_GOV_BASE,
-        "requested_from_phase": PipelinePhase.DEEP_SCORED.value,
-        "requested_to_phase": PipelinePhase.SHORTLISTED.value,
-        "trigger": "manual_recruiter_approve",
+        "requested_from_phase": PipelinePhase.SHORTLISTED.value,
+        "requested_to_phase": PipelinePhase.INTERVIEW_PENDING.value,
+        "trigger": "manual_recruiter_schedule_interview",
     }
     env = _gov_envelope(
         event_type="recruiter_force_transition",
@@ -259,6 +254,6 @@ def test_governance_force_transition_sets_human_override_flag() -> None:
     assert bus.publish(env).status.value == "accepted"
     snap = bundle.store.get(bundle.state_id).snapshot
     assert snap is not None
-    assert snap.pipeline.phase == PipelinePhase.SHORTLISTED
+    assert snap.pipeline.phase == PipelinePhase.INTERVIEW_PENDING
     last_tr = snap.transitions[-1]
     assert (last_tr.extensions or {}).get("governance.force_human_override") is True

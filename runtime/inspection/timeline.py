@@ -20,6 +20,7 @@ from .decision_evidence import (
     render_operator_navigation_text,
     skill_decision_timeline_lines,
 )
+from .decision_explainer import ranking_timeline_lines_for_ingested_event
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
 # Vertical-slice inspection labels (not persisted; human-readable only).
@@ -89,6 +90,9 @@ def render_vertical_slice_timeline_text(
     :func:`merge_catalog_streams` with primary ingress plus a recorded publish stream
     (e.g. ``RecordingInMemoryEventBus.recorded_envelopes``) so nested workflow events
     such as ``questionnaire_requested`` resolve to concrete ``event_type`` values.
+
+    Runs whose ingest is deprecated ``ranking_completed`` are skipped (ranking is now
+    chained inside ``light_scoring_completed`` / ``deep_scoring_completed``).
     """
     lines: List[str] = []
     by_id = envelope_lookup(envelope_catalog)
@@ -103,6 +107,8 @@ def render_vertical_slice_timeline_text(
     for run_idx, run in enumerate(run_history, start=1):
         ingest_id = str(run.trace.ingested_event_id)
         ingest_env = by_id.get(ingest_id)
+        if ingest_env is not None and ingest_env.event_type == "ranking_completed":
+            continue
         etype = ingest_env.event_type if ingest_env else "<unknown_ingress_type>"
         ikind = (
             classify_vertical_slice_ingest_kind(ingest_env)
@@ -146,6 +152,11 @@ def render_vertical_slice_timeline_text(
                     f"{tr.from_state!r} -> {tr.to_state!r} trigger={tr.trigger!r}"
                 )
                 lines.extend(governance_transition_detail_lines(tr))
+                lines.extend(
+                    ranking_timeline_lines_for_ingested_event(
+                        ns, run.trace.ingested_event_id
+                    )
+                )
 
         tv = run.transition_result
         if tv is not None:

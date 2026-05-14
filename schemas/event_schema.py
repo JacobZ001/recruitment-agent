@@ -64,17 +64,24 @@ class EventType(str, Enum):
     QUESTIONNAIRE_COMPLETED = "questionnaire_completed"
     QUESTIONNAIRE_FAILED = "questionnaire_failed"
 
+    # Ranking (system / orchestrator emission; also valid as direct ingress in tests)
+    RANKING_COMPLETED = "ranking_completed"  # deprecated: ranking decisions are now internal to planner
+
     # Decisions / progression (still as events; decisions remain deterministic elsewhere)
     SHORTLISTED = "shortlisted"
     HUMAN_OVERRIDE = "human_override"
 
     # Human governance (immutable ingress; deterministic planner interprets)
-    RECRUITER_APPROVE_CANDIDATE = "recruiter_approve_candidate"
+    RECRUITER_APPROVE_CANDIDATE = "recruiter_approve_candidate"  # deprecated: use RECRUITER_SHORTLIST_CANDIDATE
+    RECRUITER_SHORTLIST_CANDIDATE = "recruiter_shortlist_candidate"
     RECRUITER_REJECT_CANDIDATE = "recruiter_reject_candidate"
     RECRUITER_SCHEDULE_INTERVIEW = "recruiter_schedule_interview"
     RECRUITER_COMPLETE_INTERVIEW = "recruiter_complete_interview"
     RECRUITER_SEND_OFFER = "recruiter_send_offer"
-    RECRUITER_MARK_HIRED = "recruiter_mark_hired"
+    RECRUITER_MARK_HIRED = "recruiter_mark_hired"  # deprecated: use CANDIDATE_ACCEPT_OFFER + offer_accepted
+    RECRUITER_RECONSIDER_CANDIDATE = "recruiter_reconsider_candidate"
+    CANDIDATE_ACCEPT_OFFER = "candidate_accept_offer"
+    CANDIDATE_DECLINE_OFFER = "candidate_decline_offer"
     RECRUITER_OVERRIDE_TRANSITION = "recruiter_override_transition"
     RECRUITER_FORCE_TRANSITION = "recruiter_force_transition"
 
@@ -84,6 +91,8 @@ class EventType(str, Enum):
 
     # Offer / closure
     OFFER_SENT = "offer_sent"
+    OFFER_ACCEPTED = "offer_accepted"
+    OFFER_DECLINED = "offer_declined"
     CANDIDATE_REJECTED = "candidate_rejected"
 
     # Failures (record-only; no retry/routing logic encoded here)

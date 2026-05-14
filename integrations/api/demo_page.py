@@ -44,6 +44,12 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
 
     skills_block = esc(json.dumps(summaries, indent=2, sort_keys=True))
 
+    inactive_note = ""
+    if got.ok and got.snapshot is not None:
+        ir = got.snapshot.extensions.get("inactive.reason")
+        if ir:
+            inactive_note = f"<p><strong>Inactive reason</strong>: {esc(ir)}</p>"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,6 +75,7 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
 
   <h2>Pipeline</h2>
   <p><strong>Current phase</strong>: {esc(phase)}</p>
+  {inactive_note}
   <p><strong>Default candidate id</strong>: <code>{esc(cid)}</code></p>
 
   <h2>Score / filter summaries (from last skill runs)</h2>
@@ -79,16 +86,19 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
 
   <h2>Governance (via event bus)</h2>
   <p>These buttons POST JSON to <code>/events</code> with typed governance payloads (no direct state mutation).</p>
-  <p>After <code>deep_scored</code>: approve → <code>shortlisted</code>, then schedule interview → complete → send offer → mark hired (each step only valid in the matching phase; wrong phase = deterministic NOOP).</p>
+  <p>After the scripted run the pipeline is typically <code>shortlisted</code> (ranking after light/deep). Then: schedule interview → complete → send offer → candidate accepts offer (wrong phase = deterministic NOOP).</p>
   <p>Typical sequence: <code>POST /demo/run</code> (or stepped <code>POST /events</code>), then use the buttons below in order.</p>
   <button type="button" id="btn-run">POST /demo/run</button>
-  <button type="button" id="btn-approve">recruiter_approve_candidate</button>
+  <button type="button" id="btn-shortlist">recruiter_shortlist_candidate (deep_scored only)</button>
   <button type="button" id="btn-schedule">recruiter_schedule_interview</button>
   <button type="button" id="btn-complete">recruiter_complete_interview</button>
   <button type="button" id="btn-offer">recruiter_send_offer</button>
-  <button type="button" id="btn-hired">recruiter_mark_hired</button>
+  <button type="button" id="btn-accept">candidate_accept_offer</button>
+  <button type="button" id="btn-decline">candidate_decline_offer</button>
+  <button type="button" id="btn-reconsider">recruiter_reconsider_candidate</button>
   <button type="button" id="btn-reject">recruiter_reject_candidate</button>
   <p id="status"></p>
+  <p id="demo-run-error" style="color:#a00;white-space:pre-wrap;"></p>
 
   <h3>curl examples</h3>
   <pre>curl -s -X POST http://127.0.0.1:8000/demo/run
@@ -102,6 +112,12 @@ curl -s -X POST http://127.0.0.1:8000/events -H "Content-Type: application/json"
     const govApprove = {json.dumps(gov_payload_approve)};
     const govReject = {json.dumps(gov_payload_reject)};
     const govPost = {json.dumps(gov_post)};
+    const errKey = 'vertical_slice_demo_run_error';
+    (function() {{
+      const prev = sessionStorage.getItem(errKey);
+      const el = document.getElementById('demo-run-error');
+      if (prev && el) el.textContent = prev;
+    }})();
     async function postEvent(eventType, payload) {{
       const r = await fetch('/events', {{
         method: 'POST',
@@ -113,16 +129,23 @@ curl -s -X POST http://127.0.0.1:8000/events -H "Content-Type: application/json"
       location.reload();
     }}
     document.getElementById('btn-run').onclick = async () => {{
+      sessionStorage.removeItem(errKey);
       const r = await fetch('/demo/run', {{ method: 'POST' }});
       const t = await r.text();
       document.getElementById('status').textContent = r.status + ' ' + t.slice(0, 500);
+      if (r.status === 409) {{
+        sessionStorage.setItem(errKey, 'Demo run blocked (409): ' + t);
+        document.getElementById('demo-run-error').textContent = sessionStorage.getItem(errKey);
+      }}
       location.reload();
     }};
-    document.getElementById('btn-approve').onclick = () => postEvent('recruiter_approve_candidate', govApprove);
+    document.getElementById('btn-shortlist').onclick = () => postEvent('recruiter_shortlist_candidate', govApprove);
     document.getElementById('btn-schedule').onclick = () => postEvent('recruiter_schedule_interview', govPost);
     document.getElementById('btn-complete').onclick = () => postEvent('recruiter_complete_interview', govPost);
     document.getElementById('btn-offer').onclick = () => postEvent('recruiter_send_offer', govPost);
-    document.getElementById('btn-hired').onclick = () => postEvent('recruiter_mark_hired', govPost);
+    document.getElementById('btn-accept').onclick = () => postEvent('candidate_accept_offer', govPost);
+    document.getElementById('btn-decline').onclick = () => postEvent('candidate_decline_offer', govReject);
+    document.getElementById('btn-reconsider').onclick = () => postEvent('recruiter_reconsider_candidate', govPost);
     document.getElementById('btn-reject').onclick = () => postEvent('recruiter_reject_candidate', govReject);
   </script>
 </body>
