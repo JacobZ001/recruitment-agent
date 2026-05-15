@@ -1,9 +1,7 @@
 """
 Thin FastAPI boundary for the recruiter vertical slice.
 
-Ingress only: ``POST /events`` publishes validated :class:`~interfaces.event_bus_interface.EventEnvelope`
-records onto the in-memory bus; orchestration remains unchanged (subscriber → orchestrator → store).
-No workflow policy or direct state mutation here.
+HTTP concerns only; recruitment business actions live in ``modules.recruitment``.
 """
 
 from __future__ import annotations
@@ -11,15 +9,13 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from integrations.api.candidate_view import build_candidate_view
 from integrations.api.demo_page import build_demo_recruiter_html
-from integrations.api.demo_summary import vertical_slice_demo_skill_summaries
 from integrations.api.schemas_http import (
     AdminResetResponse,
     CandidateViewResponse,
@@ -31,75 +27,21 @@ from integrations.api.schemas_http import (
     TimelineResponse,
     VerticalSliceIngressEventBody,
 )
-from integrations.api.session import DemoRunPreconditionError, VerticalSliceApiRuntime
-from runtime.persistence.sqlite_state_store import SQLiteStateStore
-from interfaces.event_bus_interface import DeliveryStatus
-from runtime.bootstrap_vertical_slice import (
-    VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
-    vertical_slice_timeline_text,
-    _envelope,
-    _FIXED_CLOCK,
+from integrations.api.session import VerticalSliceApiRuntime
+from modules.recruitment import (
+    CandidateNotFoundError,
+    DemoRunPreconditionError,
+    get_candidate_view_for_runtime,
+    get_demo_candidate,
+    get_state_summary,
+    get_timeline,
+    policies,
+    record_recruiter_decision,
+    run_primary_demo_sequence,
+    submit_cv,
 )
-from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
-from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
-from schemas.state_schema import OrchestrationState
-
-
-def _state_summary_from_snapshot(
-    snap: OrchestrationState,
-    *,
-    store_revision: Optional[int],
-) -> StateSummaryResponse:
-    return StateSummaryResponse(
-        pipeline_phase=snap.pipeline.phase.value,
-        transitions_count=len(snap.transitions),
-        state_id=str(snap.id),
-        store_revision=store_revision,
-    )
-
-
-def _demo_candidate_response(rt: VerticalSliceApiRuntime) -> DemoCandidateResponse:
-    got = rt.bundle.store.get(rt.bundle.state_id)
-    state_summary: Optional[StateSummaryResponse] = None
-    phase: Optional[str] = None
-    if got.ok and got.snapshot is not None and got.meta is not None:
-        phase = got.snapshot.pipeline.phase.value
-        state_summary = _state_summary_from_snapshot(
-            got.snapshot,
-            store_revision=got.meta.store_revision,
-        )
-    inactive_reason: Optional[str] = None
-    if got.ok and got.snapshot is not None:
-        inactive_reason = got.snapshot.extensions.get("inactive.reason")
-    return DemoCandidateResponse(
-        candidate_id=str(rt.candidate_id),
-        profile=dict(DEMO_CANDIDATE_DISPLAY),
-        pipeline_phase=phase,
-        state_summary=state_summary,
-        skill_summaries=vertical_slice_demo_skill_summaries(rt.bundle),
-        inactive_reason=inactive_reason,
-    )
-
-
-def _publish_payload_merge(base_payload: Dict[str, Any], extra: Dict[str, Any], seq: int) -> Dict[str, Any]:
-    out = dict(base_payload)
-    out.update(extra)
-    out["api_sequence"] = seq
-    return out
-
-
-def _timeline_catalog_note(rt: VerticalSliceApiRuntime) -> Optional[str]:
-    bus = rt.bundle.bus
-    rec = getattr(bus, "recorded_envelopes", None)
-    if rec is None:
-        return (
-            "This bus implementation does not expose recorded_envelopes; merged catalog "
-            "cannot include runtime-emitted publishes—ingress labels for nested orchestration "
-            "runs may show as unknown types unless an explicit catalog is supplied elsewhere."
-        )
-    if len(rec) == 0:
-        return "No envelopes recorded yet; publish events before expecting a rich timeline."
-    return None
+from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
+from runtime.persistence.sqlite_state_store import SQLiteStateStore
 
 
 def get_runtime(request: Request) -> VerticalSliceApiRuntime:
@@ -109,15 +51,22 @@ def get_runtime(request: Request) -> VerticalSliceApiRuntime:
     return rt
 
 
+def _candidate_not_found_http(candidate_id: UUID, *, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": "candidate_not_found",
+            "message": message,
+            "candidate_id": str(candidate_id),
+        },
+    )
+
+
 DEFAULT_VERTICAL_SLICE_DB_PATH = "data/app.db"
 
 
 def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
-    """SQLite file path, or ``None`` for in-memory store.
-
-    Unless ``explicit`` is passed to :func:`create_app`, reads ``VERTICAL_SLICE_DB_PATH``:
-    unset → ``data/app.db``; empty string → in-memory.
-    """
+    """SQLite file path, or ``None`` for in-memory store."""
     if explicit is not None:
         s = explicit.strip()
         return s if s else None
@@ -163,7 +112,6 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
 
     @app.post("/admin/reset", response_model=AdminResetResponse, tags=["admin"])
     def admin_reset(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> AdminResetResponse:
-        """Development-only: wipe persisted orchestration rows (SQLite) and restore bootstrap ``NEW`` state."""
         try:
             result = rt.dev_reset_to_bootstrap_initial()
         except RuntimeError as exc:
@@ -180,52 +128,39 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> EventIngressResponse:
         cid = body.candidate_id if body.candidate_id is not None else VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
-        if cid != rt.candidate_id:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "candidate_not_found",
-                    "message": "candidate_id does not match this single-aggregate runtime",
-                    "candidate_id": str(cid),
-                },
-            )
+        try:
+            if policies.is_governance_event(body.event_type):
+                result = record_recruiter_decision(
+                    rt,
+                    cid,
+                    body.event_type,
+                    body.payload,
+                    correlation_id=body.correlation_id,
+                )
+            else:
+                result = submit_cv(
+                    rt,
+                    cid,
+                    body.event_type,
+                    body.payload,
+                    correlation_id=body.correlation_id,
+                )
+        except CandidateNotFoundError:
+            raise _candidate_not_found_http(
+                cid,
+                message="candidate_id does not match this single-aggregate runtime",
+            ) from None
 
-        seq = rt.next_publish_sequence()
-        correlation = body.correlation_id if body.correlation_id is not None else cid
-
-        env = _envelope(
-            event_type=body.event_type,
-            candidate_id=cid,
-            correlation_id=correlation,
-            occurred_at=_FIXED_CLOCK,
-            seq=seq,
-        )
-        # Governance payloads use strict Pydantic models (``extra=forbid``). Do not merge
-        # bootstrap/bootstrap-sequence keys from :func:`_envelope` or they invalidate parsing.
-        if body.event_type in GOVERNANCE_EVENT_TYPES:
-            merged_payload = dict(body.payload)
-        else:
-            merged_payload = _publish_payload_merge(dict(env.payload), body.payload, seq)
-        env = env.model_copy(update={"payload": merged_payload})
-
-        pr = rt.bundle.bus.publish(env)
-        accepted = pr.status == DeliveryStatus.ACCEPTED
-        pub_dump = pr.model_dump(mode="json")
-
-        state_summary: Optional[StateSummaryResponse] = None
-        cur = rt.bundle.store.get(rt.bundle.state_id)
-        if cur.ok and cur.snapshot is not None and cur.meta is not None:
-            state_summary = _state_summary_from_snapshot(
-                cur.snapshot,
-                store_revision=cur.meta.store_revision,
-            )
+        state_summary = None
+        if result.state_summary is not None:
+            state_summary = StateSummaryResponse(**result.state_summary)
 
         return EventIngressResponse(
-            ingress_accepted=accepted,
-            publish_status=pr.status.value,
-            event_id=str(env.event_id),
-            event_type=env.event_type,
-            publish_result=pub_dump,
+            ingress_accepted=result.ingress_accepted,
+            publish_status=result.publish_status,
+            event_id=result.event_id,
+            event_type=result.event_type,
+            publish_result=result.publish_result,
             state_summary=state_summary,
         )
 
@@ -234,50 +169,61 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         candidate_id: UUID,
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> StateSummaryResponse:
-        if candidate_id != rt.candidate_id:
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime")
+        try:
+            policies.validate_single_tenant_candidate(rt, candidate_id)
+        except CandidateNotFoundError:
+            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from None
 
         got = rt.bundle.store.get_for_candidate(candidate_id)
         if not got.ok or got.snapshot is None or got.meta is None:
             raise HTTPException(status_code=404, detail="no orchestration state for candidate")
 
-        return _state_summary_from_snapshot(got.snapshot, store_revision=got.meta.store_revision)
+        return StateSummaryResponse(**get_state_summary(got.snapshot, store_revision=got.meta.store_revision))
 
     @app.get("/timeline/{candidate_id}", response_model=TimelineResponse)
-    def get_timeline(
+    def get_timeline_route(
         candidate_id: UUID,
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> TimelineResponse:
-        if candidate_id != rt.candidate_id:
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime")
+        try:
+            policies.validate_single_tenant_candidate(rt, candidate_id)
+        except CandidateNotFoundError:
+            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from None
 
-        note = _timeline_catalog_note(rt)
-        text = vertical_slice_timeline_text(rt.bundle)
-        return TimelineResponse(timeline_text=text, catalog_note=note)
+        tl = get_timeline(rt)
+        return TimelineResponse(**tl)
 
     @app.get("/demo/candidate", response_model=DemoCandidateResponse)
-    def get_demo_candidate(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoCandidateResponse:
-        return _demo_candidate_response(rt)
+    def get_demo_candidate_route(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoCandidateResponse:
+        body = get_demo_candidate(rt)
+        state_summary = body.get("state_summary")
+        return DemoCandidateResponse(
+            candidate_id=body["candidate_id"],
+            profile=body["profile"],
+            pipeline_phase=body["pipeline_phase"],
+            state_summary=StateSummaryResponse(**state_summary) if state_summary else None,
+            skill_summaries=body["skill_summaries"],
+            inactive_reason=body.get("inactive_reason"),
+        )
 
     @app.get("/candidate/{candidate_id}", response_model=CandidateViewResponse)
-    def get_candidate_view(
+    def get_candidate_view_route(
         candidate_id: UUID,
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> CandidateViewResponse:
-        if candidate_id != rt.candidate_id:
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime")
-
-        got = rt.bundle.store.get_for_candidate(candidate_id)
-        if not got.ok or got.snapshot is None:
-            raise HTTPException(status_code=404, detail="no orchestration state for candidate")
-
-        body = build_candidate_view(got.snapshot)
-        return CandidateViewResponse(candidate_id=str(candidate_id), **body)
+        try:
+            view = get_candidate_view_for_runtime(rt, candidate_id)
+        except CandidateNotFoundError as exc:
+            msg = str(exc)
+            if "no orchestration state" in msg:
+                raise HTTPException(status_code=404, detail="no orchestration state for candidate") from exc
+            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from exc
+        return CandidateViewResponse(candidate_id=str(candidate_id), **view)
 
     @app.post("/demo/run", response_model=DemoRunResponse)
     def post_demo_run(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoRunResponse:
         try:
-            snap = rt.run_primary_demo_sequence()
+            snap = run_primary_demo_sequence(rt, rt.candidate_id)
         except DemoRunPreconditionError as e:
             raise HTTPException(status_code=409, detail=str(e)) from e
         got = rt.bundle.store.get(rt.bundle.state_id)
@@ -285,9 +231,8 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail="state store meta missing after demo run")
         return DemoRunResponse(
             message="primary vertical slice sequence published via bus",
-            state_summary=_state_summary_from_snapshot(
-                snap,
-                store_revision=got.meta.store_revision,
+            state_summary=StateSummaryResponse(
+                **get_state_summary(snap, store_revision=got.meta.store_revision)
             ),
         )
 

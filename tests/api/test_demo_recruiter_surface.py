@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from integrations.api.app import create_app
-from integrations.api.candidate_view import CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+from modules.recruitment.projection import CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
 from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from schemas.state_schema import PipelinePhase
 

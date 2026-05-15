@@ -1,39 +1,13 @@
-"""Read-only demo projections from the wired vertical-slice bundle (no policy)."""
+"""Backward-compatible shim; canonical implementation is ``modules.recruitment.projection``."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from orchestrator.vertical_slice_planner import (
-    SKILL_DEEP_SCORING,
-    SKILL_HARD_FILTER,
-    SKILL_LIGHT_SCORING,
-)
 from runtime.bootstrap_vertical_slice import VerticalSliceRuntimeBundle
-from runtime.inspection import skill_decision_summary_parts
+
+from modules.recruitment.projection import demo_skill_summaries
 
 
 def vertical_slice_demo_skill_summaries(bundle: VerticalSliceRuntimeBundle) -> Dict[str, Any]:
-    """Last successful summaries for hard filter / light / deep scoring from run history."""
-    hard: Optional[Dict[str, Any]] = None
-    light: Optional[Dict[str, Any]] = None
-    deep: Optional[Dict[str, Any]] = None
-    got = bundle.store.get(bundle.state_id)
-    snap = got.snapshot if got.ok and got.snapshot is not None else None
-    for run in bundle.subscriber.run_history:
-        if not run.ok:
-            continue
-        for sr in run.skill_results:
-            name = sr.metadata.skill_name
-            parts = skill_decision_summary_parts(sr, state_snapshot=snap)
-            if name == SKILL_HARD_FILTER:
-                hard = parts
-            elif name == SKILL_LIGHT_SCORING:
-                light = parts
-            elif name == SKILL_DEEP_SCORING:
-                deep = parts
-    return {
-        "hard_filter": hard,
-        "light_scoring": light,
-        "deep_scoring": deep,
-    }
+    return demo_skill_summaries(bundle)

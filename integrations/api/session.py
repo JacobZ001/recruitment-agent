@@ -19,11 +19,8 @@ from runtime.bootstrap_vertical_slice import (
 from runtime.in_memory_state_store import InMemoryStateStoreConfig
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from runtime.recording_event_bus import RecordingInMemoryEventBus
+from modules.recruitment.exceptions import DemoRunPreconditionError
 from schemas.state_schema import OrchestrationState, PipelinePhase
-
-
-class DemoRunPreconditionError(ValueError):
-    """Raised when ``POST /demo/run`` cannot safely replay the scripted primary sequence."""
 
 
 @dataclass(frozen=True)

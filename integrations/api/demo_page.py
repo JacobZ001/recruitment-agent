@@ -9,7 +9,7 @@ from typing import Any, Dict
 from runtime.bootstrap_vertical_slice import vertical_slice_timeline_text
 from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
 
-from integrations.api.candidate_view import build_candidate_view
+from modules.recruitment.projection import build_candidate_view
 from integrations.api.session import VerticalSliceApiRuntime
 
 

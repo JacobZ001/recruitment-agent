@@ -100,3 +100,17 @@ Purpose: preserve long-term architectural reasoning, prevent drift, and provide 
 - **Tradeoffs**: Less static type safety in the short term; potential inconsistency across modules if not tracked.
 - **Future Considerations**: Create a shared domain vocabulary module once stable, introduce backward-compatible aliases, and migrate string fields to shared enums with harness validation.
 
+---
+
+## ADR-007 — Modular monolith application boundary (`modules/recruitment`)
+
+- **ADR ID**: ADR-007
+- **Title**: Single-tenant modular monolith with a recruitment application module
+- **Status**: Accepted
+- **Decision date**: 2026-05-12
+- **Context**: Incremental capabilities were spreading across `integrations/api`, `runtime`, and inspection helpers, requiring coordinated edits across many files for small features. Dependency direction was unclear (HTTP vs domain vs orchestration).
+- **Decision**: Introduce `modules/recruitment` as the **application/domain boundary** for recruitment business actions (policies, use cases, read projections). Dependency flow is **`integrations/api` → `modules/recruitment` → `runtime` / orchestrator / store**. The API layer owns HTTP models, FastAPI wiring, runtime lifecycle, and mapping application exceptions to status codes. `modules/recruitment` does not import `integrations.api`, does not construct runtimes, and does not raise `HTTPException`. Transition legality and workflow routing remain in `state_machine` and `orchestrator` respectively.
+- **Consequences**: New recruiter-facing features have a clear home (`use_cases.py`, `policies.py`, `projection.py`); API routes stay thin; orchestration and schemas stay unchanged in Step 1.
+- **Tradeoffs**: Some duplication of runtime typing via Protocols until a shared ports module exists; projections may still read bootstrap/inspection helpers directly.
+- **Future Considerations**: Move additional runtime wiring behind explicit ports; grow modules only when a second bounded context appears (avoid premature microservices).
+
