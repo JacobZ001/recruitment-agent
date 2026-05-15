@@ -29,25 +29,41 @@ def _format_candidate_view_html(view: Dict[str, Any]) -> str:
         parts.append(f"<p><strong>Status</strong>: {esc(st.get('kind'))}</p>")
     else:
         parts.append(f"<p><strong>Status</strong>: {esc(st)}</p>")
-    parts.append(f"<p><strong>Summary</strong>: {esc(view.get('summary'))}</p>")
+
+    parts.append("<h3>Evaluation status</h3>")
+    parts.append(f"<p>{esc(view.get('summary'))}</p>")
 
     scores = view.get("scores") or {}
-    if scores:
-        parts.append("<h3>Scores</h3><ul>")
-        for key, val in scores.items():
-            if isinstance(val, dict):
-                inner = ", ".join(f"{esc(sk)}={esc(sv)}" for sk, sv in val.items())
-                parts.append(f"<li><strong>{esc(key)}</strong>: {inner}</li>")
-            else:
-                parts.append(f"<li><strong>{esc(key)}</strong>: {esc(val)}</li>")
+    crit = scores.get("criteria") or []
+    if crit:
+        parts.append("<h3>Evaluation</h3>")
+        parts.append("<ul>")
+        for row in crit:
+            name = row.get("name")
+            score = row.get("score")
+            conf = row.get("confidence")
+            src = row.get("source")
+            score_s = esc(score) if score is not None else "n/a"
+            conf_s = esc(conf) if conf is not None else "n/a"
+            parts.append(
+                f"<li><strong>{esc(name)}</strong>: {score_s} "
+                f"(confidence: {conf_s}) — <em>{esc(src)}</em></li>"
+            )
         parts.append("</ul>")
+        ov = scores.get("overall_score") or {}
+        ov_val = ov.get("value")
+        ov_type = ov.get("type")
+        ov_s = esc(ov_val) if ov_val is not None else "n/a"
+        type_s = esc(ov_type) if ov_type is not None else "n/a"
+        parts.append(f"<p><strong>Overall score</strong>: {ov_s} ({type_s})</p>")
 
     ranking = view.get("ranking") or {}
-    if ranking:
-        parts.append("<h3>Ranking</h3><ul>")
-        for rk, rv in ranking.items():
-            parts.append(f"<li><strong>{esc(rk)}</strong>: {esc(rv)}</li>")
-        parts.append("</ul>")
+    parts.append("<h3>Ranking</h3>")
+    parts.append("<ul>")
+    parts.append(f"<li><strong>rank</strong>: {esc(ranking.get('rank'))}</li>")
+    parts.append(f"<li><strong>total_candidates</strong>: {esc(ranking.get('total_candidates'))}</li>")
+    parts.append(f"<li><strong>note</strong>: {esc(ranking.get('note'))}</li>")
+    parts.append("</ul>")
 
     actions = view.get("next_actions") or []
     if actions:

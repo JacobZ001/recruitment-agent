@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from integrations.api.app import create_app
+from integrations.api.candidate_view import CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
 from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from schemas.state_schema import PipelinePhase
 
@@ -24,6 +25,26 @@ _GOVERNANCE_PAYLOAD = {
 def client() -> TestClient:
     with TestClient(create_app(db_path="")) as c:
         yield c
+
+
+def _assert_criteria_shape(crit: list) -> None:
+    assert isinstance(crit, list)
+    assert len(crit) >= 2
+    for c in crit:
+        assert "name" in c and isinstance(c["name"], str) and c["name"]
+        assert "source" in c and c["source"] in (
+            "universal",
+            "role_specific",
+            "recruiter_preference",
+        )
+        assert c.get("score") is None
+        assert c.get("confidence") is None
+
+
+def _assert_overall_score_shape(overall: dict) -> None:
+    assert "value" in overall
+    assert "type" in overall
+    assert overall["type"] in ("light", "deep", None)
 
 
 def test_get_demo_candidate_returns_fixture_profile(client: TestClient) -> None:
@@ -43,21 +64,55 @@ def test_get_candidate_by_id_returns_projection(client: TestClient) -> None:
     assert data["candidate_id"] == cid
     assert data["stage"] == PipelinePhase.NEW.value
     assert data["status"]["kind"] == "active"
-    assert "pipeline" in data["summary"].lower() or "new" in data["summary"].lower()
+    assert data["summary"] == CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+    _assert_criteria_shape(data["scores"]["criteria"])
+    _assert_overall_score_shape(data["scores"]["overall_score"])
+    assert data["scores"]["overall_score"]["value"] is None
+    assert data["scores"]["overall_score"]["type"] is None
+    assert data["ranking"]["rank"] is None
+    assert data["ranking"]["total_candidates"] is None
+    assert "branch" not in data["ranking"]
+    assert "stage" not in data["ranking"]
     assert data["next_actions"] == []
 
 
-def test_get_candidate_after_demo_run_includes_ranking_and_scores(client: TestClient) -> None:
+def test_ranking_section_omits_snapshot_scoring_stage_keys(client: TestClient) -> None:
+    """``ranking.stage`` / ``ranking.branch`` stay on snapshot for audit; not recruiter API."""
+    assert client.post("/demo/run").status_code == 200
+    data = client.get(f"/candidate/{VERTICAL_SLICE_DEFAULT_CANDIDATE_ID}").json()
+    rt = client.app.state.vertical_slice
+    ext = dict(rt.bundle.store.get_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID).snapshot.extensions)
+    assert ext.get("ranking.stage") == "deep"
+    assert "stage" not in data["ranking"]
+    assert "branch" not in data["ranking"]
+    assert data["scores"]["overall_score"]["type"] == "deep"
+
+
+def test_get_candidate_after_demo_run_scores_and_ranking_match_extensions(client: TestClient) -> None:
     assert client.post("/demo/run").status_code == 200
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     data = client.get(f"/candidate/{cid}").json()
     assert data["stage"] == PipelinePhase.SHORTLISTED.value
     assert data["status"]["kind"] == "active"
-    assert data["ranking"].get("branch") == "top_k"
-    assert data["ranking"].get("stage") == "deep"
-    assert data["ranking"].get("explanation")
-    assert "light" in data["scores"]
-    assert "deep" in data["scores"]
+    assert data["summary"] == CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+
+    _assert_criteria_shape(data["scores"]["criteria"])
+
+    rt = client.app.state.vertical_slice
+    got = rt.bundle.store.get_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    assert got.ok and got.snapshot is not None
+    ext = dict(got.snapshot.extensions or {})
+
+    overall = data["scores"]["overall_score"]
+    _assert_overall_score_shape(overall)
+    assert overall["type"] == "deep"
+    assert overall["value"] == ext.get("decision.deep_score")
+
+    assert data["ranking"]["rank"] is None
+    assert data["ranking"]["total_candidates"] is None
+    assert "single-candidate" in (data["ranking"].get("note") or "")
+    assert "stage" not in data["ranking"]
+    assert "branch" not in data["ranking"]
     assert data["next_actions"]
 
 
@@ -125,7 +180,7 @@ def test_demo_html_contains_profile_phase_timeline_and_scores(client: TestClient
     assert "Alex Morgan" in html
     assert "shortlisted" in html
     assert "workflow timeline" in html
-    assert "Scores" in html
+    assert "Evaluation" in html
     assert "Ranking" in html
     assert "recruiter_schedule_interview" in html
     assert "candidate_accept_offer" in html

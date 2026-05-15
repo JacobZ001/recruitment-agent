@@ -903,9 +903,9 @@ Summary (v2 cleanup):
 - **Revisit when**: Audit/replay requirements demand bit-stable human copy on old snapshots
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-12
-- **Current decision**: ``ranking.explanation`` and aggregate ``summary`` strings are **derived at read time** (from persisted ``ranking.*`` / ``decision.*`` keys plus :mod:`runtime.inspection.decision_explainer`), not stored as separate snapshot fields.
-- **Rationale**: Keeps the projection thin and avoids duplicating prose in ``OrchestrationState.extensions`` while explanations remain small and deterministic.
-- **Future impact**: If explanation copy or mapping logic changes, **historical API/timeline text can disagree** with what operators saw at commit time unless old behavior is preserved or versioned.
+- **Current decision**: ``GET /candidate`` ``summary`` is a **fixed placeholder** (not derived). The ``ranking`` object in that response is a **single-candidate stub** (no internal branch/stage). **Criteria scores** in ``scores.criteria`` are mapped read-only from ``decision.light_*`` / ``decision.deep_*`` in ``snapshot.extensions``. Elsewhere (e.g. timelines), human copy may still be derived at read time via :mod:`runtime.inspection.decision_explainer` from persisted keys.
+- **Rationale**: Product-facing read model avoids synthetic narrative until evaluation copy is persisted; numeric signals stay tied to stored ``decision.*`` keys.
+- **Future impact**: If ``decision.*`` key shapes change, **candidate view criteria mapping** must stay in sync; timeline/explainer-derived text can still drift from historical operator expectations unless versioned or persisted.
 - **Priority**: Low
 - **Recommended future direction**: Optionally persist explanation strings in ``snapshot.extensions`` at commit time for audit-stable display, or version explainer outputs behind an explicit schema/revision flag.
 

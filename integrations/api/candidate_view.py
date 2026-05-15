@@ -1,19 +1,30 @@
 """
 Recruiter-facing projection from an orchestration snapshot (read-only composition).
 
-Uses persisted ``OrchestrationState`` fields and :mod:`runtime.inspection.decision_explainer`
-only; no planner or transition policy.
+Maps only persisted ``OrchestrationState.pipeline`` and ``snapshot.extensions`` keys
+into a stable JSON shape; no planner, transition engine, or inspection explainer calls.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from runtime.inspection.decision_explainer import (
-    build_decision_summary_text,
-    build_ranking_decision_dict,
-)
 from schemas.state_schema import OrchestrationState, PipelinePhase
+
+# Fixed copy for read model until model-based narrative is persisted (see tech_debt).
+CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER = (
+    "Not available (model-based evaluation under development)"
+)
+
+_RANKING_NOTE = "ranking not available in single-candidate mode"
+
+# Minimal layout: (name, source) only. Per-criterion scores are not persisted yet.
+# future: populated by cognition layer (dynamic per role / recruiter)
+_CRITERIA_LAYOUT: Tuple[Tuple[str, str], ...] = (
+    ("communication", "universal"),
+    ("technical", "role_specific"),
+    ("professionalism", "recruiter_preference"),
+)
 
 
 def _recruiter_status_kind(phase: str) -> str:
@@ -28,46 +39,57 @@ def _status_block(phase: str) -> Dict[str, Any]:
     return {"kind": _recruiter_status_kind(phase)}
 
 
-def _scores_from_extensions(ext: Mapping[str, Any]) -> Dict[str, Any]:
-    scores: Dict[str, Any] = {}
-    if "decision.light_score" in ext or "decision.light_confidence" in ext:
-        light: Dict[str, Any] = {}
-        if "decision.light_score" in ext:
-            light["normalized"] = ext["decision.light_score"]
-        if "decision.light_confidence" in ext:
-            light["confidence"] = ext["decision.light_confidence"]
-        if light:
-            scores["light"] = light
-    if "decision.deep_score" in ext or "decision.deep_confidence" in ext:
-        deep: Dict[str, Any] = {}
-        if "decision.deep_score" in ext:
-            deep["normalized"] = ext["decision.deep_score"]
-        if "decision.deep_confidence" in ext:
-            deep["confidence"] = ext["decision.deep_confidence"]
-        if deep:
-            scores["deep"] = deep
-    return scores
+def _float_or_null(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-def _ranking_block(ext: Mapping[str, Any]) -> Dict[str, Any]:
-    """
-    Read model for ranking: ``stage`` / ``branch`` from snapshot ``ranking.*`` keys;
-    ``explanation`` from :func:`build_ranking_decision_dict` (same persisted keys, no new policy).
-    """
-    branch = ext.get("ranking.branch")
-    stage = ext.get("ranking.stage")
-    if branch is None or stage is None:
-        return {}
-    if not str(branch).strip() or not str(stage).strip():
-        return {}
-    blob = build_ranking_decision_dict(dict(ext))
-    explanation = ""
-    if blob is not None:
-        explanation = str(blob["ranking_decision"]["explanation"])
+def _criteria_from_layout() -> List[Dict[str, Any]]:
+    """Placeholder criteria rows until per-dimension scores exist in snapshot extensions."""
+    return [
+        {
+            "name": name,
+            "score": None,
+            "confidence": None,
+            "source": source,
+        }
+        for name, source in _CRITERIA_LAYOUT
+    ]
+
+
+def _overall_score_from_extensions(ext: Mapping[str, Any]) -> Dict[str, Any]:
+    deep_s = _float_or_null(ext.get("decision.deep_score"))
+    if deep_s is not None:
+        return {"value": deep_s, "type": "deep"}
+    light_s = _float_or_null(ext.get("decision.light_score"))
+    if light_s is not None:
+        return {"value": light_s, "type": "light"}
+    return {"value": None, "type": None}
+
+
+def _scores_section(ext: Mapping[str, Any]) -> Dict[str, Any]:
     return {
-        "stage": stage,
-        "branch": branch,
-        "explanation": explanation,
+        "criteria": _criteria_from_layout(),
+        "overall_score": _overall_score_from_extensions(ext),
+    }
+
+
+def _ranking_section(_ext: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Global rank placeholder only.
+
+    ``ranking.stage`` on the snapshot records which *scoring* pass last applied ranking
+    policy (light vs deep), not a recruiter-facing rank; use ``scores.overall_score.type``
+    for that. Do not expose ``ranking.stage`` or ``ranking.branch`` here.
+    """
+    return {
+        "rank": None,
+        "total_candidates": None,
+        "note": _RANKING_NOTE,
     }
 
 
@@ -105,9 +127,7 @@ def _next_actions_for_phase(phase: str) -> List[str]:
 
 def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
     """
-    Compose a recruiter-facing dict from ``snapshot.extensions``, pipeline phase,
-    and :func:`~runtime.inspection.decision_explainer.build_ranking_decision_dict` /
-    :func:`~runtime.inspection.decision_explainer.build_decision_summary_text`.
+    Compose a recruiter-facing dict from ``snapshot.extensions`` and pipeline phase.
 
     ``pipeline.phase`` (exposed as ``stage``) is the single source of truth for UI state;
     no secondary status layer is maintained beyond aggregate ``status.kind``.
@@ -117,29 +137,11 @@ def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
     stage = snapshot.pipeline.phase.value
     status = _status_block(stage)
 
-    summary_bits: List[str] = []
-    decision_txt = build_decision_summary_text(ext)
-    if decision_txt:
-        summary_bits.append(decision_txt)
-
-    rd = build_ranking_decision_dict(ext)
-    if rd is not None:
-        summary_bits.append(str(rd["ranking_decision"]["explanation"]))
-
-    ir = ext.get("inactive.reason")
-    if ir is not None and str(ir).strip():
-        summary_bits.append(f"Inactive context: {ir!s}.")
-
-    summary = " ".join(summary_bits).strip()
-    if not summary:
-        summary = f"Current pipeline stage is {stage!r}."
-
-    ranking = _ranking_block(ext)
     return {
         "stage": stage,
         "status": status,
-        "summary": summary,
-        "scores": _scores_from_extensions(ext),
-        "ranking": ranking,
+        "summary": CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER,
+        "scores": _scores_section(ext),
+        "ranking": _ranking_section(ext),
         "next_actions": _next_actions_for_phase(stage),
     }
