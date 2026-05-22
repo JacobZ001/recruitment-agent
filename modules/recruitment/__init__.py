@@ -18,15 +18,18 @@ from .projection import (
     get_state_summary,
     get_timeline,
 )
+from .policies import ALLOWED_INGRESS_EVENT_TYPES, allowed_ingress_event_types
 from .use_cases import (
     EventIngressResult,
     publish_ingress_event,
+    publish_recruitment_event,
     record_recruiter_decision,
     run_primary_demo_sequence,
     submit_cv,
 )
 
 __all__ = (
+    "ALLOWED_INGRESS_EVENT_TYPES",
     "CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER",
     "CandidateNotFoundError",
     "DemoRunPreconditionError",
@@ -38,7 +41,9 @@ __all__ = (
     "get_demo_candidate",
     "get_state_summary",
     "get_timeline",
+    "allowed_ingress_event_types",
     "publish_ingress_event",
+    "publish_recruitment_event",
     "record_recruiter_decision",
     "run_primary_demo_sequence",
     "submit_cv",

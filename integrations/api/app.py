@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from integrations.api.demo_page import build_demo_recruiter_html
+from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
     CandidateViewResponse,
@@ -29,16 +30,15 @@ from integrations.api.schemas_http import (
 )
 from integrations.api.session import VerticalSliceApiRuntime
 from modules.recruitment import (
-    CandidateNotFoundError,
-    DemoRunPreconditionError,
+    RecruitmentUseCaseError,
     get_candidate_view_for_runtime,
     get_demo_candidate,
     get_state_summary,
     get_timeline,
     policies,
+    publish_recruitment_event,
     record_recruiter_decision,
     run_primary_demo_sequence,
-    submit_cv,
 )
 from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
@@ -49,17 +49,6 @@ def get_runtime(request: Request) -> VerticalSliceApiRuntime:
     if rt is None:
         raise HTTPException(status_code=503, detail="runtime not initialized")
     return rt
-
-
-def _candidate_not_found_http(candidate_id: UUID, *, message: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={
-            "code": "candidate_not_found",
-            "message": message,
-            "candidate_id": str(candidate_id),
-        },
-    )
 
 
 DEFAULT_VERTICAL_SLICE_DB_PATH = "data/app.db"
@@ -138,18 +127,15 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
                     correlation_id=body.correlation_id,
                 )
             else:
-                result = submit_cv(
+                result = publish_recruitment_event(
                     rt,
                     cid,
                     body.event_type,
                     body.payload,
                     correlation_id=body.correlation_id,
                 )
-        except CandidateNotFoundError:
-            raise _candidate_not_found_http(
-                cid,
-                message="candidate_id does not match this single-aggregate runtime",
-            ) from None
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=cid)
 
         state_summary = None
         if result.state_summary is not None:
@@ -171,8 +157,8 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     ) -> StateSummaryResponse:
         try:
             policies.validate_single_tenant_candidate(rt, candidate_id)
-        except CandidateNotFoundError:
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from None
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
 
         got = rt.bundle.store.get_for_candidate(candidate_id)
         if not got.ok or got.snapshot is None or got.meta is None:
@@ -187,8 +173,8 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     ) -> TimelineResponse:
         try:
             policies.validate_single_tenant_candidate(rt, candidate_id)
-        except CandidateNotFoundError:
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from None
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
 
         tl = get_timeline(rt)
         return TimelineResponse(**tl)
@@ -213,19 +199,16 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     ) -> CandidateViewResponse:
         try:
             view = get_candidate_view_for_runtime(rt, candidate_id)
-        except CandidateNotFoundError as exc:
-            msg = str(exc)
-            if "no orchestration state" in msg:
-                raise HTTPException(status_code=404, detail="no orchestration state for candidate") from exc
-            raise HTTPException(status_code=404, detail="candidate_id not found for this runtime") from exc
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
         return CandidateViewResponse(candidate_id=str(candidate_id), **view)
 
     @app.post("/demo/run", response_model=DemoRunResponse)
     def post_demo_run(rt: VerticalSliceApiRuntime = Depends(get_runtime)) -> DemoRunResponse:
         try:
             snap = run_primary_demo_sequence(rt, rt.candidate_id)
-        except DemoRunPreconditionError as e:
-            raise HTTPException(status_code=409, detail=str(e)) from e
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         got = rt.bundle.store.get(rt.bundle.state_id)
         if not got.ok or got.meta is None:
             raise HTTPException(status_code=500, detail="state store meta missing after demo run")

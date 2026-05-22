@@ -7,14 +7,22 @@ Does not encode transition graph legality or planner routing — those remain in
 
 from __future__ import annotations
 
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Protocol, Tuple
 from uuid import UUID
 
 from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_INGRESS_EVENT_TYPES
 from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 
-_ALLOWED_INGRESS = frozenset(VERTICAL_SLICE_INGRESS_EVENT_TYPES)
+# Canonical allowlist for API ingress validation and use-case policy (single source).
+ALLOWED_INGRESS_EVENT_TYPES: Tuple[str, ...] = VERTICAL_SLICE_INGRESS_EVENT_TYPES
+
+_ALLOWED_INGRESS = frozenset(ALLOWED_INGRESS_EVENT_TYPES)
 _GOVERNANCE = frozenset(GOVERNANCE_EVENT_TYPES)
+
+
+def allowed_ingress_event_types() -> Tuple[str, ...]:
+    """Return the allowed vertical-slice ingress event type names (immutable tuple)."""
+    return ALLOWED_INGRESS_EVENT_TYPES
 
 
 class SingleTenantRuntime(Protocol):

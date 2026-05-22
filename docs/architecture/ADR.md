@@ -102,9 +102,9 @@ Purpose: preserve long-term architectural reasoning, prevent drift, and provide 
 
 ---
 
-## ADR-007 — Modular monolith application boundary (`modules/recruitment`)
+## ADR-008 — Modular monolith application boundary (`modules/recruitment`)
 
-- **ADR ID**: ADR-007
+- **ADR ID**: ADR-008
 - **Title**: Single-tenant modular monolith with a recruitment application module
 - **Status**: Accepted
 - **Decision date**: 2026-05-12

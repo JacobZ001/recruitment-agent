@@ -97,6 +97,28 @@ def publish_ingress_event(
     )
 
 
+def publish_recruitment_event(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    event_type: str,
+    payload: Dict[str, Any],
+    *,
+    correlation_id: Optional[UUID] = None,
+) -> EventIngressResult:
+    """Publish a non-governance pipeline ingress event (system progression / CV path)."""
+    if policies.is_governance_event(event_type):
+        raise InvalidIngressEventError(
+            f"event_type {event_type!r} is governance; use record_recruiter_decision"
+        )
+    return publish_ingress_event(
+        runtime,
+        candidate_id,
+        event_type,
+        payload,
+        correlation_id=correlation_id,
+    )
+
+
 def submit_cv(
     runtime: IngressRuntime,
     candidate_id: UUID,
@@ -105,12 +127,8 @@ def submit_cv(
     *,
     correlation_id: Optional[UUID] = None,
 ) -> EventIngressResult:
-    """Publish a non-governance pipeline ingress event."""
-    if policies.is_governance_event(event_type):
-        raise InvalidIngressEventError(
-            f"event_type {event_type!r} is governance; use record_recruiter_decision"
-        )
-    return publish_ingress_event(
+    """Deprecated alias for :func:`publish_recruitment_event` (name retained for compatibility)."""
+    return publish_recruitment_event(
         runtime,
         candidate_id,
         event_type,
@@ -130,7 +148,7 @@ def record_recruiter_decision(
     """Publish a governance ingress event with strict payload (no bootstrap merge)."""
     if not policies.is_governance_event(event_type):
         raise InvalidIngressEventError(
-            f"event_type {event_type!r} is not governance; use submit_cv"
+            f"event_type {event_type!r} is not governance; use publish_recruitment_event"
         )
     return publish_ingress_event(
         runtime,

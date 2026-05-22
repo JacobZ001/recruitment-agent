@@ -11,8 +11,11 @@ from fastapi.testclient import TestClient
 
 from integrations.api.app import create_app
 from modules.recruitment import policies
-from modules.recruitment.use_cases import record_recruiter_decision
-from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
+from modules.recruitment.use_cases import publish_recruitment_event, record_recruiter_decision, submit_cv
+from runtime.bootstrap_vertical_slice import (
+    VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
+    VERTICAL_SLICE_INGRESS_EVENT_TYPES,
+)
 from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 
 
@@ -67,6 +70,16 @@ def test_is_governance_event(event_type: str) -> None:
 def test_invalid_candidate_id_via_api_404(client: TestClient) -> None:
     r = client.get(f"/candidate/{uuid4()}")
     assert r.status_code == 404
+
+
+def test_allowed_ingress_matches_bootstrap_allowlist() -> None:
+    assert tuple(policies.ALLOWED_INGRESS_EVENT_TYPES) == VERTICAL_SLICE_INGRESS_EVENT_TYPES
+    assert policies.allowed_ingress_event_types() == VERTICAL_SLICE_INGRESS_EVENT_TYPES
+
+
+def test_submit_cv_delegates_to_publish_recruitment_event() -> None:
+    assert submit_cv is not publish_recruitment_event
+    assert submit_cv.__doc__ and "Deprecated" in submit_cv.__doc__
 
 
 def test_non_governance_merge_adds_api_sequence() -> None:
