@@ -62,7 +62,7 @@ Stages describe **acquired or partial system capabilities**—things a recruiter
 - **`runtime/`** — reference wiring (`bootstrap_vertical_slice.py`), in-memory bus/store, **inspection** (`runtime/inspection/`), **demo fixture** (`demo_candidate_fixture.py`).
 - **`modules/recruitment/`** — application boundary (DDD-lite): **`policies.py`** (ingress allowlist, governance detection, single-tenant checks), **`use_cases.py`** (publish ingress, demo sequence), **`projection.py`** (recruiter read models). Does **not** own runtime lifecycle or HTTP.
 - **`skills/deterministic/`** — vertical-slice fakes; **`skills/llm/`**, **`skills/hybrid/`** — reserved for cognition when stage **6** begins.
-- **`integrations/api/`** — thin FastAPI ingress, HTTP models, runtime holder (`session.py`), demo HTML; delegates business actions to **`modules/recruitment`**.
+- **`integrations/api/`** — thin FastAPI ingress, HTTP models, demo HTML (API manages lifespan); delegates business actions and runtime holder to **`modules/recruitment`** (`runtime.py`, use cases, projections).
 - **`tests/`** — contract, replay, governance, API, inspection, module boundary tests.
 
 ---

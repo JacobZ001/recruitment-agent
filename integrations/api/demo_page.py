@@ -10,7 +10,7 @@ from runtime.bootstrap_vertical_slice import vertical_slice_timeline_text
 from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
 
 from modules.recruitment.projection import build_candidate_view
-from integrations.api.session import VerticalSliceApiRuntime
+from modules.recruitment.runtime import VerticalSliceApiRuntime
 
 
 def _format_candidate_view_html(view: Dict[str, Any]) -> str:

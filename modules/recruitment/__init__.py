@@ -19,6 +19,7 @@ from .projection import (
     get_timeline,
 )
 from .policies import ALLOWED_INGRESS_EVENT_TYPES, allowed_ingress_event_types
+from .runtime import DevResetResult, VerticalSliceApiRuntime
 from .use_cases import (
     EventIngressResult,
     publish_ingress_event,
@@ -33,6 +34,7 @@ __all__ = (
     "CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER",
     "CandidateNotFoundError",
     "DemoRunPreconditionError",
+    "DevResetResult",
     "EventIngressResult",
     "InvalidIngressEventError",
     "RecruitmentUseCaseError",
@@ -47,4 +49,5 @@ __all__ = (
     "record_recruiter_decision",
     "run_primary_demo_sequence",
     "submit_cv",
+    "VerticalSliceApiRuntime",
 )

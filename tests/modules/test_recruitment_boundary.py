@@ -9,8 +9,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+import integrations.api.session as api_session_module
 from integrations.api.app import create_app
 from modules.recruitment import policies
+from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment.use_cases import publish_recruitment_event, record_recruiter_decision, submit_cv
 from runtime.bootstrap_vertical_slice import (
     VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
@@ -23,6 +25,15 @@ from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 def client() -> TestClient:
     with TestClient(create_app(db_path="")) as c:
         yield c
+
+
+def test_api_session_module_is_shim_only() -> None:
+    path = Path(__file__).resolve().parents[2] / "integrations" / "api" / "session.py"
+    text = path.read_text(encoding="utf-8")
+    assert "class VerticalSliceApiRuntime" not in text
+    assert "class DevResetResult" not in text
+    assert api_session_module.VerticalSliceApiRuntime is VerticalSliceApiRuntime
+    assert api_session_module.DevResetResult is not None
 
 
 def test_recruitment_module_does_not_import_integrations_api() -> None:
@@ -80,6 +91,22 @@ def test_allowed_ingress_matches_bootstrap_allowlist() -> None:
 def test_submit_cv_delegates_to_publish_recruitment_event() -> None:
     assert submit_cv is not publish_recruitment_event
     assert submit_cv.__doc__ and "Deprecated" in submit_cv.__doc__
+
+
+def test_api_lifespan_initializes_runtime_and_demo_run(client: TestClient) -> None:
+    rt = client.app.state.vertical_slice
+    assert isinstance(rt, VerticalSliceApiRuntime)
+    assert client.get("/health").status_code == 200
+    assert client.post("/demo/run").status_code == 200
+
+
+def test_admin_reset_restores_new_phase(client: TestClient) -> None:
+    assert client.post("/demo/run").status_code == 200
+    reset = client.post("/admin/reset")
+    assert reset.status_code == 200
+    body = reset.json()
+    assert body["pipeline_phase"] == "new"
+    assert body["status"] == "ok"
 
 
 def test_non_governance_merge_adds_api_sequence() -> None:

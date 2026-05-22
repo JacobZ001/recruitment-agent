@@ -28,7 +28,7 @@ from integrations.api.schemas_http import (
     TimelineResponse,
     VerticalSliceIngressEventBody,
 )
-from integrations.api.session import VerticalSliceApiRuntime
+from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment import (
     RecruitmentUseCaseError,
     get_candidate_view_for_runtime,
