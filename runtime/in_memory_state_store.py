@@ -223,6 +223,10 @@ class InMemoryStateStore:
     def has_candidate(self, candidate_id: UUID) -> bool:
         return candidate_id in self._candidate_index
 
+    def list_all_state_ids(self) -> List[UUID]:
+        """Return all persisted orchestration state ids (deterministic sort order)."""
+        return sorted(self._rows.keys(), key=lambda sid: str(sid))
+
     def get(self, state_id: UUID, *, replay_run_id: Optional[UUID] = None) -> StateStoreResult:
         row = self._rows.get(state_id)
         if row is None:

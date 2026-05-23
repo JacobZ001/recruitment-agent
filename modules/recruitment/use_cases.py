@@ -7,7 +7,7 @@ Runtime is always passed in by the API layer; this module does not construct run
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 from uuid import UUID
 
 from interfaces.event_bus_interface import DeliveryStatus
@@ -19,7 +19,7 @@ from schemas.state_schema import OrchestrationState
 
 from . import policies
 from .exceptions import DemoRunPreconditionError, InvalidIngressEventError
-from .projection import get_state_summary
+from .projection import build_candidate_list_item, get_state_summary
 from .registry import get_state_id
 
 
@@ -199,3 +199,30 @@ def run_primary_demo_sequence(
     """Run the scripted primary vertical-slice sequence (requires pipeline phase NEW)."""
     _ensure_candidate_state(runtime, candidate_id)
     return runtime.run_primary_demo_sequence()
+
+
+def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
+    """
+    List lightweight summaries for every orchestration snapshot in the store.
+
+    **Semantics (Stage B MVP):** This is a **snapshot-driven** list produced by enumerating
+    persisted orchestration state ids (``store.list_all_state_ids()``) and projecting each
+    latest snapshot. It is **not** a domain-level candidate registry or application catalog.
+
+    Assumes **one candidate ↔ one orchestration state** (single application per candidate).
+    Read-only: does not create state. Skips rows without a candidate ``StateLink``.
+    """
+    store = runtime.bundle.store
+    items: List[Dict[str, Any]] = []
+    for state_id in store.list_all_state_ids():
+        got = store.get(state_id)
+        if not got.ok or got.snapshot is None:
+            continue
+        try:
+            items.append(build_candidate_list_item(got.snapshot))
+        except ValueError:
+            continue
+    # TODO: recruiter-facing sort (recency / stage / score)
+    # current sort is deterministic only, not product semantics
+    items.sort(key=lambda row: row["candidate_id"])
+    return items

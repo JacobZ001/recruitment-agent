@@ -97,6 +97,23 @@ class CandidateViewResponse(BaseModel):
     next_actions: List[str] = Field(default_factory=list)
 
 
+class CandidateListItemOverallScore(BaseModel):
+    value: Optional[float] = None
+    type: Optional[str] = Field(
+        default=None,
+        description='Score source when present: "light" or "deep" (aligned with GET /candidate).',
+    )
+
+
+class CandidateListItem(BaseModel):
+    """Lightweight row for ``GET /candidates`` (latest snapshot per orchestration state)."""
+
+    candidate_id: str
+    stage: str
+    status: CandidateViewStatus
+    overall_score: Optional[CandidateListItemOverallScore] = None
+
+
 class DemoRunResponse(BaseModel):
     """Result of publishing the scripted primary sequence via the bus."""
 

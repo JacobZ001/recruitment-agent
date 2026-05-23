@@ -107,6 +107,20 @@ def test_restart_new_connection_same_db(tmp_path) -> None:
     s2.close()
 
 
+def test_list_all_state_ids(tmp_path) -> None:
+    db = tmp_path / "t.db"
+    store = SQLiteStateStore(str(db), config=InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK))
+    s1 = uuid4()
+    c1 = uuid4()
+    s2 = uuid4()
+    c2 = uuid4()
+    store.create(_minimal_state(state_id=s1, candidate_id=c1))
+    store.create(_minimal_state(state_id=s2, candidate_id=c2, phase=PipelinePhase.CV_RECEIVED))
+    ids = store.list_all_state_ids()
+    assert ids == sorted([s1, s2], key=lambda u: str(u))
+    store.close()
+
+
 def test_multi_candidate_isolation(tmp_path) -> None:
     db = tmp_path / "t.db"
     store = SQLiteStateStore(str(db), config=InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK))

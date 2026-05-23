@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -19,6 +19,7 @@ from integrations.api.demo_page import build_demo_recruiter_html
 from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
+    CandidateListItem,
     CandidateViewResponse,
     DemoCandidateResponse,
     DemoRunResponse,
@@ -38,6 +39,7 @@ from modules.recruitment import (
     get_timeline_for_candidate,
     policies,
     publish_recruitment_event,
+    list_candidates,
     record_recruiter_decision,
     run_primary_demo_sequence,
 )
@@ -187,6 +189,13 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
             skill_summaries=body["skill_summaries"],
             inactive_reason=body.get("inactive_reason"),
         )
+
+    @app.get("/candidates", response_model=List[CandidateListItem])
+    def list_candidates_route(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> List[CandidateListItem]:
+        rows = list_candidates(rt)
+        return [CandidateListItem(**row) for row in rows]
 
     @app.get("/candidate/{candidate_id}", response_model=CandidateViewResponse)
     def get_candidate_view_route(

@@ -403,6 +403,35 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
   - Add a **harness or unit test** that asserts bootstrap default ids equal ``get_state_id(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)`` so drift is caught in CI.
   - Coordinate with **Candidate multi-state index governance** if composite keys (job, workflow version) replace the flat ``candidate:{id}`` string.
 
+### Candidate list is store-driven (not domain-driven)
+- **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: When multi-application-per-candidate or candidate lifecycle outside pipeline is required
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``GET /candidates`` is implemented by ``list_candidates`` in ``modules/recruitment/use_cases.py``, which calls ``store.list_all_state_ids()``, loads each snapshot, and projects via ``build_candidate_list_item``. There is **no** explicit candidate aggregate, application entity, or domain registry—only orchestration snapshots indexed by ``StateLink`` (candidate kind).
+- **Rationale**: Stage B MVP needs a recruiter-facing list **without** new persistence models or snapshot schema changes; store enumeration reuses existing SQLite/in-memory stores and keeps the read path simple.
+- **Future impact** / **risks**—cannot support without redesign:
+  - **Multiple applications per candidate** (same person, different reqs / pipelines).
+  - **Candidate lifecycle** independent of orchestration pipeline phase (archived, dormant, deleted).
+  - **Deletion / archiving** semantics (list always reflects “whatever states exist in the store”).
+- **Priority**: Medium
+- **Recommended future direction**: Introduce a **candidate / application** domain model (or explicit registry table) as the list source of truth; treat orchestration state as a child resource; keep projections read-only over snapshots.
+
+### Candidate list has no pagination or filtering
+- **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: Before recruiter UI lists more than a small bounded set of candidates per tenant
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``list_candidates`` loads **all** snapshots into memory, builds the full list, and returns it with **no** ``limit``/``offset``, cursor, or filters (stage, status, search). Sort is **deterministic** by ``candidate_id`` string only—not recruiter-facing recency or score order (see TODO in ``use_cases.list_candidates``).
+- **Rationale**: Acceptable for single-tenant Stage B demos and integration tests; defers query design until domain list semantics exist.
+- **Future impact** / **risks**:
+  - **Performance degradation** as distinct orchestration states grow (full scan + N snapshot loads per request).
+  - **API unsuitable for real UI** at scale without pagination and basic filters.
+- **Priority**: Medium
+- **Recommended future direction**: Add **limit/offset** or **cursor** pagination on the list use case; support basic filters (``stage``, ``status.kind``, optional search); drive queries from domain/registry or indexed read models—not unbounded ``list_all_state_ids`` in hot paths.
+
 ### HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
 - **Scope**: API

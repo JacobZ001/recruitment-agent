@@ -133,6 +133,35 @@ def _next_actions_for_phase(phase: str) -> List[str]:
     return list(hints.get(phase, ()))
 
 
+def _candidate_id_from_snapshot(snapshot: OrchestrationState) -> Optional[UUID]:
+    for link in snapshot.links:
+        if link.kind.strip().lower() == "candidate":
+            return link.id
+    return None
+
+
+def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
+    """
+    Lightweight list row from ``snapshot`` (stage, status kind, overall score).
+
+    ``overall_score`` uses the same deep-then-light rule as :func:`build_candidate_view`
+    (via :func:`_overall_score_from_extensions`). Does not include criteria, timeline,
+    ranking detail, or evaluation summary.
+    """
+    ext = dict(snapshot.extensions or {})
+    stage = snapshot.pipeline.phase.value
+    overall = _overall_score_from_extensions(ext)
+    cid = _candidate_id_from_snapshot(snapshot)
+    if cid is None:
+        raise ValueError("snapshot has no candidate StateLink")
+    return {
+        "candidate_id": str(cid),
+        "stage": stage,
+        "status": _status_block(stage),
+        "overall_score": overall,
+    }
+
+
 def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
     """
     Compose a recruiter-facing dict from ``snapshot.extensions`` and pipeline phase.

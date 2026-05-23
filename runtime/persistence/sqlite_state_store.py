@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from schemas.state_schema import OrchestrationState
@@ -142,6 +142,13 @@ class SQLiteStateStore:
             (str(candidate_id),),
         )
         return cur.fetchone() is not None
+
+    def list_all_state_ids(self) -> List[UUID]:
+        """Return all persisted orchestration state ids (deterministic sort order)."""
+        cur = self._conn.execute(
+            "SELECT state_id FROM orchestration_state ORDER BY state_id",
+        )
+        return [UUID(row[0]) for row in cur.fetchall()]
 
     def get(self, state_id: UUID, *, replay_run_id: Optional[UUID] = None) -> StateStoreResult:
         cur = self._conn.execute(

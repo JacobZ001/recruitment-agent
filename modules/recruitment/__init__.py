@@ -12,6 +12,7 @@ from .exceptions import (
 )
 from .projection import (
     CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER,
+    build_candidate_list_item,
     build_candidate_view,
     get_candidate_view_for_runtime,
     get_demo_candidate,
@@ -28,6 +29,7 @@ from .use_cases import (
     publish_ingress_event,
     publish_recruitment_event,
     record_recruiter_decision,
+    list_candidates,
     run_primary_demo_sequence,
     submit_cv,
 )
@@ -41,6 +43,7 @@ __all__ = (
     "EventIngressResult",
     "InvalidIngressEventError",
     "RecruitmentUseCaseError",
+    "build_candidate_list_item",
     "build_candidate_view",
     "get_candidate_view_for_runtime",
     "get_demo_candidate",
@@ -49,6 +52,7 @@ __all__ = (
     "get_state_summary_for_candidate",
     "get_timeline",
     "allowed_ingress_event_types",
+    "list_candidates",
     "publish_ingress_event",
     "publish_recruitment_event",
     "record_recruiter_decision",
