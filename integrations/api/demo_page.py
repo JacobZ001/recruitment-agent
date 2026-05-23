@@ -6,8 +6,8 @@ import html
 import json
 from typing import Any, Dict
 
-from runtime.bootstrap_vertical_slice import vertical_slice_timeline_text
-from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
+from modules.recruitment.fixtures import DEMO_CANDIDATE_DISPLAY
+from modules.recruitment.inspection.timeline import vertical_slice_timeline_text
 
 from modules.recruitment.projection import build_candidate_view
 from modules.recruitment.runtime import VerticalSliceApiRuntime

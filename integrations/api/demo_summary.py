@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from runtime.bootstrap_vertical_slice import VerticalSliceRuntimeBundle
+from modules.recruitment.bootstrap import VerticalSliceRuntimeBundle
 
 from modules.recruitment.projection import demo_skill_summaries
 

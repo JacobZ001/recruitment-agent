@@ -43,8 +43,8 @@ from schemas.governance_schema import (
 )
 from schemas.state_schema import DecisionActorType, OrchestrationState, PipelinePhase, StateActor, StateDomain
 
-from runtime.demo_candidate_fixture import merge_demo_profile_into_skill_payload
-from runtime.vertical_slice_ranking import resolve_ranking_branch
+from modules.recruitment.fixtures import merge_demo_profile_into_skill_payload
+from modules.recruitment.ranking import resolve_ranking_branch
 
 
 # Stable skill identifiers — must match keys in the orchestrator skill registry wiring.

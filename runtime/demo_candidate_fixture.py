@@ -1,70 +1,13 @@
 """
-Deterministic demo candidate / CV artifact for vertical-slice demos (no parsing, no LLM).
+Backward-compatible shim; canonical module is ``modules.recruitment.fixtures``.
 
-Read-only facts merged into planner-built skill inputs when ``VerticalSlicePlanner`` is
-wired with ``demo_skill_context=True`` (e.g. API runtime). Bootstrap/replay defaults omit
-this merge to preserve historical harness equality.
+Compatibility shim — removal planned after multi-candidate stabilization. Import from
+``modules.recruitment.fixtures`` in new code.
 """
 
-from __future__ import annotations
+from modules.recruitment.fixtures import (
+    DEMO_CANDIDATE_DISPLAY,
+    merge_demo_profile_into_skill_payload,
+)
 
-from typing import Any, Dict, List
-
-# Human-readable profile for GET /demo/candidate and HTML (not orchestration policy).
-DEMO_CANDIDATE_DISPLAY: Dict[str, Any] = {
-    "candidate_name": "Alex Morgan",
-    "target_role": "Senior Backend Engineer",
-    "years_experience": 9,
-    "location": "Berlin, DE (remote OK)",
-    "skills": ["Python", "Django", "PostgreSQL", "REST APIs", "system design"],
-    "education": "M.Sc. Computer Science (deterministic demo record)",
-    "work_authorization": "authorized",
-    "summary": (
-        "Backend engineer with API and data-layer depth; demo profile for deterministic "
-        "hard-filter and scoring skills—no PDF, no LLM extraction."
-    ),
-    "evidence_refs": [
-        "artifact://demo/cv/alex-morgan-2026",
-        "structured://demo/profile/alex-morgan",
-    ],
-}
-
-
-def _skill_payload_defaults() -> Dict[str, Any]:
-    """Keys understood by ``fake_*`` vertical-slice skills (setdefault merge)."""
-    skills_kw = "python django postgresql rest api design testing"
-    present: List[str] = [
-        "email",
-        "full_name",
-        "work_auth",
-        "skills",
-        "summary",
-        "education",
-        "location",
-    ]
-    return {
-        "demo.candidate_profile": dict(DEMO_CANDIDATE_DISPLAY),
-        "declared.years_experience": 9,
-        "declared.work_authorization": "authorized",
-        "declared.skill_keywords": skills_kw,
-        "declared.present_fields": present,
-        "declared.profile_completeness_ratio": 0.88,
-        "declared.profile_field_slots": 8,
-        "declared.questionnaire_available": True,
-        "declared.questionnaire_readiness": 0.92,
-        "declared.questionnaire_completed": True,
-        "declared.evidence_item_count": 6,
-        "declared.evidence_max_slots": 12,
-        "declared.communication_quality": 0.82,
-        "declared.project_depth_score": 0.79,
-        "filter.min_years_experience": 3,
-        "filter.required_keywords": ["python", "api"],
-        "filter.mandatory_fields": ["email", "full_name", "work_auth"],
-        "scoring.required_keywords": ["python", "django"],
-    }
-
-
-def merge_demo_profile_into_skill_payload(payload: Dict[str, Any]) -> None:
-    """Mutates ``payload`` in place: demo keys only fill gaps (planner ``extras`` win)."""
-    for k, v in _skill_payload_defaults().items():
-        payload.setdefault(k, v)
+__all__ = ("DEMO_CANDIDATE_DISPLAY", "merge_demo_profile_into_skill_payload")

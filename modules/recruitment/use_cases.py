@@ -11,7 +11,8 @@ from typing import Any, Dict, Optional, Protocol
 from uuid import UUID
 
 from interfaces.event_bus_interface import DeliveryStatus
-from runtime.bootstrap_vertical_slice import _FIXED_CLOCK, _envelope
+from .ingress import FIXED_CLOCK as _FIXED_CLOCK
+from .ingress import build_ingress_envelope as _envelope
 from schemas.state_schema import OrchestrationState
 
 from . import policies

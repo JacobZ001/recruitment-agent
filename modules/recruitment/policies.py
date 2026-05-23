@@ -3,6 +3,8 @@ Application-level recruitment policies (ingress allowlist, governance, single-te
 
 Does not encode transition graph legality or planner routing — those remain in
 ``state_machine`` / ``orchestrator`` respectively.
+
+This module is the **single source** for allowed API ingress event type names.
 """
 
 from __future__ import annotations
@@ -10,10 +12,25 @@ from __future__ import annotations
 from typing import Any, Dict, Protocol, Tuple
 from uuid import UUID
 
-from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_INGRESS_EVENT_TYPES
 from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 
-# Canonical allowlist for API ingress validation and use-case policy (single source).
+# Canonical scripted primary progression (deterministic planner/registry sequence).
+PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
+    "candidate_created",
+    "cv_uploaded",
+    "cv_parsed",
+    "hard_filter_passed",
+    "light_scoring_completed",
+    "questionnaire_sent",
+    "questionnaire_completed",
+    "deep_scoring_completed",
+)
+
+# API / integration allowlist = primary progression + governance + bounded system ingress.
+VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = (
+    PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES + ("candidate_rejected",)
+)
+
 ALLOWED_INGRESS_EVENT_TYPES: Tuple[str, ...] = VERTICAL_SLICE_INGRESS_EVENT_TYPES
 
 _ALLOWED_INGRESS = frozenset(ALLOWED_INGRESS_EVENT_TYPES)

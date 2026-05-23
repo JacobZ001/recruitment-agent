@@ -35,7 +35,7 @@ def build_ranking_decision_dict(extensions: Dict[str, Any]) -> Optional[Dict[str
     key = (str(stage), str(branch))
     explanation = _EXPLANATIONS.get(
         key,
-        "Deterministic ranking branch (see runtime.vertical_slice_ranking).",
+        "Deterministic ranking branch (see modules.recruitment.ranking).",
     )
     return {
         "ranking_decision": {

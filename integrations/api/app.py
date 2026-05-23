@@ -40,7 +40,7 @@ from modules.recruitment import (
     record_recruiter_decision,
     run_primary_demo_sequence,
 )
-from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
+from modules.recruitment.bootstrap import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 
 

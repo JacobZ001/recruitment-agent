@@ -59,10 +59,10 @@ Stages describe **acquired or partial system capabilities**—things a recruiter
 
 - **`schemas/`**, **`interfaces/`**, **`state_machine/`** — contracts and deterministic transition rules.
 - **`orchestrator/`** — planning policy (e.g. `vertical_slice_planner.py`); **no** LLM calls.
-- **`runtime/`** — reference wiring (`bootstrap_vertical_slice.py`), in-memory bus/store, **inspection** (`runtime/inspection/`), **demo fixture** (`demo_candidate_fixture.py`).
-- **`modules/recruitment/`** — application boundary (DDD-lite): **`policies.py`** (ingress allowlist, governance detection, single-tenant checks), **`use_cases.py`** (publish ingress, demo sequence), **`projection.py`** (recruiter read models). Does **not** own runtime lifecycle or HTTP.
+- **`modules/recruitment/`** — application boundary: **`policies`**, **`use_cases`**, **`projection`**, **`runtime`** (API holder), **`bootstrap`** (vertical-slice wiring only), **`fixtures`**, **`ranking`**, **`ingress`**, **`inspection/`**, **`domain/`** (multi-candidate aggregate placeholder). Does **not** own HTTP.
+- **`runtime/`** — generic infrastructure: bus, store, SQLite persistence, recording bus, **`runtime/inspection/`**. **`bootstrap_vertical_slice.py`**, **`demo_candidate_fixture.py`**, **`vertical_slice_ranking.py`** remain **compatibility shims** to `modules/recruitment` during migration.
 - **`skills/deterministic/`** — vertical-slice fakes; **`skills/llm/`**, **`skills/hybrid/`** — reserved for cognition when stage **6** begins.
-- **`integrations/api/`** — thin FastAPI ingress, HTTP models, demo HTML (API manages lifespan); delegates business actions and runtime holder to **`modules/recruitment`** (`runtime.py`, use cases, projections).
+- **`integrations/api/`** — thin FastAPI ingress, HTTP models, demo HTML; imports **`modules/recruitment`** for business actions (API manages lifespan).
 - **`tests/`** — contract, replay, governance, API, inspection, module boundary tests.
 
 ---

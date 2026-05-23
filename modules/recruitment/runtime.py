@@ -14,13 +14,13 @@ from typing import Optional
 from uuid import UUID
 
 from orchestrator.vertical_slice_planner import VerticalSlicePlanner
-from runtime.bootstrap_vertical_slice import (
+from .bootstrap import (
     VerticalSliceRuntimeBundle,
-    _FIXED_CLOCK,
     _initial_state,
     drive_vertical_slice_primary_sequence,
     wire_vertical_slice_runtime,
 )
+from .ingress import FIXED_CLOCK as _FIXED_CLOCK
 from runtime.in_memory_state_store import InMemoryStateStoreConfig
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from runtime.recording_event_bus import RecordingInMemoryEventBus

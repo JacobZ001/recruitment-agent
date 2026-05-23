@@ -14,8 +14,8 @@ from orchestrator.vertical_slice_planner import (
     SKILL_HARD_FILTER,
     SKILL_LIGHT_SCORING,
 )
-from runtime.bootstrap_vertical_slice import VerticalSliceRuntimeBundle, vertical_slice_timeline_text
-from runtime.demo_candidate_fixture import DEMO_CANDIDATE_DISPLAY
+from .fixtures import DEMO_CANDIDATE_DISPLAY
+from .inspection.timeline import vertical_slice_timeline_text
 from runtime.inspection import skill_decision_summary_parts
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
@@ -41,7 +41,7 @@ class ReadRuntime(Protocol):
     def candidate_id(self) -> UUID: ...
 
     @property
-    def bundle(self) -> VerticalSliceRuntimeBundle: ...
+    def bundle(self) -> Any: ...
 
 
 def _recruiter_status_kind(phase: str) -> str:
@@ -187,7 +187,7 @@ def get_timeline(runtime: ReadRuntime) -> Dict[str, Any]:
     }
 
 
-def demo_skill_summaries(bundle: VerticalSliceRuntimeBundle) -> Dict[str, Any]:
+def demo_skill_summaries(bundle: Any) -> Dict[str, Any]:
     hard: Optional[Dict[str, Any]] = None
     light: Optional[Dict[str, Any]] = None
     deep: Optional[Dict[str, Any]] = None
