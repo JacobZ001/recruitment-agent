@@ -17,3 +17,7 @@ class InvalidIngressEventError(RecruitmentUseCaseError):
 
 class DemoRunPreconditionError(RecruitmentUseCaseError):
     """Scripted primary sequence cannot run safely on the current pipeline snapshot."""
+
+
+class InvalidCandidateActionError(RecruitmentUseCaseError):
+    """Action key is not allowed for the candidate's current pipeline phase."""

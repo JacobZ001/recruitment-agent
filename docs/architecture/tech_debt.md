@@ -432,6 +432,62 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Add **limit/offset** or **cursor** pagination on the list use case; support basic filters (``stage``, ``status.kind``, optional search); drive queries from domain/registry or indexed read models—not unbounded ``list_all_state_ids`` in hot paths.
 
+### Recruiter action label ownership
+- **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: When recruiter UI needs copy changes, i18n, or role-specific phrasing without touching governance vocabulary
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``available_actions[].label`` is resolved via ``ACTION_DESCRIPTORS`` in ``modules/recruitment/policies.py`` (keyed by ``event_type``) with **fallback** to ``label_from_event_type`` (string transform) when no descriptor exists. Availability remains **registry-only**; descriptors are UI metadata, not a second action map.
+- **Rationale**: Decouples display copy from domain ``event_type`` names for catalogued actions while keeping a deterministic fallback for registry-only events (e.g. ``recruiter_shortlist_candidate``) before descriptors are added.
+- **Future impact** / **risks**:
+  - **Copy changes** for uncatalogued events still require accepting transform output or adding a descriptor entry.
+  - **No multi-language or role-specific phrasing** in the API layer today.
+  - **Drift** if frontend and ``ACTION_DESCRIPTORS`` diverge when clients render their own labels.
+- **Priority**: Low
+- **Recommended future direction**: Expand ``ACTION_DESCRIPTORS`` (or a dedicated labels module) for all recruiter ``event_type`` values exposed by the registry; alternatively move label responsibility entirely to the **frontend** and return ``event_type`` only from the API.
+
+### Action availability ignores transition guards
+- **Status**: OPEN
+- **Scope**: API+TransitionEngine
+- **Revisit when**: When guard-conditioned edges must hide actions until prerequisites are met
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``get_available_actions_for_phase`` exposes an action if a registry rule applies (``from_state`` is the current phase or ``*``) and carries a resolvable ``manual_recruiter_*`` trigger. It does **not** evaluate **guard conditions** on those rules or snapshot context.
+- **Rationale**: Keeps list derivation read-only and cheap; guards may be stubs or context-dependent in the reference slice.
+- **Future impact** / **risks**:
+  - **UI may show actions** that orchestration would reject when guards fail.
+  - Operators may attempt actions that appear available but produce no plan or a validation failure downstream.
+- **Priority**: Medium
+- **Recommended future direction**: Evaluate guards (or call :class:`~state_machine.transition_engine.TransitionEngine` validation with current snapshot) before exposing an action; or return a **conditionally available** flag when guards are not satisfied.
+
+### Untyped recruiter action payloads
+- **Status**: OPEN
+- **Scope**: API+Contracts
+- **Revisit when**: When recruiter actions require structured fields (interview slot, offer terms, audit templates)
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``perform_candidate_action`` and ``POST /candidates/{candidate_id}/action`` accept an optional ``payload`` as ``Dict[str, Any]``, merged over fixed API governance defaults. There is **no** per-``event_type`` payload schema or validation before publish.
+- **Rationale**: Stage B wires existing governance events through one action API before investing in action-specific forms.
+- **Future impact** / **risks**:
+  - **No validation per action** — missing or inconsistent fields across clients.
+  - **Fragile integration** when new registry triggers add actions with implicit payload expectations.
+  - **Audit ambiguity** when downstream systems expect structured evidence per action type.
+- **Priority**: Medium
+- **Recommended future direction**: Define **per-``event_type`` payload schemas** (Pydantic models) and validate in ``perform_candidate_action`` before publish; keep optional ``payload`` for backward compatibility until clients migrate.
+
+### Recruiter action list ordering and grouping (UI)
+- **Status**: OPEN
+- **Scope**: API
+- **Revisit when**: When recruiter list UI needs sections (lifecycle, risk, priority)
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: ``available_actions`` is a **flat list** sorted by ``event_type`` string only—no grouping, priority, or role-based ordering.
+- **Rationale**: Stage B MVP exposes registry truth without product semantics.
+- **Future impact**: Recruiter clients must invent their own ordering; inconsistent UX across surfaces.
+- **Priority**: Low
+- **Recommended future direction**: Add optional **group** / **sort_order** metadata derived from registry ``rule_id`` or product policy—without reintroducing duplicate action-key tables.
+
 ### HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
 - **Scope**: API

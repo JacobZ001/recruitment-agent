@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from modules.recruitment.exceptions import (
     CandidateNotFoundError,
     DemoRunPreconditionError,
+    InvalidCandidateActionError,
     InvalidIngressEventError,
     RecruitmentUseCaseError,
 )
@@ -42,6 +43,14 @@ def recruitment_error_to_http(
             status_code=422,
             detail={
                 "code": "invalid_ingress",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, InvalidCandidateActionError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_candidate_action",
                 "message": str(exc),
             },
         )

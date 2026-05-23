@@ -20,6 +20,7 @@ from runtime.inspection import skill_decision_summary_parts
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
 from .exceptions import CandidateNotFoundError
+from .policies import get_available_actions_for_phase
 
 CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER = (
     "Not available (model-based evaluation under development)"
@@ -159,6 +160,7 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
         "stage": stage,
         "status": _status_block(stage),
         "overall_score": overall,
+        "available_actions": get_available_actions_for_phase(stage),
     }
 
 

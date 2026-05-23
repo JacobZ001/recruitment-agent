@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from modules.recruitment.policies import ALLOWED_INGRESS_EVENT_TYPES
 
@@ -105,6 +105,12 @@ class CandidateListItemOverallScore(BaseModel):
     )
 
 
+class RecruiterActionItem(BaseModel):
+    key: str
+    label: str
+    event_type: str
+
+
 class CandidateListItem(BaseModel):
     """Lightweight row for ``GET /candidates`` (latest snapshot per orchestration state)."""
 
@@ -112,6 +118,22 @@ class CandidateListItem(BaseModel):
     stage: str
     status: CandidateViewStatus
     overall_score: Optional[CandidateListItemOverallScore] = None
+    available_actions: List[RecruiterActionItem] = Field(default_factory=list)
+
+
+class CandidateActionBody(BaseModel):
+    """Recruiter governance ingress for ``POST /candidates/{candidate_id}/action``."""
+
+    event_type: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("event_type", "action"),
+        description="Governance event type (e.g. recruiter_schedule_interview). ``action`` is a deprecated alias.",
+    )
+    payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional governance fields merged over API defaults (actor_id, reason, etc.).",
+    )
 
 
 class DemoRunResponse(BaseModel):

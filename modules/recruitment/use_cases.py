@@ -18,8 +18,20 @@ from .ingress import build_ingress_envelope as _envelope
 from schemas.state_schema import OrchestrationState
 
 from . import policies
-from .exceptions import DemoRunPreconditionError, InvalidIngressEventError
-from .projection import build_candidate_list_item, get_state_summary
+from .exceptions import (
+    CandidateNotFoundError,
+    DemoRunPreconditionError,
+    InvalidCandidateActionError,
+    InvalidIngressEventError,
+)
+from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
+
+DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD: Dict[str, Any] = {
+    "actor_id": "recruitment-api",
+    "actor_type": "recruiter",
+    "reason": "Recruiter action via candidate workflow API",
+    "evidence_refs": [],
+}
 from .registry import get_state_id
 
 
@@ -226,3 +238,40 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     # current sort is deterministic only, not product semantics
     items.sort(key=lambda row: row["candidate_id"])
     return items
+
+
+def perform_candidate_action(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    event_type: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Publish a recruiter governance ``event_type`` (existing bus path).
+
+    Validates the candidate exists and that ``event_type`` is registry-allowed for the phase.
+
+    TODO: Different recruiter actions will need structured payloads (e.g. interview slot,
+    offer terms). ``payload`` is untyped ``Dict[str, Any]`` merged over API defaults today.
+    """
+    got = runtime.bundle.store.get_for_candidate(candidate_id)
+    if not got.ok or got.snapshot is None:
+        raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
+
+    phase = got.snapshot.pipeline.phase.value
+    policies.validate_recruiter_event_for_phase(event_type, phase)
+    gov_payload = dict(DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD)
+    if payload:
+        gov_payload.update(payload)
+
+    result = record_recruiter_decision(
+        runtime,
+        candidate_id,
+        event_type,
+        gov_payload,
+    )
+    if not result.ingress_accepted:
+        raise InvalidCandidateActionError(
+            f"governance publish not accepted for {event_type!r}: {result.publish_status}"
+        )
+    return get_candidate_view_for_runtime(runtime, candidate_id)

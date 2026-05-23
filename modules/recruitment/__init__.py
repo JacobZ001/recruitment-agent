@@ -7,6 +7,7 @@ HTTP and runtime wiring live outside this package; use cases receive an injected
 from .exceptions import (
     CandidateNotFoundError,
     DemoRunPreconditionError,
+    InvalidCandidateActionError,
     InvalidIngressEventError,
     RecruitmentUseCaseError,
 )
@@ -22,7 +23,17 @@ from .projection import (
     get_timeline_for_candidate,
 )
 from .registry import get_state_id
-from .policies import ALLOWED_INGRESS_EVENT_TYPES, allowed_ingress_event_types
+from .policies import (
+    ACTION_DESCRIPTORS,
+    ALLOWED_INGRESS_EVENT_TYPES,
+    ActionDescriptor,
+    allowed_ingress_event_types,
+    get_allowed_transitions_for_phase,
+    get_available_actions_for_phase,
+    label_for_recruiter_action,
+    label_from_event_type,
+    validate_recruiter_event_for_phase,
+)
 from .runtime import DevResetResult, VerticalSliceApiRuntime
 from .use_cases import (
     EventIngressResult,
@@ -30,17 +41,21 @@ from .use_cases import (
     publish_recruitment_event,
     record_recruiter_decision,
     list_candidates,
+    perform_candidate_action,
     run_primary_demo_sequence,
     submit_cv,
 )
 
 __all__ = (
+    "ACTION_DESCRIPTORS",
+    "ActionDescriptor",
     "ALLOWED_INGRESS_EVENT_TYPES",
     "CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER",
     "CandidateNotFoundError",
     "DemoRunPreconditionError",
     "DevResetResult",
     "EventIngressResult",
+    "InvalidCandidateActionError",
     "InvalidIngressEventError",
     "RecruitmentUseCaseError",
     "build_candidate_list_item",
@@ -52,7 +67,13 @@ __all__ = (
     "get_state_summary_for_candidate",
     "get_timeline",
     "allowed_ingress_event_types",
+    "get_allowed_transitions_for_phase",
+    "get_available_actions_for_phase",
+    "label_for_recruiter_action",
+    "label_from_event_type",
+    "validate_recruiter_event_for_phase",
     "list_candidates",
+    "perform_candidate_action",
     "publish_ingress_event",
     "publish_recruitment_event",
     "record_recruiter_decision",

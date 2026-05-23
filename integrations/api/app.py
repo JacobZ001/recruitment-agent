@@ -19,6 +19,7 @@ from integrations.api.demo_page import build_demo_recruiter_html
 from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
+    CandidateActionBody,
     CandidateListItem,
     CandidateViewResponse,
     DemoCandidateResponse,
@@ -40,6 +41,7 @@ from modules.recruitment import (
     policies,
     publish_recruitment_event,
     list_candidates,
+    perform_candidate_action,
     record_recruiter_decision,
     run_primary_demo_sequence,
 )
@@ -196,6 +198,23 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     ) -> List[CandidateListItem]:
         rows = list_candidates(rt)
         return [CandidateListItem(**row) for row in rows]
+
+    @app.post("/candidates/{candidate_id}/action", response_model=CandidateViewResponse)
+    def post_candidate_action(
+        candidate_id: UUID,
+        body: CandidateActionBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> CandidateViewResponse:
+        try:
+            view = perform_candidate_action(
+                rt,
+                candidate_id,
+                body.event_type,
+                body.payload or None,
+            )
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
+        return CandidateViewResponse(candidate_id=str(candidate_id), **view)
 
     @app.get("/candidate/{candidate_id}", response_model=CandidateViewResponse)
     def get_candidate_view_route(
