@@ -370,16 +370,38 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Recommended future direction**: Introduce **explicit runtime scopes** (factory or context-owned `VerticalSliceApiRuntime` instances) only when product requirements demand isolation—preserve deterministic wiring and harness-friendly construction; avoid embedding orchestration policy in the API.
 
 ### Fixed aggregate identity (single candidate-scoped orchestration instance)
-- **Status**: OPEN
+- **Status**: SUPERSEDED
 - **Scope**: API+Persistence
-- **Revisit when**: When Stage B ships multi-candidate HTTP or aggregate registry
+- **Revisit when**: N/A (see successor entries below)
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: The reference API assumes the bootstrap **`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`** (and associated single orchestration aggregate). Requests for other candidate ids are rejected (e.g. 404)—there is **no** runtime-created aggregate identity or multi-aggregate registry at the HTTP edge.
-- **Rationale**: Keeps ingress validation and tests **tight** on one explainable path; defers **multi-aggregate lifecycle** (create candidate / bind aggregate / route at HTTP edge) until Stage B wiring exists. **Snapshot persistence for the wired aggregate** (SQLite) is orthogonal: it does not by itself add new candidate identities or a registry at the API boundary.
-- **Future impact**: External systems cannot drive **per-candidate** workflows through the API until aggregate creation, routing, and scope rules exist outside the bootstrap script.
+- **Last reviewed**: 2026-05-22
+- **Current decision**: **Superseded** by Stage B multi-candidate wiring: ``POST /events`` and read APIs accept arbitrary ``candidate_id`` values; orchestration snapshots are created on **ingress (write path)** and resolved via the store’s ``get_for_candidate`` index. The bootstrap **default demo candidate** remains the wired reference subject for ``/demo/*`` and timeline (see **Timeline is global, not candidate-scoped**).
+- **Rationale**: Original entry tracked pre–Stage B single-aggregate HTTP rejection; behavior has moved forward without closing all related debt (mapping duplication, global timeline).
+- **Future impact**: None as a standalone gate; follow **Candidate → state_id mapping (single source of truth)** and timeline entries instead.
+- **Priority**: Low
+- **Recommended future direction**: Treat this registry row as historical; do not re-open unless aggregate lifecycle requirements regress.
+
+### Candidate → state_id mapping (single source of truth)
+- **Status**: OPEN
+- **Scope**: API+DX
+- **Revisit when**: Before changing namespace, mapping format, or orchestration id versioning (including replay fixture regeneration)
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: Deterministic ``candidate_id → orchestration state id`` uses the same formula in **two places** today:
+  - **Application layer (canonical for writes)**: ``modules/recruitment/registry.py`` — ``get_state_id(candidate_id)`` → ``uuid5(BOOT_NS, f"candidate:{candidate_id}")``; consumed by ``modules/recruitment/use_cases.py`` (``_ensure_candidate_state`` before ingress publish).
+  - **Bootstrap wiring (duplicated)**: ``modules/recruitment/bootstrap.py`` — private ``_state_id_for_candidate(candidate_id)`` with the **same** ``uuid5(_BOOT_NS, f"candidate:{candidate_id}")`` expression for ``VERTICAL_SLICE_DEFAULT_STATE_ID``, ``_state_id()``, and initial slice wiring.
+  The subscriber resolves live state via ``store.get_for_candidate(envelope.subject_id)`` and does **not** import the registry (intentional boundary). **No refactor is scheduled in the current milestone**—behavior and tests remain as-is.
+- **Rationale**: **Acceptable short-term**: bootstrap needed stable default ids before ``registry.py`` existed; duplicating a one-line deterministic formula avoided bootstrap → application import cycles during the modular monolith migration. The formula is trivial and currently identical in both sites.
+- **Future impact** (if left unresolved when mapping evolves):
+  - **Inconsistent mapping** if one site changes namespace, string format, or versioning and the other does not.
+  - **Replay / harness mismatch** when bootstrap-created snapshots use a different ``state_id`` than ingress-created rows for the same ``candidate_id``.
+  - **Bootstrap encodes domain identity** despite being a wiring layer—future contributors may “fix” mapping in the wrong file.
 - **Priority**: Medium
-- **Recommended future direction**: Add **deterministic** aggregate lifecycle operations (create/bind ids, explicit aggregate keys) in **runtime construction** or a thin registry—**not** in route handlers as ad-hoc policy; align with future persistence and audit entries.
+- **Recommended future direction** (do **not** implement until explicitly scheduled):
+  - **Centralize** mapping in one application module—e.g. extend ``modules/recruitment/registry.py`` or introduce ``modules/recruitment/identity.py`` with a single exported function (same semantics, documented contract).
+  - **Bootstrap imports** that function for ``VERTICAL_SLICE_DEFAULT_STATE_ID`` / ``_state_id()`` instead of redefining ``_state_id_for_candidate``.
+  - Add a **harness or unit test** that asserts bootstrap default ids equal ``get_state_id(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)`` so drift is caught in CI.
+  - Coordinate with **Candidate multi-state index governance** if composite keys (job, workflow version) replace the flat ``candidate:{id}`` string.
 
 ### HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
@@ -398,12 +420,33 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Scope**: Inspection+API
 - **Revisit when**: When consumers need machine-stable timeline JSON
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: Inspection (`runtime/inspection/`) and **`GET /timeline/{candidate_id}`** expose **deterministic plain text** timelines only. There is **no** canonical structured timeline schema (JSON rows, typed segments) or alternate renderers (UI components, export formats) in the reference runtime.
+- **Last reviewed**: 2026-05-22
+- **Current decision**: Inspection (`runtime/inspection/`) and **`GET /timeline/{candidate_id}`** expose **deterministic plain text** timelines only. There is **no** canonical structured timeline schema (JSON rows, typed segments) or alternate renderers (UI components, export formats) in the reference runtime. **Scope caveat**: timeline content is **not** candidate-scoped today—see **Timeline is global, not candidate-scoped (multi-candidate safety)**.
 - **Rationale**: Human-readable text is the smallest **read-only** projection for early operator visibility on the reference slice; structured timelines add schema churn before operator and integration contracts stabilize.
 - **Future impact**: Downstream tools cannot consume **machine-stable** timeline entries without parsing text; multiple surfaces may diverge if each invents its own JSON.
 - **Priority**: Medium
-- **Recommended future direction**: Introduce an intermediate **structured timeline model** (immutable facts → entries) shared by **text / JSON / UI** renderers; keep rendering **non-authoritative** and **deterministic**; align with **Inspection event-history provenance and catalog governance**.
+- **Recommended future direction**: Introduce an intermediate **structured timeline model** (immutable facts → entries) shared by **text / JSON / UI** renderers; keep rendering **non-authoritative** and **deterministic**; align with **Inspection event-history provenance and catalog governance** and **Timeline is global, not candidate-scoped**.
+
+### Timeline is global, not candidate-scoped (multi-candidate safety)
+- **Status**: OPEN
+- **Scope**: Inspection+API
+- **Revisit when**: When exposing timeline for non-default candidates or shipping recruiter-facing audit/history UX
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: Timeline rendering is **system-level**, not per-candidate:
+  - **Data sources**: global ``bundle.subscriber.run_history`` (all orchestration runs handled by the wired subscriber) plus a **merged envelope catalog** (primary scripted ingress + ``RecordingInMemoryEventBus.recorded_envelopes`` when present)—see ``modules/recruitment/projection.get_timeline`` and ``runtime/inspection``.
+  - **Important**: This is **not** a candidate audit trail. It reflects **process-wide execution artifacts** for the single wired bus/subscriber, not an isolated history keyed by ``candidate_id``.
+  - **Multi-candidate workaround (explicit, no filtering yet)**: ``GET /timeline/{candidate_id}`` via ``get_timeline_for_candidate`` allows timeline **only** when ``candidate_id`` equals the bootstrap **default demo candidate** (``VERTICAL_SLICE_DEFAULT_CANDIDATE_ID``). Any other candidate id returns **404** (`CandidateNotFoundError`: ``timeline not supported for multi-candidate yet``), **even if** that candidate has orchestration state from ``POST /events``. **No candidate filtering is implemented** in this milestone—behavior is intentionally unchanged.
+- **Rationale**: **Acceptable short-term** after Stage B multi-candidate ingress: exposing the global timeline for arbitrary ids would **leak cross-candidate runs** (misleading or unsafe). A 404 gate is safer than implying per-candidate history. Filtering and catalog scoping are deferred to avoid false “audit trail” semantics before contracts exist.
+- **Future impact** / **risks**:
+  - **Misleading interpretation**: developers or recruiters may treat ``GET /timeline/{id}`` as **that candidate’s workflow history**—it is not, unless/until candidate-scoped filtering exists.
+  - **Future bugs**: re-enabling timeline for all candidates **without** filtering would mix ``run_history`` and bus tapes across candidates—**cross-candidate contamination** in one text blob.
+  - **Product gap**: non-demo candidates have state/summary/candidate view but **no** timeline surface until scoping is designed.
+- **Priority**: High (safety + clarity for multi-candidate Stage B)
+- **Recommended future direction** (do **not** implement until explicitly scheduled):
+  - **Option A (preferred)**: Make timeline **candidate-aware**—filter ``run_history`` and catalog envelopes by ``envelope.subject_id == candidate_id`` (and/or correlation policy); render only matching orchestration runs; add harness tests for two-candidate isolation on timeline text.
+  - **Option B**: **Deprecate** timeline as a recruiter-facing product feature—keep plain-text rendering as **debug/harness-only** (CLI, internal tools), not ``GET /timeline`` on the public API.
+  - In either case, document in API/operator docs that timeline is **not** canonical audit (transition records + persisted snapshot remain source of truth until a durable event read model exists—see **Inspection event-history provenance and catalog governance**).
 
 ### API boundary coupling to bootstrap helpers (`_envelope`, fixed clock)
 - **Status**: OPEN

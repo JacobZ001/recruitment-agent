@@ -74,6 +74,20 @@ def test_bootstrap_module_does_not_import_fastapi() -> None:
     assert "httpexception" not in text
 
 
+def test_runtime_module_does_not_import_registry() -> None:
+    path = Path(__file__).resolve().parents[2] / "modules" / "recruitment" / "runtime.py"
+    text = path.read_text(encoding="utf-8")
+    assert "registry" not in text
+
+
+def test_bootstrap_subscriber_does_not_import_registry() -> None:
+    path = Path(__file__).resolve().parents[2] / "modules" / "recruitment" / "bootstrap.py"
+    text = path.read_text(encoding="utf-8")
+    assert "from .registry" not in text
+    assert "CandidateRegistry" not in text
+    assert "get_for_candidate" in text
+
+
 def test_ranking_module_is_pure_policy() -> None:
     path = Path(__file__).resolve().parents[2] / "modules" / "recruitment" / "ranking.py"
     text = path.read_text(encoding="utf-8")

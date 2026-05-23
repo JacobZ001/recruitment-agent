@@ -40,9 +40,9 @@ class DevResetResult:
 
 class VerticalSliceApiRuntime:
     """
-    One wired vertical slice per process: deterministic ids, recording bus for inspection.
+    One wired vertical slice per process: recording bus and store.
 
-    Not multi-tenant; ``candidate_id`` on the bundle matches bootstrap default subject id.
+    Single-tenant; multiple candidates share one bus/orchestrator (state resolved via store index).
     """
 
     def __init__(self, *, db_path: Optional[str] = None) -> None:

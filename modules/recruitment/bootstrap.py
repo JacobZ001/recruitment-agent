@@ -132,16 +132,22 @@ from .ingress import build_ingress_envelope as _envelope
 from .ingress import vertical_slice_primary_ingress_envelopes
 from .inspection.catalog import resolve_vertical_slice_inspection_catalog
 from .policies import PRIMARY_VERTICAL_SLICE_EVENT_TYPES, VERTICAL_SLICE_INGRESS_EVENT_TYPES
-
+from .state_init import initial_orchestration_state as _initial_state
 _STUB_AUDIT_TIME = datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)
 
-# Stable ids for the single-aggregate reference vertical slice (bootstrap + API ingress).
-VERTICAL_SLICE_DEFAULT_STATE_ID = uuid5(_BOOT_NS, "vertical_slice.orchestration_state")
+# Stable ids for the reference vertical slice (bootstrap + API ingress).
 VERTICAL_SLICE_DEFAULT_CANDIDATE_ID = uuid5(_BOOT_NS, "vertical_slice.candidate_subject")
 
 
+def _state_id_for_candidate(candidate_id: UUID) -> UUID:
+    return uuid5(_BOOT_NS, f"candidate:{candidate_id}")
+
+
+VERTICAL_SLICE_DEFAULT_STATE_ID = _state_id_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+
+
 def _state_id() -> UUID:
-    return uuid5(_BOOT_NS, "vertical_slice.orchestration_state")
+    return _state_id_for_candidate(_candidate_id())
 
 
 def _candidate_id() -> UUID:
@@ -284,20 +290,6 @@ def _skill_registry() -> Dict[str, Skill]:
             runtime_label="runtime.stub.questionnaire_stage",
         ),
     }
-
-
-def _initial_state(*, state_id: UUID, candidate_id: UUID, occurred_at: datetime) -> OrchestrationState:
-    """Frozen timestamps so replay harnesses can assert identical aggregates across runs."""
-    return OrchestrationState(
-        id=state_id,
-        links=[StateLink(kind="candidate", id=candidate_id, source="bootstrap_vertical_slice")],
-        pipeline=PipelineState(entered_phase_at=occurred_at),
-        audit=StateAudit(
-            created_at=occurred_at,
-            updated_at=occurred_at,
-            updated_by="bootstrap_vertical_slice",
-        ),
-    )
 
 
 StateStoreLike = Union[InMemoryStateStore, SQLiteStateStore]
@@ -526,10 +518,11 @@ class _OrchestrationSubscriber:
     run_history: List[OrchestrationExecutionResult] = field(default_factory=list, repr=False)
 
     def handle(self, envelope: EventEnvelope, context: DeliveryContext) -> HandleResult:
-        cur = self.store.get(self.state_id)
+        cur = self.store.get_for_candidate(envelope.subject_id)
         if not cur.ok or cur.snapshot is None or cur.meta is None:
             return _reject_handle("orchestration snapshot missing before handle")
 
+        state_id = cur.meta.state_id
         result = self.orchestrator.handle_event(
             state=cur.snapshot,
             envelope=envelope,
@@ -540,7 +533,7 @@ class _OrchestrationSubscriber:
 
         if result.ok and result.new_state is not None:
             rep = self.store.replace(
-                self.state_id,
+                state_id,
                 result.new_state,
                 expected_store_revision=cur.meta.store_revision,
             )

@@ -234,12 +234,35 @@ def get_demo_candidate(runtime: ReadRuntime) -> Dict[str, Any]:
     }
 
 
-def get_candidate_view_for_runtime(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
-    if candidate_id != runtime.candidate_id:
-        raise CandidateNotFoundError(
-            f"candidate_id does not match this single-aggregate runtime: {candidate_id!s}"
-        )
+def _load_snapshot_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> OrchestrationState:
     got = runtime.bundle.store.get_for_candidate(candidate_id)
     if not got.ok or got.snapshot is None:
-        raise CandidateNotFoundError("no orchestration state for candidate")
-    return build_candidate_view(got.snapshot)
+        raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
+    return got.snapshot
+
+
+def get_candidate_view_for_runtime(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
+    return build_candidate_view(_load_snapshot_for_candidate(runtime, candidate_id))
+
+
+def get_state_summary_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
+    """Load state summary for ``candidate_id``; raises :class:`CandidateNotFoundError` when absent."""
+    got = runtime.bundle.store.get_for_candidate(candidate_id)
+    if not got.ok or got.snapshot is None or got.meta is None:
+        raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
+    return get_state_summary(got.snapshot, store_revision=got.meta.store_revision)
+
+
+_TIMELINE_MULTI_CANDIDATE_MSG = "timeline not supported for multi-candidate yet"
+
+
+def get_timeline_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
+    """
+    Timeline for the wired default demo candidate only.
+
+    Other candidate ids are rejected so global ``run_history`` does not leak cross-candidate data.
+    """
+    if candidate_id != runtime.candidate_id:
+        raise CandidateNotFoundError(_TIMELINE_MULTI_CANDIDATE_MSG)
+    _load_snapshot_for_candidate(runtime, candidate_id)
+    return get_timeline(runtime)

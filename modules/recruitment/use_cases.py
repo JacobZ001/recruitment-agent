@@ -11,6 +11,8 @@ from typing import Any, Dict, Optional, Protocol
 from uuid import UUID
 
 from interfaces.event_bus_interface import DeliveryStatus
+from runtime.in_memory_state_store import StateStoreFailureCode
+from .state_init import initial_orchestration_state
 from .ingress import FIXED_CLOCK as _FIXED_CLOCK
 from .ingress import build_ingress_envelope as _envelope
 from schemas.state_schema import OrchestrationState
@@ -18,6 +20,7 @@ from schemas.state_schema import OrchestrationState
 from . import policies
 from .exceptions import DemoRunPreconditionError, InvalidIngressEventError
 from .projection import get_state_summary
+from .registry import get_state_id
 
 
 class IngressRuntime(Protocol):
@@ -44,8 +47,37 @@ class EventIngressResult:
     state_summary: Optional[Dict[str, Any]]
 
 
-def _state_summary_after_publish(runtime: IngressRuntime) -> Optional[Dict[str, Any]]:
-    cur = runtime.bundle.store.get(runtime.bundle.state_id)
+def _ensure_candidate_state(runtime: IngressRuntime, candidate_id: UUID) -> UUID:
+    """
+    Write path only: ensure a store snapshot exists for ``candidate_id`` before ingress publish.
+
+    Uses deterministic ``state_id``; does not register candidates in memory.
+    """
+    state_id = get_state_id(candidate_id)
+    got = runtime.bundle.store.get_for_candidate(candidate_id)
+    if got.ok and got.snapshot is not None:
+        return state_id
+
+    init = initial_orchestration_state(
+        state_id=state_id,
+        candidate_id=candidate_id,
+        occurred_at=_FIXED_CLOCK,
+    )
+    created = runtime.bundle.store.create(init)
+    if created.ok:
+        return state_id
+    if (
+        created.failure is not None
+        and created.failure.code == StateStoreFailureCode.ALREADY_EXISTS
+    ):
+        return state_id
+    raise RuntimeError(f"candidate state create failed: {created.failure}")
+
+
+def _state_summary_after_publish(
+    runtime: IngressRuntime, *, candidate_id: UUID
+) -> Optional[Dict[str, Any]]:
+    cur = runtime.bundle.store.get_for_candidate(candidate_id)
     if cur.ok and cur.snapshot is not None and cur.meta is not None:
         return get_state_summary(cur.snapshot, store_revision=cur.meta.store_revision)
     return None
@@ -63,10 +95,10 @@ def publish_ingress_event(
 
     Governance payloads are not merged with bootstrap/api_sequence fields.
     """
-    policies.validate_single_tenant_candidate(runtime, candidate_id)
     if not policies.is_allowed_ingress_event(event_type):
         raise InvalidIngressEventError(f"event_type not allowed: {event_type!r}")
 
+    _ensure_candidate_state(runtime, candidate_id)
     seq = runtime.next_publish_sequence()
     corr = correlation_id if correlation_id is not None else candidate_id
 
@@ -94,7 +126,7 @@ def publish_ingress_event(
         event_id=str(env.event_id),
         event_type=env.event_type,
         publish_result=pub_dump,
-        state_summary=_state_summary_after_publish(runtime),
+        state_summary=_state_summary_after_publish(runtime, candidate_id=candidate_id),
     )
 
 
@@ -165,5 +197,5 @@ def run_primary_demo_sequence(
     candidate_id: UUID,
 ) -> OrchestrationState:
     """Run the scripted primary vertical-slice sequence (requires pipeline phase NEW)."""
-    policies.validate_single_tenant_candidate(runtime, candidate_id)
+    _ensure_candidate_state(runtime, candidate_id)
     return runtime.run_primary_demo_sequence()

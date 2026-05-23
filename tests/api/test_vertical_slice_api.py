@@ -79,15 +79,17 @@ def test_unknown_candidate_returns_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_post_events_wrong_candidate_returns_404(client: TestClient) -> None:
+def test_post_events_accepts_new_candidate_id(client: TestClient) -> None:
+    cid = str(uuid4())
     r = client.post(
         "/events",
         json={
             "event_type": "candidate_created",
-            "candidate_id": str(uuid4()),
+            "candidate_id": cid,
         },
     )
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert client.get(f"/state/{cid}").status_code == 200
 
 
 def test_admin_reset_in_memory_restores_new(client: TestClient) -> None:

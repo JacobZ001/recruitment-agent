@@ -16,8 +16,11 @@ from .projection import (
     get_candidate_view_for_runtime,
     get_demo_candidate,
     get_state_summary,
+    get_state_summary_for_candidate,
     get_timeline,
+    get_timeline_for_candidate,
 )
+from .registry import get_state_id
 from .policies import ALLOWED_INGRESS_EVENT_TYPES, allowed_ingress_event_types
 from .runtime import DevResetResult, VerticalSliceApiRuntime
 from .use_cases import (
@@ -41,7 +44,9 @@ __all__ = (
     "build_candidate_view",
     "get_candidate_view_for_runtime",
     "get_demo_candidate",
+    "get_state_id",
     "get_state_summary",
+    "get_state_summary_for_candidate",
     "get_timeline",
     "allowed_ingress_event_types",
     "publish_ingress_event",

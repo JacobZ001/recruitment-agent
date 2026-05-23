@@ -34,7 +34,8 @@ from modules.recruitment import (
     get_candidate_view_for_runtime,
     get_demo_candidate,
     get_state_summary,
-    get_timeline,
+    get_state_summary_for_candidate,
+    get_timeline_for_candidate,
     policies,
     publish_recruitment_event,
     record_recruiter_decision,
@@ -156,15 +157,11 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> StateSummaryResponse:
         try:
-            policies.validate_single_tenant_candidate(rt, candidate_id)
+            summary = get_state_summary_for_candidate(rt, candidate_id)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=candidate_id)
 
-        got = rt.bundle.store.get_for_candidate(candidate_id)
-        if not got.ok or got.snapshot is None or got.meta is None:
-            raise HTTPException(status_code=404, detail="no orchestration state for candidate")
-
-        return StateSummaryResponse(**get_state_summary(got.snapshot, store_revision=got.meta.store_revision))
+        return StateSummaryResponse(**summary)
 
     @app.get("/timeline/{candidate_id}", response_model=TimelineResponse)
     def get_timeline_route(
@@ -172,11 +169,10 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> TimelineResponse:
         try:
-            policies.validate_single_tenant_candidate(rt, candidate_id)
+            tl = get_timeline_for_candidate(rt, candidate_id)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=candidate_id)
 
-        tl = get_timeline(rt)
         return TimelineResponse(**tl)
 
     @app.get("/demo/candidate", response_model=DemoCandidateResponse)
