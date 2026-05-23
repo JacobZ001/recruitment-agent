@@ -51,6 +51,7 @@ from modules.recruitment.ranking import resolve_ranking_branch
 SKILL_CANDIDATE_CREATED = "recruitment.vertical_slice.candidate_created"
 SKILL_CV_UPLOADED = "recruitment.vertical_slice.cv_uploaded"
 SKILL_CV_PARSED = "recruitment.vertical_slice.cv_parsed"
+SKILL_CV_PARSE_AND_SCORE = "recruitment.vertical_slice.cv_parse_and_score"
 SKILL_HARD_FILTER = "recruitment.vertical_slice.hard_filter"
 SKILL_LIGHT_SCORING = "recruitment.vertical_slice.light_scoring"
 SKILL_DEEP_SCORING = "recruitment.vertical_slice.deep_scoring"
@@ -173,6 +174,8 @@ class VerticalSlicePlanner:
         }
         if extras:
             payload.update(extras)
+        if envelope.payload:
+            payload.update(dict(envelope.payload))
         if self._demo_skill_context:
             merge_demo_profile_into_skill_payload(payload)
         return SkillInputEnvelope(payload=payload)
@@ -194,6 +197,8 @@ class VerticalSlicePlanner:
             return self._plan_cv_uploaded(phase, envelope)
         if et == "cv_parsed":
             return self._plan_cv_parsed(phase, envelope)
+        if et == "cv_submitted":
+            return self._plan_cv_submitted(phase, envelope)
         if et == "hard_filter_passed":
             return self._plan_hard_filter_passed(phase, envelope)
         if et == "hard_filter_failed":
@@ -299,6 +304,27 @@ class VerticalSlicePlanner:
                 SkillInvocationSpec(
                     skill_name=SKILL_CV_PARSED,
                     input=self._skill_input(planner_path="cv_parsed", envelope=envelope),
+                    required=True,
+                ),
+            ),
+        )
+
+    def _plan_cv_submitted(self, phase: PipelinePhase, envelope: EventEnvelope) -> OrchestrationPlan:
+        if phase != PipelinePhase.NEW:
+            return OrchestrationPlan()
+        return OrchestrationPlan(
+            proposed_transition=ProposedTransition(
+                state_domain=StateDomain.PIPELINE,
+                from_state=PipelinePhase.NEW.value,
+                to_state=PipelinePhase.CV_PARSED.value,
+                trigger=_event_trigger("cv_submitted"),
+                human_override=_human_override(envelope),
+                transition_actor=_system_actor(envelope),
+            ),
+            skills=(
+                SkillInvocationSpec(
+                    skill_name=SKILL_CV_PARSE_AND_SCORE,
+                    input=self._skill_input(planner_path="cv_submitted", envelope=envelope),
                     required=True,
                 ),
             ),
@@ -963,6 +989,17 @@ def skill_result_to_vertical_slice_decision_extensions(
         refs = _evidence_ref_strings_from_skill_result(res)
         if refs:
             out["_evidence_refs_partial"] = refs
+        return out
+
+    if skill_name == SKILL_CV_PARSE_AND_SCORE:
+        if "cv.raw_text" in pl:
+            out["cv.raw_text"] = pl["cv.raw_text"]
+        if "cv.signals" in pl:
+            out["cv.signals"] = pl["cv.signals"]
+        if "scoring.normalized_score" in pl:
+            out["decision.light_score"] = float(pl["scoring.normalized_score"])
+        if "scoring.confidence_score" in pl:
+            out["decision.light_confidence"] = float(pl["scoring.confidence_score"])
         return out
 
     return out

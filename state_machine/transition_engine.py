@@ -586,6 +586,13 @@ def default_pipeline_registry() -> TransitionRegistry:
             allowed_triggers=("event:cv_parsed",),
         ),
         TransitionRule(
+            rule_id="pipeline.new_to_cv_parsed_cv_submitted",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.NEW.value,
+            to_state=p.CV_PARSED.value,
+            allowed_triggers=("event:cv_submitted",),
+        ),
+        TransitionRule(
             rule_id="pipeline.cv_parsed_to_hard_filter_passed",
             state_domain=StateDomain.PIPELINE,
             from_state=p.CV_PARSED.value,

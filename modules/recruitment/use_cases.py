@@ -167,17 +167,23 @@ def publish_recruitment_event(
 def submit_cv(
     runtime: IngressRuntime,
     candidate_id: UUID,
-    event_type: str,
-    payload: Dict[str, Any],
+    cv_text: str,
     *,
     correlation_id: Optional[UUID] = None,
 ) -> EventIngressResult:
-    """Deprecated alias for :func:`publish_recruitment_event` (name retained for compatibility)."""
+    """
+    Ingest raw CV text for a candidate (single ``cv_submitted`` event).
+
+    Triggers deterministic parse-and-score skill; results persist on snapshot extensions.
+    """
+    text = cv_text.strip()
+    if not text:
+        raise InvalidIngressEventError("cv_text must be non-empty")
     return publish_recruitment_event(
         runtime,
         candidate_id,
-        event_type,
-        payload,
+        "cv_submitted",
+        {"cv_text": text},
         correlation_id=correlation_id,
     )
 
@@ -234,9 +240,17 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
             items.append(build_candidate_list_item(got.snapshot))
         except ValueError:
             continue
-    # TODO: recruiter-facing sort (recency / stage / score)
-    # current sort is deterministic only, not product semantics
-    items.sort(key=lambda row: row["candidate_id"])
+    def _score_sort_key(row: Dict[str, Any]) -> tuple:
+        overall = row.get("overall_score") or {}
+        value = overall.get("value")
+        if value is None:
+            return (1, 0.0, row["candidate_id"])
+        try:
+            return (0, -float(value), row["candidate_id"])
+        except (TypeError, ValueError):
+            return (1, 0.0, row["candidate_id"])
+
+    items.sort(key=_score_sort_key)
     return items
 
 

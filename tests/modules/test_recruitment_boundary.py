@@ -222,9 +222,13 @@ def test_bootstrap_imported_only_by_runtime_api_and_shims() -> None:
     assert offenders == [], f"unexpected bootstrap imports: {offenders}"
 
 
-def test_submit_cv_delegates_to_publish_recruitment_event() -> None:
-    assert submit_cv is not publish_recruitment_event
-    assert submit_cv.__doc__ and "Deprecated" in submit_cv.__doc__
+def test_submit_cv_publishes_cv_submitted() -> None:
+    rt = VerticalSliceApiRuntime()
+    cid = uuid4()
+    publish_recruitment_event(rt, cid, "candidate_created", {})
+    result = submit_cv(rt, cid, "Python developer\n5 years experience\npython django")
+    assert result.ingress_accepted is True
+    assert result.event_type == "cv_submitted"
 
 
 def test_api_lifespan_initializes_runtime_and_demo_run(client: TestClient) -> None:

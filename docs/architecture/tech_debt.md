@@ -432,6 +432,18 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Add **limit/offset** or **cursor** pagination on the list use case; support basic filters (``stage``, ``status.kind``, optional search); drive queries from domain/registry or indexed read models—not unbounded ``list_all_state_ids`` in hot paths.
 
+### CV ingestion evolution (MVP ``cv_submitted``)
+- **Status**: OPEN
+- **Scope**: Skills+API
+- **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
+- **Introduced in**: 2026-05-22
+- **Last reviewed**: 2026-05-22
+- **Current decision**: Real CV text enters via a single ingress event ``cv_submitted`` and one deterministic skill ``cv_parse_and_score``. Snapshot extensions store ``cv.raw_text``, ``cv.signals`` (small dict), and ``decision.light_score`` (+ optional ``decision.light_confidence``). Demo/replay still uses ``cv_uploaded`` → ``cv_parsed`` in ``PRIMARY_VERTICAL_SLICE_EVENT_TYPES``.
+- **Rationale**: One business action per event for MVP usability; parsing/scoring stay inside the skill layer so the planner remains event→transition→skill only.
+- **Future impact**: Later stages can add ``cv_parsed`` (LLM), ``cv_enriched``, and ``scoring_updated`` as **new skills and registry edges** without leaking CV semantics into the planner.
+- **Priority**: Medium
+- **Recommended future direction**: Split or wrap ``cv_parse_and_score``; add typed ``cv_text`` payload validation at ingress; optional artifact refs when a document store exists—keep orchestration contracts stable.
+
 ### Recruiter action label ownership
 - **Status**: OPEN
 - **Scope**: API

@@ -164,10 +164,10 @@ Qualified candidates are evaluated across three dimensions:
 
 ### Universal Competencies
 
-- Communication
-- Ownership
-- Reliability
-- Thinking clarity
+- Communication 25%
+- Ownership 25%
+- Reliability 30%
+- Thinking clarity 20%
 
 ### Role-Specific Competencies
 

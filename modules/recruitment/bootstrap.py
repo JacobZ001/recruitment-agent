@@ -101,6 +101,7 @@ from orchestrator.orchestrator import (
 )
 from orchestrator.vertical_slice_planner import (
     SKILL_CANDIDATE_CREATED,
+    SKILL_CV_PARSE_AND_SCORE,
     SKILL_CV_PARSED,
     SKILL_CV_UPLOADED,
     SKILL_QUESTIONNAIRE_STAGE,
@@ -120,6 +121,7 @@ from schemas.state_schema import (
     StateAudit,
     StateLink,
 )
+from skills.deterministic.cv_parse_and_score_skill import CvParseAndScoreSkill
 from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
 from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
@@ -278,6 +280,7 @@ def _skill_registry() -> Dict[str, Skill]:
             runtime_label="runtime.stub.candidate_created",
         ),
         SKILL_CV_UPLOADED: FakeCvUploadedSkill(),
+        SKILL_CV_PARSE_AND_SCORE: CvParseAndScoreSkill(),
         SKILL_CV_PARSED: _StubVerticalSliceSkill(
             skill_name=SKILL_CV_PARSED,
             runtime_label="runtime.stub.cv_parsed",

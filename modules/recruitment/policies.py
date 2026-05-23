@@ -31,8 +31,12 @@ PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
 )
 
 # API / integration allowlist = primary progression + governance + bounded system ingress.
+# ``cv_submitted`` is MVP real-CV ingress (single event); not part of the demo primary sequence.
 VERTICAL_SLICE_INGRESS_EVENT_TYPES: Tuple[str, ...] = (
-    PRIMARY_VERTICAL_SLICE_EVENT_TYPES + GOVERNANCE_EVENT_TYPES + ("candidate_rejected",)
+    PRIMARY_VERTICAL_SLICE_EVENT_TYPES
+    + ("cv_submitted",)
+    + GOVERNANCE_EVENT_TYPES
+    + ("candidate_rejected",)
 )
 
 ALLOWED_INGRESS_EVENT_TYPES: Tuple[str, ...] = VERTICAL_SLICE_INGRESS_EVENT_TYPES

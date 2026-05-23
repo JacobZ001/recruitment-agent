@@ -22,7 +22,13 @@ class VerticalSliceIngressEventBody(BaseModel):
         description="Optional; must match the wired slice candidate when set.",
     )
     correlation_id: Optional[UUID] = Field(default=None)
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Event-specific fields. For ``cv_submitted``, include ``cv_text`` (raw CV body). "
+            "Other events may carry skill or ranking overrides."
+        ),
+    )
 
     @field_validator("event_type")
     @classmethod
