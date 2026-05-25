@@ -232,3 +232,88 @@ Avoid:
 - autonomous architecture rewrites
 - implicit assumptions
 
+---
+
+# Collaboration Operating Model (PM / Architect / Builder)
+
+## Role Ownership
+
+### Project Manager (Human)
+
+- Owns final product and scope decisions.
+- Approves or rejects each development round proposal.
+- Performs QA alignment and requirement confirmation.
+
+### Architect Agent (session name: `Architect Agent`)
+
+- Produces high-level architecture guidance and round plans.
+- Converts approved round scope into executable `PLAN.md`.
+- Reviews `FEEDBACK.md` and codebase changes, then proposes the next round.
+- Does not bypass PM approval for scope-changing work.
+
+### Builder Agent (session name: `Builder Agent`)
+
+- Executes only the currently approved `PLAN.md`.
+- Implements bounded changes in the codebase.
+- Reports outcomes by overwriting `FEEDBACK.md`.
+- Must not redefine architecture boundaries without explicit PM approval.
+
+## Session Naming Convention
+
+- Architecture/planning session name: `Architect Agent`.
+- Implementation/execution session name: `Builder Agent`.
+
+## Single Source of Truth Files
+
+### `PLAN.md` (Execution plan source)
+
+- Location: repository root.
+- Ownership: Architect Agent (after PM approval).
+- Write mode: overwrite per round (keep only current approved round).
+- Purpose: concrete implementation instructions for Builder Agent.
+
+### `FEEDBACK.md` (Execution report source)
+
+- Location: repository root.
+- Ownership: Builder Agent.
+- Write mode: overwrite per round (keep only current round report).
+- Purpose: implementation status, file changes, tests, risks, and deviations.
+
+## Development Round Protocol
+
+Each round follows this sequence:
+
+1. Architect Agent proposes a light high-level structured plan for PM review.
+2. PM reviews and confirms scope, risks, and acceptance criteria.
+3. Architect Agent overwrites `PLAN.md` with executable round instructions.
+4. Builder Agent executes `PLAN.md` in a separate implementation session.
+5. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
+6. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then proposes next round.
+
+## Plan and Feedback Standards
+
+### `PLAN.md` must include
+
+- Round ID and one-sentence goal.
+- Scope in / scope out.
+- Explicit constraints and architecture boundaries.
+- Ordered execution steps.
+- Acceptance criteria (testable checklist).
+- Required Builder feedback format reminder.
+
+### `FEEDBACK.md` must include
+
+- Round ID and execution status (`done` / `partial` / `blocked`).
+- Step-by-step completion mapping against `PLAN.md`.
+- Full file change summary (`A` / `M` / `D`).
+- Test commands and results.
+- Risks, deviations, and blockers.
+- Suggested next-round focus (short).
+
+## Governance and Guardrails
+
+- `PLAN.md` is the only execution instruction source for Builder Agent.
+- Builder Agent should avoid opportunistic scope expansion.
+- Schema or state-machine contract changes require explicit PM approval in the current round scope.
+- If implementation reality conflicts with `PLAN.md`, Builder reports in `FEEDBACK.md` and pauses further out-of-scope changes.
+
