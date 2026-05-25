@@ -257,6 +257,14 @@ Avoid:
 - Implements bounded changes in the codebase.
 - Reports outcomes by overwriting `FEEDBACK.md`.
 - Must not redefine architecture boundaries without explicit PM approval.
+- If a change is not explicitly listed in PLAN.md:
+    - DO NOT IMPLEMENT
+    - report in FEEDBACK.md instead
+- Builder must not modify:
+    - schema
+    - state transitions
+    - API contracts
+- unless explicitly listed in PLAN.md
 
 ## Session Naming Convention
 
