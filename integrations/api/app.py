@@ -20,6 +20,7 @@ from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
     CandidateActionBody,
+    CandidatePdfIngressBody,
     CandidateListItem,
     CandidateViewResponse,
     DemoCandidateResponse,
@@ -44,6 +45,7 @@ from modules.recruitment import (
     perform_candidate_action,
     record_recruiter_decision,
     run_primary_demo_sequence,
+    submit_cv_pdf,
 )
 from modules.recruitment.bootstrap import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
@@ -258,6 +260,36 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=candidate_id)
         return CandidateViewResponse(candidate_id=str(candidate_id), **view)
+
+    @app.post("/candidates/{candidate_id}/cv/pdf", response_model=EventIngressResponse)
+    def post_candidate_pdf_cv(
+        candidate_id: UUID,
+        body: CandidatePdfIngressBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> EventIngressResponse:
+        try:
+            result = submit_cv_pdf(
+                rt,
+                candidate_id,
+                body.pdf_base64,
+                file_name=body.file_name,
+                correlation_id=body.correlation_id,
+            )
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
+
+        state_summary = None
+        if result.state_summary is not None:
+            state_summary = StateSummaryResponse(**result.state_summary)
+
+        return EventIngressResponse(
+            ingress_accepted=result.ingress_accepted,
+            publish_status=result.publish_status,
+            event_id=result.event_id,
+            event_type=result.event_type,
+            publish_result=result.publish_result,
+            state_summary=state_summary,
+        )
 
     @app.get("/candidate/{candidate_id}", response_model=CandidateViewResponse)
     def get_candidate_view_route(

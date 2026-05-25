@@ -25,6 +25,7 @@ from .exceptions import (
     InvalidIngressEventError,
     ScoringFailedError,
 )
+from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
 
 DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD: Dict[str, Any] = {
@@ -187,6 +188,29 @@ def submit_cv(
         candidate_id,
         "cv_submitted",
         {"cv_text": text},
+        correlation_id=correlation_id,
+    )
+
+
+def submit_cv_pdf(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    pdf_base64: str,
+    *,
+    file_name: str = "cv.pdf",
+    correlation_id: Optional[UUID] = None,
+) -> EventIngressResult:
+    """
+    Ingest a bounded PDF CV payload and route extracted text into ``submit_cv``.
+
+    The canonical orchestration path remains ``cv_submitted`` with plain ``cv_text``.
+    """
+    pdf_bytes = decode_pdf_base64(pdf_base64, file_name=file_name)
+    extracted = extract_text_from_pdf_bytes(pdf_bytes, file_name=file_name)
+    return submit_cv(
+        runtime,
+        candidate_id,
+        extracted.cv_text,
         correlation_id=correlation_id,
     )
 

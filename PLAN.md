@@ -28,6 +28,9 @@ Ship a real PDF CV ingress path that runs end-to-end through `cv_submitted -> pa
 - LLM remains bounded to semantic extraction/evaluation; no orchestration control.
 - Keep fail-closed semantics for ingestion/parsing/scoring failures.
 - Do not reintroduce legacy `decision.*` compatibility semantics.
+- PDF ingress 优先选择最小可用 contract，优先复用现有 submit_cv(cv_text: str) 路径，不要扩大发散到 questionnaire 或前端重构。
+
+
 
 ## Execution Steps
 

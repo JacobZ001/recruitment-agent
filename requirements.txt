@@ -8,3 +8,6 @@ pytest>=8.0
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
+
+# Deterministic PDF CV extraction at the application boundary.
+pypdf>=6.12.1,<7

@@ -47,6 +47,32 @@ class StateSummaryResponse(BaseModel):
     store_revision: Optional[int] = None
 
 
+class CandidatePdfIngressBody(BaseModel):
+    """Validated payload for bounded PDF CV upload ingress."""
+
+    pdf_base64: str = Field(
+        ...,
+        min_length=1,
+        description="Raw base64-encoded PDF bytes (no data URL prefix).",
+    )
+    file_name: str = Field(
+        default="cv.pdf",
+        min_length=1,
+        description="Original uploaded file name; must end with .pdf.",
+    )
+    correlation_id: Optional[UUID] = Field(default=None)
+
+    @field_validator("file_name")
+    @classmethod
+    def _pdf_file_name(cls, v: str) -> str:
+        name = v.strip()
+        if not name:
+            raise ValueError("file_name must be non-empty")
+        if not name.lower().endswith(".pdf"):
+            raise ValueError("file_name must end with .pdf")
+        return name
+
+
 class TimelineResponse(BaseModel):
     timeline_text: str
     catalog_note: Optional[str] = Field(

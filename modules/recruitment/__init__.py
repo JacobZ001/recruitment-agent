@@ -7,6 +7,7 @@ HTTP and runtime wiring live outside this package; use cases receive an injected
 from .exceptions import (
     CandidateNotFoundError,
     DemoRunPreconditionError,
+    InvalidCvPdfError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
     RecruitmentUseCaseError,
@@ -45,6 +46,7 @@ from .use_cases import (
     perform_candidate_action,
     run_primary_demo_sequence,
     submit_cv,
+    submit_cv_pdf,
 )
 
 __all__ = (
@@ -56,6 +58,7 @@ __all__ = (
     "DemoRunPreconditionError",
     "DevResetResult",
     "EventIngressResult",
+    "InvalidCvPdfError",
     "InvalidCandidateActionError",
     "InvalidIngressEventError",
     "RecruitmentUseCaseError",
@@ -81,5 +84,6 @@ __all__ = (
     "record_recruiter_decision",
     "run_primary_demo_sequence",
     "submit_cv",
+    "submit_cv_pdf",
     "VerticalSliceApiRuntime",
 )

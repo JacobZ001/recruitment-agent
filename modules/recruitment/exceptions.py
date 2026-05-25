@@ -15,6 +15,10 @@ class InvalidIngressEventError(RecruitmentUseCaseError):
     """Event type is not allowed or does not match the intended use case."""
 
 
+class InvalidCvPdfError(RecruitmentUseCaseError):
+    """Uploaded or encoded PDF CV failed validation or text extraction guards."""
+
+
 class DemoRunPreconditionError(RecruitmentUseCaseError):
     """Scripted primary sequence cannot run safely on the current pipeline snapshot."""
 

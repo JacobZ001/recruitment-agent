@@ -213,6 +213,18 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 
 ## Persistence (SQLite)
 
+### Local SQLite schema/cutover migration strategy
+- **Status**: OPEN
+- **Scope**: Persistence+DX
+- **Revisit when**: Before the next breaking local schema/cutover round or before any expectation of preserving developer SQLite rows across upgrades
+- **Introduced in**: 2026-05-25
+- **Last reviewed**: 2026-05-25
+- **Current decision**: The single-tenant reference runtime treats local SQLite as a disposable developer store. When schema or cutover changes invalidate old local rows, the supported workflow is to reset/delete `data/app.db` and let the app recreate it on boot/reset.
+- **Rationale**: This keeps approved cutovers small and honest while the MVP surface is still evolving quickly. It avoids smuggling migration complexity into runtime read/write paths before a durable migration contract exists.
+- **Future impact**: Repeated local resets are acceptable for MVP development, but they do not scale into a stable operator/developer upgrade story once data longevity matters or schema changes become frequent.
+- **Priority**: Medium
+- **Recommended future direction**: Define an explicit local migration stance: either (a) codified disposable-dev SQLite with automated reset tooling, or (b) a lightweight deterministic migration/upcaster path with version checks and failure guidance. Do not revive runtime compatibility shims as a substitute for a real migration strategy.
+
 ### SQLite replace uses DELETE + INSERT instead of UPSERT
 - **Status**: OPEN
 - **Scope**: Persistence
@@ -438,8 +450,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-25
-- **Current decision**: Real CV text enters via a single ingress event ``cv_submitted`` and one bounded LLM skill ``cv_parse_and_score``. The skill emits typed ``ingress_profile`` plus ``evaluation.light``; deterministic stages still own hard filtering, deep scoring, ranking, and routing. Demo flows may still use ``cv_uploaded`` in scripted sequences, but current recruiter semantics come from the typed snapshot path.
-- **Rationale**: One business action per event preserves usable ingress while allowing bounded cognition where it matters: semantic extraction from CV text.
+- **Current decision**: Real CV ingress now supports bounded PDF upload payloads at the API boundary, which are deterministically converted into plain ``cv_text`` and then published as the existing ``cv_submitted`` event. The bounded LLM skill still emits typed ``ingress_profile`` plus ``evaluation.light``; deterministic stages own hard filtering, deep scoring, ranking, and routing. Demo flows may still use ``cv_uploaded`` in scripted sequences, but current recruiter semantics come from the typed snapshot path.
+- **Rationale**: One business action per event preserves usable ingress while allowing bounded cognition where it matters: semantic extraction from real recruiter-provided CV artifacts.
 - **Future impact**: Later stages can add richer artifact references, multi-stage enrichment, or separate parse/score edges without leaking workflow control into prompts or reviving flat score keys.
 - **Priority**: Medium
 - **Recommended future direction**: Split or wrap ``cv_parse_and_score`` only when bounded artifact storage, payload contracts, and provider operations need it; keep orchestration contracts stable and deterministic.
