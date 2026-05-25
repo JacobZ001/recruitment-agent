@@ -29,6 +29,7 @@ from runtime.inspection.decision_evidence import (
     truncate_for_inspection,
 )
 from runtime.inspection.timeline import render_vertical_slice_timeline_text
+from modules.recruitment.scoring_context_service import build_score_evaluation
 from schemas.state_schema import (
     DecisionActorType,
     EvaluationState,
@@ -36,7 +37,6 @@ from schemas.state_schema import (
     PipelinePhase,
     PipelineState,
     PipelineStatus,
-    ScoreEvaluation,
     StateActor,
     StateAudit,
     StateDomain,
@@ -124,11 +124,17 @@ def test_skill_decision_summary_prefers_snapshot_evaluation() -> None:
         id=uuid4(),
         links=[],
         evaluation=EvaluationState(
-            light=ScoreEvaluation(
-                normalized_score=0.88,
-                confidence=0.66,
-                explanation="persisted",
+            light=build_score_evaluation(
                 source="test",
+                explanation="persisted",
+                context_version=1,
+                l1_universal={
+                    "communication": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}
+                },
+                l2_role_specific={"role_fit": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}},
+                l3_recruiter_preference={
+                    "preference_fit": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}
+                },
                 evidence_refs=["persisted://ref"],
             )
         ),

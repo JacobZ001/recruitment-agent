@@ -58,8 +58,9 @@ def _build_pdf_base64(text: str | None) -> str:
     return base64.b64encode(_build_pdf_bytes(text)).decode("ascii")
 
 
-def test_submit_cv_pdf_persists_typed_snapshot_fields() -> None:
+def test_submit_cv_pdf_persists_typed_snapshot_fields(establish_ready_scoring_context) -> None:
     rt = VerticalSliceApiRuntime()
+    establish_ready_scoring_context(rt)
     cid = uuid4()
     result = submit_cv_pdf(
         rt,
@@ -72,7 +73,7 @@ def test_submit_cv_pdf_persists_typed_snapshot_fields() -> None:
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
     snap = got.snapshot
-    assert snap.pipeline.phase == PipelinePhase.LIGHT_SCORED
+    assert snap.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
     assert snap.ingress_profile is not None
     assert snap.evaluation is not None
     assert snap.evaluation.light is not None

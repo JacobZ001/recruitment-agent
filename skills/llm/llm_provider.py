@@ -53,6 +53,204 @@ def _extract_keywords(cv_text: str, *, pool: List[str]) -> List[str]:
     return out
 
 
+def _criterion_payload(score: float, reason: str) -> Dict[str, Any]:
+    confidence = _clamp01(0.45 + (score * 0.45))
+    return {
+        "score": round(score, 6),
+        "confidence": round(confidence, 6),
+        "reason": reason,
+    }
+
+
+def _payload_for_profile(cv_text: str) -> Dict[str, Any]:
+    lowered = cv_text.lower()
+    years = _extract_years(cv_text)
+    role_pool = [
+        "engineer",
+        "developer",
+        "manager",
+        "architect",
+        "analyst",
+        "recruiter",
+        "designer",
+    ]
+    skill_pool = [
+        "python",
+        "django",
+        "fastapi",
+        "sql",
+        "postgresql",
+        "docker",
+        "git",
+        "rest",
+        "api",
+        "testing",
+        "javascript",
+        "typescript",
+        "react",
+    ]
+    industry_pool = [
+        "fintech",
+        "healthcare",
+        "recruitment",
+        "saas",
+        "ecommerce",
+    ]
+    roles = _extract_keywords(lowered, pool=role_pool)
+    skills = _extract_keywords(lowered, pool=skill_pool)
+    industries = _extract_keywords(lowered, pool=industry_pool)
+
+    seniority = None
+    if years is not None:
+        if years >= 8:
+            seniority = "senior"
+        elif years >= 4:
+            seniority = "mid"
+        else:
+            seniority = "junior"
+
+    cleaned = " ".join(line.strip() for line in cv_text.splitlines() if line.strip())
+    summary = cleaned[:220].strip() or "Candidate profile extracted from submitted CV."
+    return {
+        "profile": {
+            "years_experience": years,
+            "seniority": seniority,
+            "roles": roles,
+            "skills": skills,
+            "industries": industries,
+            "summary": summary,
+        },
+        "explanation": "Stub provider deterministic profile extraction from submitted CV text.",
+    }
+
+
+def _payload_for_legacy_cv_eval(cv_text: str) -> Dict[str, Any]:
+    base = _payload_for_profile(cv_text)
+    profile = base["profile"]
+    lowered = cv_text.lower()
+    years = profile.get("years_experience")
+    skills = profile.get("skills") or []
+    richness = min(len(cv_text.strip()) / 400.0, 1.0)
+    years_score = 0.0 if years is None else min(float(years) / 10.0, 1.0)
+    skill_score = min(len(skills) / 8.0, 1.0)
+    summary_score = _clamp01((richness * 0.4) + (skill_score * 0.6))
+    _ = lowered
+    communication = _clamp01((richness * 0.7) + 0.15)
+    ownership = _clamp01((years_score * 0.7) + 0.15)
+    reliability = _clamp01((summary_score * 0.6) + (years_score * 0.2) + 0.1)
+    thinking = _clamp01((skill_score * 0.6) + (richness * 0.2) + 0.1)
+    return {
+        **base,
+        "criteria": {
+            "communication": _criterion_payload(
+                communication,
+                "Estimated from writing clarity and CV completeness.",
+            ),
+            "ownership": _criterion_payload(
+                ownership,
+                "Estimated from experience level and role progression cues.",
+            ),
+            "reliability": _criterion_payload(
+                reliability,
+                "Estimated from consistency and evidence density in the CV.",
+            ),
+            "thinking": _criterion_payload(
+                thinking,
+                "Estimated from technical breadth and structured problem-solving signals.",
+            ),
+        },
+        "explanation": (
+            "Stub provider deterministic evaluation from the submitted CV text. "
+            "Used for tests and local development only."
+        ),
+    }
+
+
+def _token_overlap_score(label: str, cv_text: str) -> float:
+    tokens = [tok for tok in re.split(r"[^a-z0-9]+", label.lower()) if tok and len(tok) > 2]
+    if not tokens:
+        return 0.45
+    matches = sum(1 for tok in tokens if tok in cv_text.lower())
+    return _clamp01(0.25 + (matches / len(tokens)) * 0.55)
+
+
+def _payload_for_layered_score(user_prompt: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(user_prompt)
+    except Exception:
+        payload = {"cv_text": user_prompt, "required_layers": {}}
+
+    cv_text = str(payload.get("cv_text") or "")
+    profile = payload.get("profile") or {}
+    required_layers = payload.get("required_layers") or {}
+    years = _extract_years(cv_text)
+    richness = min(len(cv_text.strip()) / 500.0, 1.0)
+    years_score = 0.0 if years is None else min(float(years) / 10.0, 1.0)
+    skills = list((profile.get("skills") or [])) if isinstance(profile, Mapping) else []
+    skill_score = min(len(skills) / 8.0, 1.0)
+    summary_score = _clamp01((richness * 0.4) + (skill_score * 0.6))
+
+    l1_names = list(required_layers.get("l1_universal") or [])
+    l2_names = list(required_layers.get("l2_role_specific") or [])
+    l3_names = list(required_layers.get("l3_recruiter_preference") or [])
+
+    l1_scores: Dict[str, Any] = {}
+    for name in l1_names:
+        lowered = str(name).lower()
+        if lowered == "communication":
+            score = _clamp01((richness * 0.7) + 0.15)
+            reason = "Estimated from writing clarity and CV completeness."
+        elif lowered == "ownership":
+            score = _clamp01((years_score * 0.7) + 0.15)
+            reason = "Estimated from experience level and role progression cues."
+        elif lowered == "reliability":
+            score = _clamp01((summary_score * 0.6) + (years_score * 0.2) + 0.1)
+            reason = "Estimated from consistency and evidence density in the CV."
+        else:
+            score = _clamp01((skill_score * 0.6) + (richness * 0.2) + 0.1)
+            reason = "Estimated from technical breadth and structured problem-solving signals."
+        l1_scores[str(name)] = _criterion_payload(score, reason)
+
+    l2_scores: Dict[str, Any] = {}
+    for name in l2_names:
+        base = _token_overlap_score(str(name), cv_text)
+        score = _clamp01(0.25 + (base * 0.55) + (years_score * 0.10))
+        l2_scores[str(name)] = _criterion_payload(
+            score,
+            "Estimated from overlap between candidate evidence and derived role/job requirements.",
+        )
+
+    l3_scores: Dict[str, Any] = {}
+    for name in l3_names:
+        base = _token_overlap_score(str(name), cv_text)
+        if str(name).lower().startswith("avoid:"):
+            score = _clamp01(0.9 - (base * 0.5))
+            reason = "Estimated from limited presence of explicitly avoided preference signals."
+        else:
+            score = _clamp01(0.30 + (base * 0.45) + (richness * 0.15))
+            reason = "Estimated from alignment with recruiter and organization preference signals."
+        l3_scores[str(name)] = _criterion_payload(score, reason)
+
+    return {
+        "l1_universal": {
+            "summary": "Universal competencies scored from candidate CV evidence.",
+            "criteria": l1_scores,
+        },
+        "l2_role_specific": {
+            "summary": "Role-specific fit scored against derived job and organization requirements.",
+            "criteria": l2_scores,
+        },
+        "l3_recruiter_preference": {
+            "summary": "Preference alignment scored against recruiter and organization context.",
+            "criteria": l3_scores,
+        },
+        "explanation": (
+            "Stub provider deterministic layered evaluation from submitted CV text "
+            "and scoring context. Used for tests and local development only."
+        ),
+    }
+
+
 class StubLLMProvider:
     """
     Deterministic local provider used in tests.
@@ -62,95 +260,11 @@ class StubLLMProvider:
     """
 
     def generate_structured(self, *, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-        _ = system_prompt
-        cv_text = user_prompt
-        lowered = cv_text.lower()
-        years = _extract_years(cv_text)
-        role_pool = [
-            "engineer",
-            "developer",
-            "manager",
-            "architect",
-            "analyst",
-            "recruiter",
-            "designer",
-        ]
-        skill_pool = [
-            "python",
-            "django",
-            "fastapi",
-            "sql",
-            "postgresql",
-            "docker",
-            "git",
-            "rest",
-            "api",
-            "testing",
-            "javascript",
-            "typescript",
-            "react",
-        ]
-        industry_pool = [
-            "fintech",
-            "healthcare",
-            "recruitment",
-            "saas",
-            "ecommerce",
-        ]
-        roles = _extract_keywords(lowered, pool=role_pool)
-        skills = _extract_keywords(lowered, pool=skill_pool)
-        industries = _extract_keywords(lowered, pool=industry_pool)
-
-        richness = min(len(cv_text.strip()) / 400.0, 1.0)
-        years_score = 0.0 if years is None else min(float(years) / 10.0, 1.0)
-        skill_score = min(len(skills) / 8.0, 1.0)
-        summary_score = _clamp01((richness * 0.4) + (skill_score * 0.6))
-
-        communication = _clamp01((richness * 0.7) + 0.15)
-        ownership = _clamp01((years_score * 0.7) + 0.15)
-        reliability = _clamp01((summary_score * 0.6) + (years_score * 0.2) + 0.1)
-        thinking = _clamp01((skill_score * 0.6) + (richness * 0.2) + 0.1)
-
-        def _criterion(score: float, reason: str) -> Dict[str, Any]:
-            confidence = _clamp01(0.45 + (score * 0.45))
-            return {
-                "score": round(score, 6),
-                "confidence": round(confidence, 6),
-                "reason": reason,
-            }
-
-        seniority = None
-        if years is not None:
-            if years >= 8:
-                seniority = "senior"
-            elif years >= 4:
-                seniority = "mid"
-            else:
-                seniority = "junior"
-
-        cleaned = " ".join(line.strip() for line in cv_text.splitlines() if line.strip())
-        summary = cleaned[:220].strip() or "Candidate profile extracted from submitted CV."
-
-        return {
-            "profile": {
-                "years_experience": years,
-                "seniority": seniority,
-                "roles": roles,
-                "skills": skills,
-                "industries": industries,
-                "summary": summary,
-            },
-            "criteria": {
-                "communication": _criterion(communication, "Estimated from writing clarity and CV completeness."),
-                "ownership": _criterion(ownership, "Estimated from experience level and role progression cues."),
-                "reliability": _criterion(reliability, "Estimated from consistency and evidence density in the CV."),
-                "thinking": _criterion(thinking, "Estimated from technical breadth and structured problem-solving signals."),
-            },
-            "explanation": (
-                "Stub provider deterministic evaluation from the submitted CV text. "
-                "Used for tests and local development only."
-            ),
-        }
+        if "l1_universal" in system_prompt and "l2_role_specific" in system_prompt:
+            return _payload_for_layered_score(user_prompt)
+        if "Required top-level keys: profile, explanation." in system_prompt:
+            return _payload_for_profile(user_prompt)
+        return _payload_for_legacy_cv_eval(user_prompt)
 
 
 class OpenAICompatibleProvider:

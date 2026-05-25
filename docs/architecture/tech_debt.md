@@ -450,11 +450,23 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-25
-- **Current decision**: Real CV ingress now supports bounded PDF upload payloads at the API boundary, which are deterministically converted into plain ``cv_text`` and then published as the existing ``cv_submitted`` event. The bounded LLM skill still emits typed ``ingress_profile`` plus ``evaluation.light``; deterministic stages own hard filtering, deep scoring, ranking, and routing. Demo flows may still use ``cv_uploaded`` in scripted sequences, but current recruiter semantics come from the typed snapshot path.
-- **Rationale**: One business action per event preserves usable ingress while allowing bounded cognition where it matters: semantic extraction from real recruiter-provided CV artifacts.
-- **Future impact**: Later stages can add richer artifact references, multi-stage enrichment, or separate parse/score edges without leaking workflow control into prompts or reviving flat score keys.
+- **Current decision**: Real CV ingress supports bounded text/PDF upload, but `cv_submitted` is now gated on an explicit active `scoring_context`. The canonical path persists `cv_received` first, then `cv_parsed`, then job-aware layered light scoring against `cv + scoring_context`. Demo flows may still use `cv_uploaded` in scripted sequences, but recruiter semantics come from the typed snapshot path.
+- **Rationale**: Keeps the candidate workflow event stable while making parsing, scoring, and context readiness explicit and auditable.
+- **Future impact**: Later stages can add richer artifact references or requisition-scoped context without leaking workflow control into prompts or reviving flat score keys.
 - **Priority**: Medium
-- **Recommended future direction**: Split or wrap ``cv_parse_and_score`` only when bounded artifact storage, payload contracts, and provider operations need it; keep orchestration contracts stable and deterministic.
+- **Recommended future direction**: Preserve the split parse/score path; if richer artifact storage or multi-step enrichment is needed, add explicit contracts around those steps instead of collapsing them back into one prompt-owned operation.
+
+### Single active `scoring_context` store (not requisition-scoped yet)
+- **Status**: OPEN
+- **Scope**: Application+Persistence
+- **Revisit when**: When the reference runtime must support more than one concurrent requisition / job context
+- **Introduced in**: 2026-05-25
+- **Last reviewed**: 2026-05-25
+- **Current decision**: R-004 persists one canonical active `scoring_context` for the whole single-tenant runtime. Candidate snapshots store only the `context_version` used for scoring plus stale flags; the context object itself lives outside candidate workflow state.
+- **Rationale**: This keeps context canonical and versioned without introducing a premature requisition aggregate in the same round as the first job-aware scoring slice.
+- **Future impact**: Multiple simultaneous roles/jobs cannot yet carry isolated ready/stale context lifecycles or candidate-to-context binding semantics.
+- **Priority**: High
+- **Recommended future direction**: Introduce requisition-scoped context ids and candidate-to-context binding explicitly in contracts and persistence; do not duplicate full context payloads onto every candidate snapshot as a shortcut.
 
 ### Coarse `scoring_failed` failure taxonomy
 - **Status**: OPEN

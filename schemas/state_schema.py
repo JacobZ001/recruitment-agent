@@ -284,12 +284,76 @@ class IngressProfile(_SchemaBase):
     summary: str = Field(default="", description="Single recruiter-facing profile summary.")
 
 
+class ScoringContextStatus(str, Enum):
+    COLLECTING = "collecting"
+    READY = "ready"
+    STALE = "stale"
+
+
+class OrganizationContext(_SchemaBase):
+    """Organization/company context used to interpret role fit and preference layers."""
+
+    company_name: str = Field(..., min_length=1)
+    industry: str = Field(default="")
+    team_name: str = Field(default="")
+    environment_signals: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    source_refs: List[str] = Field(default_factory=list)
+
+
+class RecruiterActorContext(_SchemaBase):
+    """Context for the specific recruiter or operator authoring the score posture."""
+
+    actor_id: str = Field(..., min_length=1)
+    actor_role: str = Field(default="")
+    hiring_focus: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    avoid_signals: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    source_refs: List[str] = Field(default_factory=list)
+
+
+class JobContext(_SchemaBase):
+    """Bounded role / requirement / success-signal context for candidate evaluation."""
+
+    title: str = Field(..., min_length=1)
+    summary: str = Field(default="")
+    responsibilities: List[str] = Field(default_factory=list)
+    hard_requirements: List[str] = Field(default_factory=list)
+    preferred_requirements: List[str] = Field(default_factory=list)
+    success_signals: List[str] = Field(default_factory=list)
+    source_refs: List[str] = Field(default_factory=list)
+
+
+class ScoringContext(_SchemaBase):
+    """Canonical evaluation context persisted separately from candidate workflow snapshots."""
+
+    context_version: int = Field(default=1, ge=1)
+    status: ScoringContextStatus = Field(default=ScoringContextStatus.COLLECTING)
+    organization_context: Optional[OrganizationContext] = Field(default=None)
+    recruiter_actor_context: Optional[RecruiterActorContext] = Field(default=None)
+    job_context: Optional[JobContext] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    ready_at: Optional[datetime] = Field(default=None)
+    stale_at: Optional[datetime] = Field(default=None)
+    source_refs: List[str] = Field(default_factory=list)
+
+
 class CriterionScore(_SchemaBase):
     """Bounded score + confidence pair for one evaluation criterion."""
 
     score: float = Field(..., ge=0.0, le=1.0)
     confidence: float = Field(..., ge=0.0, le=1.0)
     reason: str = Field(default="")
+
+
+class ScoreLayerEvaluation(_SchemaBase):
+    """One explicit scoring layer inside a workflow-stage evaluation."""
+
+    summary: str = Field(default="")
+    criteria: Dict[str, CriterionScore] = Field(default_factory=dict)
 
 
 class HardFilterEvaluation(_SchemaBase):
@@ -309,7 +373,11 @@ class ScoreEvaluation(_SchemaBase):
     confidence: float = Field(..., ge=0.0, le=1.0)
     explanation: str = Field(default="")
     source: str = Field(..., min_length=1)
-    criteria: Dict[str, CriterionScore] = Field(default_factory=dict)
+    context_version: int = Field(..., ge=1)
+    stale: bool = Field(default=False)
+    l1_universal: ScoreLayerEvaluation = Field(default_factory=ScoreLayerEvaluation)
+    l2_role_specific: ScoreLayerEvaluation = Field(default_factory=ScoreLayerEvaluation)
+    l3_recruiter_preference: ScoreLayerEvaluation = Field(default_factory=ScoreLayerEvaluation)
     evidence_refs: List[str] = Field(default_factory=list)
 
 

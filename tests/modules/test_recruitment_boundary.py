@@ -222,8 +222,9 @@ def test_bootstrap_imported_only_by_runtime_api_and_shims() -> None:
     assert offenders == [], f"unexpected bootstrap imports: {offenders}"
 
 
-def test_submit_cv_publishes_cv_submitted() -> None:
+def test_submit_cv_publishes_cv_submitted(establish_ready_scoring_context) -> None:
     rt = VerticalSliceApiRuntime()
+    establish_ready_scoring_context(rt)
     cid = uuid4()
     publish_recruitment_event(rt, cid, "candidate_created", {})
     result = submit_cv(rt, cid, "Python developer\n5 years experience\npython django")

@@ -19,6 +19,14 @@ class InvalidCvPdfError(RecruitmentUseCaseError):
     """Uploaded or encoded PDF CV failed validation or text extraction guards."""
 
 
+class InvalidScoringContextError(RecruitmentUseCaseError):
+    """Scoring-context authoring or normalization failed bounded validation."""
+
+
+class ScoringContextNotReadyError(RecruitmentUseCaseError):
+    """Candidate CV ingress is forbidden until the active scoring context is ready."""
+
+
 class DemoRunPreconditionError(RecruitmentUseCaseError):
     """Scripted primary sequence cannot run safely on the current pipeline snapshot."""
 

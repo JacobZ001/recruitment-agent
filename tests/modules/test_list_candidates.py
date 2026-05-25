@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from modules.recruitment.scoring_context_service import build_score_evaluation
 from modules.recruitment.projection import build_candidate_list_item
 from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment.use_cases import list_candidates, publish_recruitment_event
 from runtime.in_memory_state_store import InMemoryStateStore
-from schemas.state_schema import EvaluationState, PipelinePhase, ScoreEvaluation
+from schemas.state_schema import EvaluationState, PipelinePhase
 
 
 def test_in_memory_list_all_state_ids() -> None:
@@ -56,11 +57,13 @@ def test_build_candidate_list_item_overall_score_light() -> None:
     snap = got.snapshot.model_copy(
         update={
             "evaluation": EvaluationState(
-                light=ScoreEvaluation(
-                    normalized_score=0.82,
-                    confidence=0.6,
-                    explanation="test",
+                light=build_score_evaluation(
                     source="test",
+                    explanation="test",
+                    context_version=1,
+                    l1_universal={"communication": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
+                    l2_role_specific={"role_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
+                    l3_recruiter_preference={"preference_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
                 )
             )
         },
@@ -78,17 +81,21 @@ def test_build_candidate_list_item_overall_score_deep_precedence() -> None:
     snap = got.snapshot.model_copy(
         update={
             "evaluation": EvaluationState(
-                light=ScoreEvaluation(
-                    normalized_score=0.5,
-                    confidence=0.5,
+                light=build_score_evaluation(
+                    source="test",
                     explanation="light",
-                    source="test",
+                    context_version=1,
+                    l1_universal={"communication": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
+                    l2_role_specific={"role_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
+                    l3_recruiter_preference={"preference_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
                 ),
-                deep=ScoreEvaluation(
-                    normalized_score=0.91,
-                    confidence=0.7,
-                    explanation="deep",
+                deep=build_score_evaluation(
                     source="test",
+                    explanation="deep",
+                    context_version=1,
+                    l1_universal={"communication": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
+                    l2_role_specific={"role_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
+                    l3_recruiter_preference={"preference_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
                 ),
             )
         },

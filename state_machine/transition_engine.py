@@ -586,11 +586,18 @@ def default_pipeline_registry() -> TransitionRegistry:
             allowed_triggers=("event:cv_parsed",),
         ),
         TransitionRule(
-            rule_id="pipeline.new_to_light_scored_cv_submitted",
+            rule_id="pipeline.new_to_cv_received_cv_submitted",
             state_domain=StateDomain.PIPELINE,
             from_state=p.NEW.value,
-            to_state=p.LIGHT_SCORED.value,
+            to_state=p.CV_RECEIVED.value,
             allowed_triggers=("event:cv_submitted",),
+        ),
+        TransitionRule(
+            rule_id="pipeline.cv_parsed_to_light_scored",
+            state_domain=StateDomain.PIPELINE,
+            from_state=p.CV_PARSED.value,
+            to_state=p.LIGHT_SCORED.value,
+            allowed_triggers=("event:light_scoring_completed",),
         ),
         TransitionRule(
             rule_id="pipeline.cv_parsed_to_hard_filter_passed",

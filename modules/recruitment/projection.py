@@ -21,6 +21,7 @@ from schemas.state_schema import (
     EvaluationState,
     OrchestrationState,
     PipelinePhase,
+    ScoringContext,
 )
 
 from .exceptions import CandidateNotFoundError
@@ -31,14 +32,14 @@ CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER = (
 )
 
 _RANKING_NOTE = "ranking not available in single-candidate mode"
-
-_CRITERIA_LAYOUT: Tuple[Tuple[str, str], ...] = (
+_EMPTY_CRITERIA_LAYOUT: Tuple[Tuple[str, str], ...] = (
     ("communication", "universal"),
     ("ownership", "universal"),
     ("reliability", "universal"),
     ("thinking", "universal"),
+    ("role_specific_fit", "role_specific"),
+    ("recruiter_preference_alignment", "recruiter_preference"),
 )
-
 
 class ReadRuntime(Protocol):
     """Runtime surface for read-only projections."""
@@ -48,6 +49,9 @@ class ReadRuntime(Protocol):
 
     @property
     def bundle(self) -> Any: ...
+
+    @property
+    def scoring_context_store(self) -> Any: ...
 
 
 def _recruiter_status_kind(phase: str) -> str:
@@ -90,20 +94,35 @@ def _summary_from_snapshot(snapshot: OrchestrationState) -> str:
 
 def _criteria_from_layout(evaluation: Optional[EvaluationState]) -> List[Dict[str, Any]]:
     light = evaluation.light if evaluation is not None else None
-    return [
-        {
-            "name": name,
-            "score": None if light is None or name not in light.criteria else float(light.criteria[name].score),
-            "confidence": (
-                None
-                if light is None or name not in light.criteria
-                else float(light.criteria[name].confidence)
-            ),
-            "source": source,
-            "reason": None if light is None or name not in light.criteria else light.criteria[name].reason,
-        }
-        for name, source in _CRITERIA_LAYOUT
-    ]
+    if light is None:
+        return [
+            {
+                "name": name,
+                "score": None,
+                "confidence": None,
+                "source": source,
+                "reason": None,
+            }
+            for name, source in _EMPTY_CRITERIA_LAYOUT
+        ]
+    out: List[Dict[str, Any]] = []
+    layer_specs = (
+        ("universal", light.l1_universal.criteria),
+        ("role_specific", light.l2_role_specific.criteria),
+        ("recruiter_preference", light.l3_recruiter_preference.criteria),
+    )
+    for source, criteria in layer_specs:
+        for name, item in criteria.items():
+            out.append(
+                {
+                    "name": name,
+                    "score": float(item.score),
+                    "confidence": float(item.confidence),
+                    "source": source,
+                    "reason": item.reason,
+                }
+            )
+    return out
 
 
 def _overall_score_from_evaluation(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
@@ -115,9 +134,14 @@ def _overall_score_from_evaluation(evaluation: Optional[EvaluationState]) -> Dic
 
 
 def _scores_section(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
+    active = None
+    if evaluation is not None:
+        active = evaluation.deep or evaluation.light
     return {
         "criteria": _criteria_from_layout(evaluation),
         "overall_score": _overall_score_from_evaluation(evaluation),
+        "context_version": None if active is None else int(active.context_version),
+        "stale": None if active is None else bool(active.stale),
     }
 
 
@@ -191,7 +215,26 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
     }
 
 
-def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
+def _scoring_context_summary(active_scoring_context: Optional[ScoringContext]) -> Optional[Dict[str, Any]]:
+    if active_scoring_context is None:
+        return None
+    org = active_scoring_context.organization_context
+    recruiter = active_scoring_context.recruiter_actor_context
+    job = active_scoring_context.job_context
+    return {
+        "context_version": int(active_scoring_context.context_version),
+        "status": active_scoring_context.status.value,
+        "organization": None if org is None else org.company_name,
+        "recruiter_actor_id": None if recruiter is None else recruiter.actor_id,
+        "job_title": None if job is None else job.title,
+    }
+
+
+def build_candidate_view(
+    snapshot: OrchestrationState,
+    *,
+    active_scoring_context: Optional[ScoringContext] = None,
+) -> Dict[str, Any]:
     """
     Compose a recruiter-facing dict from ``snapshot.extensions`` and pipeline phase.
 
@@ -209,6 +252,7 @@ def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
         "profile": None if profile is None else _model_dump_json(profile),
         "decision": _model_dump_json(snapshot.decision),
         "evaluation": None if evaluation is None else _model_dump_json(evaluation),
+        "scoring_context": _scoring_context_summary(active_scoring_context),
         "flags": _model_dump_json(snapshot.ingress_flags),
         "scores": _scores_section(evaluation),
         "ranking": _ranking_section(snapshot.extensions or {}),
@@ -305,7 +349,10 @@ def _load_snapshot_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Or
 
 
 def get_candidate_view_for_runtime(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
-    return build_candidate_view(_load_snapshot_for_candidate(runtime, candidate_id))
+    return build_candidate_view(
+        _load_snapshot_for_candidate(runtime, candidate_id),
+        active_scoring_context=runtime.scoring_context_store.get(),
+    )
 
 
 def get_state_summary_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:

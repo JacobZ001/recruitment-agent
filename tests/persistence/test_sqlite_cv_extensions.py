@@ -5,7 +5,14 @@ from __future__ import annotations
 from uuid import uuid4
 
 from modules.recruitment.runtime import VerticalSliceApiRuntime
-from modules.recruitment.use_cases import submit_cv
+from modules.recruitment.use_cases import (
+    author_job_context_from_text,
+    author_organization_context,
+    author_recruiter_actor_context,
+    refresh_active_scoring_context,
+    submit_cv,
+)
+from schemas.state_schema import OrganizationContext, RecruiterActorContext
 
 _CV = "Pat Lee\npat@co.dev\n10 years experience\nPython SQL API testing"
 
@@ -14,6 +21,20 @@ def test_sqlite_cv_extensions_survive_reload(tmp_path) -> None:
     db = str(tmp_path / "cv.sqlite")
     cid = uuid4()
     rt = VerticalSliceApiRuntime(db_path=db)
+    author_organization_context(
+        rt,
+        OrganizationContext(company_name="BlueOcean", source_refs=["test://org"]),
+    )
+    author_recruiter_actor_context(
+        rt,
+        RecruiterActorContext(actor_id="sqlite-test", source_refs=["test://recruiter"]),
+    )
+    author_job_context_from_text(
+        rt,
+        "Role: QA Recruiter\nMust: communication, process ownership\nSuccess: keep candidate flow on track",
+        source_ref="test://job",
+    )
+    refresh_active_scoring_context(rt)
     submit_cv(rt, cid, _CV)
     rt.bundle.store.close()
 

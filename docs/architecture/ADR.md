@@ -142,3 +142,22 @@ Purpose: preserve long-term architectural reasoning, prevent drift, and provide 
 - **Tradeoffs**: Developers must reset local SQLite state after the cutover if they were carrying pre-cutover rows. There is no general migration framework for historical local snapshots in this round.
 - **Future Considerations**: If retained historical data becomes a product requirement, solve it with an explicit migration/upcaster strategy rather than reviving ad-hoc compatibility readers in runtime code.
 
+---
+
+## ADR-011 — Job-aware layered scoring uses a separate canonical `scoring_context`
+
+- **ADR ID**: ADR-011
+- **Title**: Job-aware three-layer evaluation with canonical scoring-context storage
+- **Status**: Accepted
+- **Decision date**: 2026-05-25
+- **Context**: The repo had a typed candidate snapshot and a first bounded cognition pilot, but light scoring still assumed universal-only criteria and CV parse/score were coupled in one ingress step. The next MVP capability required recruiter/job awareness without turning prompts into workflow logic or duplicating context onto every candidate snapshot.
+- **Decision**:
+  - Introduce a separate canonical `scoring_context` object with typed `organization_context`, `recruiter_actor_context`, and `job_context` components.
+  - Persist that context outside candidate workflow snapshots and gate `cv_submitted` until `scoring_context.status == ready`.
+  - Split candidate CV parsing from scoring: persist `ingress_profile` first, then score against `cv + scoring_context`.
+  - Use the same layered schema for `evaluation.light` and `evaluation.deep`: `l1_universal`, `l2_role_specific`, `l3_recruiter_preference`, plus deterministic aggregate score/confidence and `context_version`.
+  - Keep programs responsible for aggregate scoring, version/stale semantics, transitions, and ranking; LLM output remains bounded to typed extraction/scoring signals only.
+- **Consequences**: Recruiter/job-aware scoring is now explicit, versioned, and inspectable. Candidate views can expose layer breakdowns and score provenance. Context changes can mark existing evaluations stale without mutating workflow routing semantics.
+- **Tradeoffs**: The current implementation keeps a single active scoring context for the whole reference runtime, not a full requisition aggregate. Context authoring and candidate workflow are clearer, but richer requisition management remains deferred.
+- **Future Considerations**: Grow the single active scoring-context store into requisition-scoped context aggregates only through explicit contracts and migration plans; do not collapse back to snapshot-local context blobs or prompt-owned scoring semantics.
+

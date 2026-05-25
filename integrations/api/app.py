@@ -27,6 +27,12 @@ from integrations.api.schemas_http import (
     DemoRunResponse,
     EventIngressResponse,
     HealthResponse,
+    JobContextPdfBody,
+    JobContextTextBody,
+    OrganizationContextBody,
+    RecruiterActorContextBody,
+    RecruiterJobAnswersBody,
+    ScoringContextResponse,
     StateSummaryResponse,
     TimelineResponse,
     VerticalSliceIngressEventBody,
@@ -34,6 +40,12 @@ from integrations.api.schemas_http import (
 from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment import (
     RecruitmentUseCaseError,
+    author_job_context_from_pdf,
+    author_job_context_from_recruiter_answers,
+    author_job_context_from_text,
+    author_organization_context,
+    author_recruiter_actor_context,
+    get_active_scoring_context,
     get_candidate_view_for_runtime,
     get_demo_candidate,
     get_state_summary,
@@ -44,10 +56,12 @@ from modules.recruitment import (
     list_candidates,
     perform_candidate_action,
     record_recruiter_decision,
+    refresh_active_scoring_context,
     run_primary_demo_sequence,
     submit_cv_pdf,
 )
 from modules.recruitment.bootstrap import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
+from schemas.state_schema import OrganizationContext, RecruiterActorContext
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 
 
@@ -116,6 +130,21 @@ def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
 
 
 def create_app(*, db_path: Optional[str] = None) -> FastAPI:
+    def _body_dump(model: object) -> dict:
+        if hasattr(model, "model_dump"):
+            return model.model_dump()
+        return model.dict()
+
+    def _context_response(rt: VerticalSliceApiRuntime) -> ScoringContextResponse:
+        context = get_active_scoring_context(rt)
+        if context is None:
+            raise HTTPException(status_code=404, detail={"code": "scoring_context_missing"})
+        if hasattr(context, "model_dump"):
+            payload = context.model_dump(mode="json")
+        else:
+            payload = context.dict()
+        return ScoringContextResponse(**payload)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.loaded_env_file = _load_local_env_file()
@@ -160,6 +189,84 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
             pipeline_phase=result.pipeline_phase,
             sqlite_tables_cleared=result.sqlite_tables_cleared,
         )
+
+    @app.get("/scoring-context", response_model=ScoringContextResponse)
+    def get_scoring_context_route(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        return _context_response(rt)
+
+    @app.post("/scoring-context/organization", response_model=ScoringContextResponse)
+    def post_organization_context(
+        body: OrganizationContextBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_organization_context(rt, OrganizationContext(**_body_dump(body)))
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/recruiter-actor", response_model=ScoringContextResponse)
+    def post_recruiter_actor_context(
+        body: RecruiterActorContextBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_recruiter_actor_context(rt, RecruiterActorContext(**_body_dump(body)))
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/job/text", response_model=ScoringContextResponse)
+    def post_job_context_text(
+        body: JobContextTextBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_job_context_from_text(rt, body.raw_text, source_ref=body.source_ref)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/job/pdf", response_model=ScoringContextResponse)
+    def post_job_context_pdf(
+        body: JobContextPdfBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_job_context_from_pdf(rt, body.pdf_base64, file_name=body.file_name)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/job/recruiter-answers", response_model=ScoringContextResponse)
+    def post_job_context_recruiter_answers(
+        body: RecruiterJobAnswersBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_job_context_from_recruiter_answers(
+                rt,
+                role_title=body.role_title,
+                must_haves_answer=body.must_haves_answer,
+                preferred_answer=body.preferred_answer,
+                success_answer=body.success_answer,
+                responsibilities_answer=body.responsibilities_answer,
+            )
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/refresh", response_model=ScoringContextResponse)
+    def post_refresh_scoring_context(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            refresh_active_scoring_context(rt)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
 
     @app.post("/events", response_model=EventIngressResponse)
     def post_event(

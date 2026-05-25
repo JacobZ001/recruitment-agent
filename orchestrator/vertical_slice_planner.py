@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from interfaces.event_bus_interface import DeliveryContext, EventEnvelope
 
 from .orchestrator import (
+    OrchestrationEmissionDraft,
     OrchestrationPlan,
     ProposedTransition,
     SkillInvocationSpec,
@@ -56,13 +57,15 @@ from schemas.state_schema import (
 
 from modules.recruitment.fixtures import merge_demo_profile_into_skill_payload
 from modules.recruitment.ranking import resolve_ranking_branch
+from modules.recruitment.scoring_context_service import build_score_evaluation
 
 
 # Stable skill identifiers — must match keys in the orchestrator skill registry wiring.
 SKILL_CANDIDATE_CREATED = "recruitment.vertical_slice.candidate_created"
 SKILL_CV_UPLOADED = "recruitment.vertical_slice.cv_uploaded"
 SKILL_CV_PARSED = "recruitment.vertical_slice.cv_parsed"
-SKILL_CV_PARSE_AND_SCORE = "recruitment.vertical_slice.cv_parse_and_score"
+SKILL_CV_PARSE_PROFILE = "recruitment.vertical_slice.cv_parse_profile"
+SKILL_CV_SCORE_LIGHT = "recruitment.vertical_slice.cv_score_light"
 SKILL_HARD_FILTER = "recruitment.vertical_slice.hard_filter"
 SKILL_LIGHT_SCORING = "recruitment.vertical_slice.light_scoring"
 SKILL_DEEP_SCORING = "recruitment.vertical_slice.deep_scoring"
@@ -302,6 +305,19 @@ class VerticalSlicePlanner:
     def _plan_cv_parsed(self, phase: PipelinePhase, envelope: EventEnvelope) -> OrchestrationPlan:
         if phase != PipelinePhase.CV_RECEIVED:
             return OrchestrationPlan()
+        emissions: Tuple[OrchestrationEmissionDraft, ...] = tuple()
+        if isinstance(envelope.payload, Mapping) and envelope.payload.get("scoring_context") is not None:
+            emissions = (
+                OrchestrationEmissionDraft(
+                    event_type="light_scoring_completed",
+                    subject_id=envelope.subject_id,
+                    subject_kind=envelope.subject_kind,
+                    payload={
+                        "cv_text": (envelope.payload or {}).get("cv_text"),
+                        "scoring_context": (envelope.payload or {}).get("scoring_context"),
+                    },
+                ),
+            )
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
@@ -311,13 +327,7 @@ class VerticalSlicePlanner:
                 human_override=_human_override(envelope),
                 transition_actor=_system_actor(envelope),
             ),
-            skills=(
-                SkillInvocationSpec(
-                    skill_name=SKILL_CV_PARSED,
-                    input=self._skill_input(planner_path="cv_parsed", envelope=envelope),
-                    required=True,
-                ),
-            ),
+            emissions=emissions,
         )
 
     def _plan_cv_submitted(self, phase: PipelinePhase, envelope: EventEnvelope) -> OrchestrationPlan:
@@ -327,16 +337,27 @@ class VerticalSlicePlanner:
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
                 from_state=PipelinePhase.NEW.value,
-                to_state=PipelinePhase.LIGHT_SCORED.value,
+                to_state=PipelinePhase.CV_RECEIVED.value,
                 trigger=_event_trigger("cv_submitted"),
                 human_override=_human_override(envelope),
                 transition_actor=_system_actor(envelope),
             ),
             skills=(
                 SkillInvocationSpec(
-                    skill_name=SKILL_CV_PARSE_AND_SCORE,
+                    skill_name=SKILL_CV_PARSE_PROFILE,
                     input=self._skill_input(planner_path="cv_submitted", envelope=envelope),
                     required=True,
+                ),
+            ),
+            emissions=(
+                OrchestrationEmissionDraft(
+                    event_type="cv_parsed",
+                    subject_id=envelope.subject_id,
+                    subject_kind=envelope.subject_kind,
+                    payload={
+                        "cv_text": (envelope.payload or {}).get("cv_text"),
+                        "scoring_context": (envelope.payload or {}).get("scoring_context"),
+                    },
                 ),
             ),
         )
@@ -400,14 +421,18 @@ class VerticalSlicePlanner:
     def _plan_light_scoring_completed(
         self, phase: PipelinePhase, envelope: EventEnvelope, *, planner_path: str
     ) -> OrchestrationPlan:
-        if phase != PipelinePhase.HARD_FILTER_PASSED:
+        if phase not in (PipelinePhase.HARD_FILTER_PASSED, PipelinePhase.CV_PARSED):
             return OrchestrationPlan()
         payload = dict(envelope.payload or {})
         branch = resolve_ranking_branch(payload=payload, stage="light")
         actor = _system_actor(envelope)
         skills_list: List[SkillInvocationSpec] = [
             SkillInvocationSpec(
-                skill_name=SKILL_LIGHT_SCORING,
+                skill_name=(
+                    SKILL_CV_SCORE_LIGHT
+                    if phase == PipelinePhase.CV_PARSED
+                    else SKILL_LIGHT_SCORING
+                ),
                 input=self._skill_input(planner_path=planner_path, envelope=envelope),
                 required=True,
             ),
@@ -464,7 +489,7 @@ class VerticalSlicePlanner:
         return OrchestrationPlan(
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
-                from_state=PipelinePhase.HARD_FILTER_PASSED.value,
+                from_state=phase.value,
                 to_state=PipelinePhase.LIGHT_SCORED.value,
                 trigger=_event_trigger("light_scoring_completed"),
                 human_override=_human_override(envelope),
@@ -980,8 +1005,19 @@ def _base_evaluation_state(state: OrchestrationState) -> EvaluationState:
     return EvaluationState()
 
 
-def _score_eval_from_llm_payload(payload: Mapping[str, Any]) -> ScoreEvaluation:
-    return _model_validate_local(ScoreEvaluation, payload)
+def _context_version_from_payload(payload: Mapping[str, Any]) -> int:
+    if payload.get("scoring.context_version") is not None:
+        return max(1, int(payload["scoring.context_version"]))
+    raw_eval = payload.get("evaluation")
+    if isinstance(raw_eval, Mapping):
+        for key in ("light", "deep"):
+            part = raw_eval.get(key)
+            if isinstance(part, Mapping) and part.get("context_version") is not None:
+                return max(1, int(part["context_version"]))
+    raw_ctx = payload.get("scoring_context")
+    if isinstance(raw_ctx, Mapping) and raw_ctx.get("context_version") is not None:
+        return max(1, int(raw_ctx["context_version"]))
+    return 1
 
 
 def _criteria_from_mapping(raw: Any) -> Dict[str, CriterionScore]:
@@ -994,6 +1030,38 @@ def _criteria_from_mapping(raw: Any) -> Dict[str, CriterionScore]:
         except Exception:
             continue
     return out
+
+
+def _score_eval_from_llm_payload(payload: Mapping[str, Any]) -> ScoreEvaluation:
+    return build_score_evaluation(
+        source=str(payload.get("source") or "system_llm"),
+        explanation=str(payload.get("explanation") or ""),
+        context_version=max(1, int(payload.get("context_version") or 1)),
+        l1_universal=_criteria_from_mapping(
+            ((payload.get("l1_universal") or {}) if isinstance(payload.get("l1_universal"), Mapping) else {}).get(
+                "criteria"
+            )
+        )
+        if isinstance(payload.get("l1_universal"), Mapping)
+        else {},
+        l2_role_specific=_criteria_from_mapping(
+            ((payload.get("l2_role_specific") or {}) if isinstance(payload.get("l2_role_specific"), Mapping) else {}).get(
+                "criteria"
+            )
+        )
+        if isinstance(payload.get("l2_role_specific"), Mapping)
+        else {},
+        l3_recruiter_preference=_criteria_from_mapping(
+            (
+                (payload.get("l3_recruiter_preference") or {})
+                if isinstance(payload.get("l3_recruiter_preference"), Mapping)
+                else {}
+            ).get("criteria")
+        )
+        if isinstance(payload.get("l3_recruiter_preference"), Mapping)
+        else {},
+        evidence_refs=[str(x) for x in list(payload.get("evidence_refs") or ())],
+    )
 
 
 def _hard_filter_evaluation_from_skill_result(res: SkillExecutionResult) -> Optional[HardFilterEvaluation]:
@@ -1021,17 +1089,64 @@ def _light_score_evaluation_from_skill_result(res: SkillExecutionResult) -> Opti
     if res.output is None:
         return None
     pl = res.output.payload or {}
+    raw_eval = pl.get("evaluation")
+    if isinstance(raw_eval, Mapping) and isinstance(raw_eval.get("light"), Mapping):
+        return _score_eval_from_llm_payload(raw_eval["light"])
     if "scoring.normalized_score" not in pl:
         return None
-    explanation = str(pl.get("scoring.explainability") or "")
-    criteria = _criteria_from_mapping(pl.get("criteria"))
-    confidence = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
-    return ScoreEvaluation(
-        normalized_score=float(pl["scoring.normalized_score"]),
-        confidence=0.0 if confidence is None else float(confidence),
-        explanation=explanation,
-        source="system_llm" if res.metadata.skill_name == SKILL_CV_PARSE_AND_SCORE else "deterministic_skill",
-        criteria=criteria,
+    context_version = _context_version_from_payload(pl)
+    return build_score_evaluation(
+        source="deterministic_skill",
+        explanation=str(pl.get("scoring.explainability") or ""),
+        context_version=context_version,
+        l1_universal={
+            "communication": CriterionScore(
+                score=float(pl.get("factors.completeness.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Deterministic proxy from profile completeness.",
+            ),
+            "ownership": CriterionScore(
+                score=float(pl.get("factors.experience.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Deterministic proxy from declared experience depth.",
+            ),
+            "reliability": CriterionScore(
+                score=float(pl.get("factors.questionnaire.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Deterministic proxy from bounded questionnaire readiness.",
+            ),
+            "thinking": CriterionScore(
+                score=float(pl.get("factors.keywords.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Deterministic proxy from keyword/requirement overlap.",
+            ),
+        },
+        l2_role_specific={
+            "Role requirement alignment": CriterionScore(
+                score=float(pl.get("factors.keywords.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Derived role-fit proxy from deterministic keyword alignment.",
+            ),
+            "Role evidence depth": CriterionScore(
+                score=float(pl.get("factors.experience.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Derived role-fit proxy from declared experience evidence.",
+            ),
+        },
+        l3_recruiter_preference={
+            "Preference alignment": CriterionScore(
+                score=float(pl.get("factors.completeness.component") or 0.0),
+                confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+                or 0.5,
+                reason="Derived recruiter-preference proxy from profile completeness.",
+            ),
+        },
         evidence_refs=_evidence_ref_strings_from_skill_result(res),
     )
 
@@ -1042,13 +1157,53 @@ def _deep_score_evaluation_from_skill_result(res: SkillExecutionResult) -> Optio
     pl = res.output.payload or {}
     if "scoring.deep.normalized_score" not in pl:
         return None
-    confidence = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=True)
-    return ScoreEvaluation(
-        normalized_score=float(pl["scoring.deep.normalized_score"]),
-        confidence=0.0 if confidence is None else float(confidence),
-        explanation=str(pl.get("scoring.deep.explainability") or ""),
+    confidence = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=True) or 0.5
+    context_version = _context_version_from_payload(pl)
+    return build_score_evaluation(
         source="deterministic_skill",
-        criteria=_criteria_from_mapping(pl.get("criteria")),
+        explanation=str(pl.get("scoring.deep.explainability") or ""),
+        context_version=context_version,
+        l1_universal={
+            "communication": CriterionScore(
+                score=float(pl.get("factors.communication") or 0.0),
+                confidence=confidence,
+                reason="Derived deep-stage communication proxy.",
+            ),
+            "ownership": CriterionScore(
+                score=float(pl.get("factors.project_depth") or 0.0),
+                confidence=confidence,
+                reason="Derived deep-stage ownership proxy from project depth.",
+            ),
+            "reliability": CriterionScore(
+                score=float(pl.get("factors.evidence_density") or 0.0),
+                confidence=confidence,
+                reason="Derived deep-stage reliability proxy from evidence density.",
+            ),
+            "thinking": CriterionScore(
+                score=float(pl.get("factors.keywords") or 0.0),
+                confidence=confidence,
+                reason="Derived deep-stage thinking proxy from role-fit keyword coverage.",
+            ),
+        },
+        l2_role_specific={
+            "Role evidence richness": CriterionScore(
+                score=float(pl.get("factors.project_depth") or 0.0),
+                confidence=confidence,
+                reason="Derived role-specific deep proxy from declared project depth.",
+            ),
+            "Role requirement alignment": CriterionScore(
+                score=float(pl.get("factors.keywords") or 0.0),
+                confidence=confidence,
+                reason="Derived role-specific deep proxy from keyword overlap.",
+            ),
+        },
+        l3_recruiter_preference={
+            "Preference alignment": CriterionScore(
+                score=float(pl.get("factors.communication") or 0.0),
+                confidence=confidence,
+                reason="Derived recruiter-preference proxy from communication quality.",
+            ),
+        },
         evidence_refs=_evidence_ref_strings_from_skill_result(res),
     )
 
@@ -1077,24 +1232,11 @@ def apply_vertical_slice_skill_state_updates(
             continue
         pl = res.output.payload or {}
 
-        if spec.skill_name == SKILL_CV_PARSE_AND_SCORE:
+        if spec.skill_name == SKILL_CV_PARSE_PROFILE:
             raw_profile = pl.get("profile")
             if isinstance(raw_profile, Mapping):
                 profile = _model_validate_local(IngressProfile, raw_profile)
                 profile_changed = True
-            raw_eval = pl.get("evaluation")
-            if isinstance(raw_eval, Mapping) and isinstance(raw_eval.get("light"), Mapping):
-                evaluation = _model_copy_local(
-                    evaluation,
-                    light=_score_eval_from_llm_payload(raw_eval["light"]),
-                )
-                evaluation_changed = True
-                continue
-
-            light_eval = _light_score_evaluation_from_skill_result(res)
-            if light_eval is not None:
-                evaluation = _model_copy_local(evaluation, light=light_eval)
-                evaluation_changed = True
             continue
 
         if spec.skill_name == SKILL_HARD_FILTER:
@@ -1104,7 +1246,7 @@ def apply_vertical_slice_skill_state_updates(
                 evaluation_changed = True
             continue
 
-        if spec.skill_name == SKILL_LIGHT_SCORING:
+        if spec.skill_name in (SKILL_LIGHT_SCORING, SKILL_CV_SCORE_LIGHT):
             light_eval = _light_score_evaluation_from_skill_result(res)
             if light_eval is not None:
                 evaluation = _model_copy_local(evaluation, light=light_eval)

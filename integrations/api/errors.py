@@ -13,7 +13,9 @@ from modules.recruitment.exceptions import (
     InvalidCvPdfError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
+    InvalidScoringContextError,
     RecruitmentUseCaseError,
+    ScoringContextNotReadyError,
     ScoringFailedError,
 )
 
@@ -53,6 +55,22 @@ def recruitment_error_to_http(
             status_code=422,
             detail={
                 "code": "invalid_pdf_cv",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, InvalidScoringContextError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_scoring_context",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, ScoringContextNotReadyError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "scoring_context_not_ready",
                 "message": str(exc),
             },
         )

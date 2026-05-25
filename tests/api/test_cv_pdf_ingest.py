@@ -63,7 +63,11 @@ def _build_pdf_base64(text: str | None) -> str:
     return base64.b64encode(_build_pdf_bytes(text)).decode("ascii")
 
 
-def test_pdf_cv_ingest_updates_state_and_recruiter_views(client: TestClient) -> None:
+def test_pdf_cv_ingest_updates_state_and_recruiter_views(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
+    establish_ready_scoring_context(client.app.state.vertical_slice)
     cid = str(uuid4())
     response = client.post(
         f"/candidates/{cid}/cv/pdf",
@@ -79,13 +83,14 @@ def test_pdf_cv_ingest_updates_state_and_recruiter_views(client: TestClient) -> 
 
     state = client.get(f"/state/{cid}")
     assert state.status_code == 200, state.text
-    assert state.json()["pipeline_phase"] == "light_scored"
+    assert state.json()["pipeline_phase"] == "questionnaire_pending"
 
     view = client.get(f"/candidate/{cid}")
     assert view.status_code == 200, view.text
     payload = view.json()
     assert payload["profile"]["summary"]
     assert payload["evaluation"]["light"]["source"] == "system_llm"
+    assert payload["scoring_context"]["status"] == "ready"
     assert payload["scores"]["overall_score"]["type"] == "light"
     assert payload["scores"]["overall_score"]["value"] is not None
 
@@ -113,11 +118,26 @@ def test_pdf_cv_ingest_empty_pdf_returns_422(client: TestClient) -> None:
     assert "empty text" in response.json()["detail"]["message"]
 
 
+def test_pdf_cv_ingest_requires_ready_scoring_context(client: TestClient) -> None:
+    cid = str(uuid4())
+    response = client.post(
+        f"/candidates/{cid}/cv/pdf",
+        json={
+            "file_name": "candidate_cv.pdf",
+            "pdf_base64": _build_pdf_base64("Recruiter operations coordinator"),
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "scoring_context_not_ready"
+
+
 def test_pdf_cv_ingest_provider_not_configured_returns_502(
     monkeypatch: pytest.MonkeyPatch,
+    establish_ready_scoring_context,
 ) -> None:
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     with TestClient(create_app(db_path="")) as client:
+        establish_ready_scoring_context(client.app.state.vertical_slice)
         cid = str(uuid4())
         response = client.post(
             f"/candidates/{cid}/cv/pdf",
@@ -135,6 +155,7 @@ def test_pdf_cv_ingest_provider_not_configured_returns_502(
 def test_pdf_cv_ingest_uses_provider_from_env_file(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    establish_ready_scoring_context,
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("LLM_PROVIDER=stub\nLLM_MODEL=stub-cv\n", encoding="utf-8")
@@ -143,6 +164,7 @@ def test_pdf_cv_ingest_uses_provider_from_env_file(
     monkeypatch.setenv("VERTICAL_SLICE_ENV_FILE", str(env_file))
 
     with TestClient(create_app(db_path="")) as client:
+        establish_ready_scoring_context(client.app.state.vertical_slice)
         cid = str(uuid4())
         response = client.post(
             f"/candidates/{cid}/cv/pdf",
@@ -157,7 +179,7 @@ def test_pdf_cv_ingest_uses_provider_from_env_file(
     assert response.json()["publish_status"] == "accepted"
 
 
-def test_pdf_cv_ingest_live_provider_smoke() -> None:
+def test_pdf_cv_ingest_live_provider_smoke(establish_ready_scoring_context) -> None:
     if os.environ.get("RUN_LLM_PROVIDER_LIVE_SMOKE") != "1":
         pytest.skip("Set RUN_LLM_PROVIDER_LIVE_SMOKE=1 to enable live provider smoke test")
     provider_name = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
@@ -165,6 +187,7 @@ def test_pdf_cv_ingest_live_provider_smoke() -> None:
         pytest.skip("Set LLM_PROVIDER=openai or LLM_PROVIDER=openrouter for live smoke")
 
     with TestClient(create_app(db_path="")) as client:
+        establish_ready_scoring_context(client.app.state.vertical_slice)
         cid = str(uuid4())
         response = client.post(
             f"/candidates/{cid}/cv/pdf",

@@ -73,6 +73,56 @@ class CandidatePdfIngressBody(BaseModel):
         return name
 
 
+class OrganizationContextBody(BaseModel):
+    company_name: str = Field(..., min_length=1)
+    industry: str = Field(default="")
+    team_name: str = Field(default="")
+    environment_signals: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    source_refs: List[str] = Field(default_factory=list)
+
+
+class RecruiterActorContextBody(BaseModel):
+    actor_id: str = Field(..., min_length=1)
+    actor_role: str = Field(default="")
+    hiring_focus: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    avoid_signals: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    source_refs: List[str] = Field(default_factory=list)
+
+
+class JobContextTextBody(BaseModel):
+    raw_text: str = Field(..., min_length=1)
+    source_ref: Optional[str] = Field(default=None)
+
+
+class JobContextPdfBody(CandidatePdfIngressBody):
+    pass
+
+
+class RecruiterJobAnswersBody(BaseModel):
+    role_title: str = Field(..., min_length=1)
+    must_haves_answer: str = Field(default="")
+    preferred_answer: str = Field(default="")
+    success_answer: str = Field(default="")
+    responsibilities_answer: str = Field(default="")
+
+
+class ScoringContextResponse(BaseModel):
+    context_version: int
+    status: str
+    organization_context: Optional[Dict[str, Any]] = None
+    recruiter_actor_context: Optional[Dict[str, Any]] = None
+    job_context: Optional[Dict[str, Any]] = None
+    created_at: str
+    updated_at: str
+    ready_at: Optional[str] = None
+    stale_at: Optional[str] = None
+    source_refs: List[str] = Field(default_factory=list)
+
+
 class TimelineResponse(BaseModel):
     timeline_text: str
     catalog_note: Optional[str] = Field(
@@ -127,6 +177,7 @@ class CandidateViewResponse(BaseModel):
     profile: Optional[Dict[str, Any]] = None
     decision: Dict[str, Any] = Field(default_factory=dict)
     evaluation: Optional[Dict[str, Any]] = None
+    scoring_context: Optional[Dict[str, Any]] = None
     flags: Dict[str, Any] = Field(default_factory=dict)
     scores: Dict[str, Any] = Field(default_factory=dict)
     ranking: Dict[str, Any] = Field(default_factory=dict)

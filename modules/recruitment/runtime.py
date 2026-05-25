@@ -27,6 +27,7 @@ from runtime.recording_event_bus import RecordingInMemoryEventBus
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
 from .exceptions import DemoRunPreconditionError
+from .scoring_context_store import InMemoryScoringContextStore, SQLiteScoringContextStore
 
 
 @dataclass(frozen=True)
@@ -48,12 +49,14 @@ class VerticalSliceApiRuntime:
     def __init__(self, *, db_path: Optional[str] = None) -> None:
         if db_path is not None:
             sql_store = SQLiteStateStore(db_path, config=InMemoryStateStoreConfig())
+            self.scoring_context_store = SQLiteScoringContextStore(db_path)
             self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
                 planner=VerticalSlicePlanner(demo_skill_context=True),
                 store=sql_store,
             )
         else:
+            self.scoring_context_store = InMemoryScoringContextStore()
             self.bundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
                 planner=VerticalSlicePlanner(demo_skill_context=True),
@@ -96,6 +99,7 @@ class VerticalSliceApiRuntime:
                 occurred_at=_FIXED_CLOCK,
             )
             store = self.bundle.store
+            self.scoring_context_store.clear()
             sqlite_cleared = False
             if isinstance(store, SQLiteStateStore):
                 sqlite_cleared = True

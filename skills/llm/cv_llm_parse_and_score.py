@@ -38,6 +38,7 @@ from interfaces.skill_interface import (
     SkillOutputEnvelope,
     SkillInterfaceVersion,
 )
+from modules.recruitment.scoring_context_service import build_score_evaluation
 from schemas.state_schema import CriterionScore, IngressProfile, ScoreEvaluation
 from skills.llm.llm_provider import LLMProvider, LLMProviderError, build_llm_provider_from_env
 
@@ -322,12 +323,13 @@ class CvLlmParseAndScoreSkill:
             industries=list(parsed.profile.industries),
             summary=parsed.profile.summary,
         )
-        light = ScoreEvaluation(
-            normalized_score=normalized_score,
-            confidence=confidence_score,
-            explanation=parsed.explanation,
+        light = build_score_evaluation(
             source="system_llm",
-            criteria=criteria,
+            explanation=parsed.explanation,
+            context_version=1,
+            l1_universal=criteria,
+            l2_role_specific={},
+            l3_recruiter_preference={},
             evidence_refs=[],
         )
         confidence = ConfidenceReport(

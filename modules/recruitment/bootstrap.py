@@ -101,8 +101,9 @@ from orchestrator.orchestrator import (
 )
 from orchestrator.vertical_slice_planner import (
     SKILL_CANDIDATE_CREATED,
-    SKILL_CV_PARSE_AND_SCORE,
+    SKILL_CV_PARSE_PROFILE,
     SKILL_CV_PARSED,
+    SKILL_CV_SCORE_LIGHT,
     SKILL_CV_UPLOADED,
     SKILL_QUESTIONNAIRE_STAGE,
     VerticalSlicePlanner,
@@ -125,7 +126,8 @@ from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
 from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
 from skills.deterministic.fake_light_scoring_skill import FakeLightScoringSkill
-from skills.llm.cv_llm_parse_and_score import CvLlmParseAndScoreSkill
+from skills.llm.cv_llm_parse_profile import CvLlmParseProfileSkill
+from skills.llm.cv_llm_score_candidate import CvLlmScoreCandidateSkill
 from state_machine.transition_engine import TransitionEngine, default_pipeline_registry
 
 from .ingress import BOOT_NS as _BOOT_NS
@@ -173,6 +175,13 @@ def _summarize_skill_result(res: SkillExecutionResult) -> str:
     base = f"{meta.skill_name} status={res.status.value}"
     if res.output and res.output.payload:
         p = res.output.payload
+        if isinstance(p.get("evaluation"), Mapping):
+            light = p["evaluation"].get("light")
+            if isinstance(light, Mapping) and light.get("context_version") is not None:
+                return (
+                    f"{base} context_version={light.get('context_version')} "
+                    f"layers=3"
+                )
         if "scoring.deep.normalized_score" in p:
             return f"{base} deep_score={p.get('scoring.deep.normalized_score')}"
         if "scoring.normalized_score" in p:
@@ -280,7 +289,8 @@ def _skill_registry() -> Dict[str, Skill]:
             runtime_label="runtime.stub.candidate_created",
         ),
         SKILL_CV_UPLOADED: FakeCvUploadedSkill(),
-        SKILL_CV_PARSE_AND_SCORE: CvLlmParseAndScoreSkill(),
+        SKILL_CV_PARSE_PROFILE: CvLlmParseProfileSkill(),
+        SKILL_CV_SCORE_LIGHT: CvLlmScoreCandidateSkill(),
         SKILL_CV_PARSED: _StubVerticalSliceSkill(
             skill_name=SKILL_CV_PARSED,
             runtime_label="runtime.stub.cv_parsed",

@@ -683,6 +683,9 @@ class FakeDeepScoringSkill:
             "provenance.ingested_event_type": ingested_event_type,
             "provenance.planner_path": planner_path,
         }
+        raw_scoring_context = payload.get("scoring_context")
+        if isinstance(raw_scoring_context, Mapping) and raw_scoring_context.get("context_version") is not None:
+            out_payload["scoring.context_version"] = int(raw_scoring_context["context_version"])
         if context.event_id:
             out_payload["provenance.context_event_id"] = str(context.event_id)
         if context.subject_id:

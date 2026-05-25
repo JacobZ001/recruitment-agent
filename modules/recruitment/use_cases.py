@@ -23,10 +23,28 @@ from .exceptions import (
     DemoRunPreconditionError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
+    InvalidScoringContextError,
+    ScoringContextNotReadyError,
     ScoringFailedError,
 )
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
+from .scoring_context_service import (
+    mark_evaluation_stale,
+    normalize_job_context_from_answers,
+    normalize_job_context_from_text,
+    refresh_scoring_context,
+    update_scoring_context,
+)
+from schemas.state_schema import (
+    EvaluationState,
+    JobContext,
+    OrchestrationState,
+    OrganizationContext,
+    RecruiterActorContext,
+    ScoringContext,
+    ScoringContextStatus,
+)
 
 DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD: Dict[str, Any] = {
     "actor_id": "recruitment-api",
@@ -46,6 +64,9 @@ class IngressRuntime(Protocol):
     @property
     def bundle(self) -> Any: ...
 
+    @property
+    def scoring_context_store(self) -> Any: ...
+
     def next_publish_sequence(self) -> int: ...
 
     def run_primary_demo_sequence(self) -> OrchestrationState: ...
@@ -59,6 +80,181 @@ class EventIngressResult:
     event_type: str
     publish_result: Dict[str, Any]
     state_summary: Optional[Dict[str, Any]]
+
+
+def _model_copy_local(model: Any, **updates: Any) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(update=updates, deep=True)
+    return model.copy(update=updates, deep=True)
+
+
+def _model_dump_json(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")
+    return model.dict()
+
+
+def get_active_scoring_context(runtime: IngressRuntime) -> Optional[ScoringContext]:
+    return runtime.scoring_context_store.get()
+
+
+def _persist_scoring_context(runtime: IngressRuntime, context: ScoringContext) -> ScoringContext:
+    return runtime.scoring_context_store.replace(context)
+
+
+def _mark_existing_candidate_evaluations_stale(
+    runtime: IngressRuntime, *, active_context_version: int
+) -> None:
+    store = runtime.bundle.store
+    for state_id in store.list_all_state_ids():
+        got = store.get(state_id)
+        if not got.ok or got.snapshot is None or got.meta is None:
+            continue
+        snapshot = got.snapshot
+        evaluation = snapshot.evaluation
+        if evaluation is None:
+            continue
+        changed = False
+        next_light = mark_evaluation_stale(
+            evaluation.light, active_context_version=active_context_version
+        )
+        next_deep = mark_evaluation_stale(
+            evaluation.deep, active_context_version=active_context_version
+        )
+        if next_light is not evaluation.light or next_deep is not evaluation.deep:
+            changed = True
+        if not changed:
+            continue
+        next_evaluation = _model_copy_local(
+            evaluation,
+            light=next_light,
+            deep=next_deep,
+        )
+        next_snapshot = _model_copy_local(snapshot, evaluation=next_evaluation)
+        store.replace(
+            state_id,
+            next_snapshot,
+            expected_store_revision=got.meta.store_revision,
+        )
+
+
+def _require_ready_scoring_context(runtime: IngressRuntime) -> ScoringContext:
+    context = get_active_scoring_context(runtime)
+    if context is None:
+        raise ScoringContextNotReadyError("scoring_context_not_ready: no active scoring_context")
+    if context.status != ScoringContextStatus.READY:
+        raise ScoringContextNotReadyError(
+            f"scoring_context_not_ready: active scoring_context status is {context.status.value}"
+        )
+    return context
+
+
+def author_organization_context(
+    runtime: IngressRuntime,
+    context: OrganizationContext,
+) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(current, organization_context=context, source_refs=context.source_refs)
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def author_recruiter_actor_context(
+    runtime: IngressRuntime,
+    context: RecruiterActorContext,
+) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(
+        current,
+        recruiter_actor_context=context,
+        source_refs=context.source_refs,
+    )
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def author_job_context(
+    runtime: IngressRuntime,
+    context: JobContext,
+) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(current, job_context=context, source_refs=context.source_refs)
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def author_job_context_from_text(
+    runtime: IngressRuntime,
+    raw_text: str,
+    *,
+    source_ref: Optional[str] = None,
+) -> ScoringContext:
+    try:
+        job = normalize_job_context_from_text(
+            raw_text,
+            source_refs=[source_ref] if source_ref else None,
+        )
+    except ValueError as exc:
+        raise InvalidScoringContextError(str(exc)) from exc
+    return author_job_context(runtime, job)
+
+
+def author_job_context_from_pdf(
+    runtime: IngressRuntime,
+    pdf_base64: str,
+    *,
+    file_name: str = "job_context.pdf",
+) -> ScoringContext:
+    pdf_bytes = decode_pdf_base64(pdf_base64, file_name=file_name)
+    extracted = extract_text_from_pdf_bytes(pdf_bytes, file_name=file_name)
+    return author_job_context_from_text(
+        runtime,
+        extracted.cv_text,
+        source_ref=f"pdf://{extracted.file_name}",
+    )
+
+
+def author_job_context_from_recruiter_answers(
+    runtime: IngressRuntime,
+    *,
+    role_title: str,
+    must_haves_answer: str,
+    preferred_answer: str,
+    success_answer: str,
+    responsibilities_answer: str,
+) -> ScoringContext:
+    try:
+        job = normalize_job_context_from_answers(
+            role_title=role_title,
+            must_haves_answer=must_haves_answer,
+            preferred_answer=preferred_answer,
+            success_answer=success_answer,
+            responsibilities_answer=responsibilities_answer,
+            source_refs=["normalized://recruiter_answers/job_context"],
+        )
+    except ValueError as exc:
+        raise InvalidScoringContextError(str(exc)) from exc
+    return author_job_context(runtime, job)
+
+
+def refresh_active_scoring_context(runtime: IngressRuntime) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    refreshed = refresh_scoring_context(current)
+    if refreshed.status != ScoringContextStatus.READY:
+        raise InvalidScoringContextError(
+            "scoring_context cannot become ready until organization_context, "
+            "recruiter_actor_context, and job_context are all present and valid"
+        )
+    return _persist_scoring_context(runtime, refreshed)
 
 
 def _ensure_candidate_state(runtime: IngressRuntime, candidate_id: UUID) -> UUID:
@@ -112,6 +308,14 @@ def publish_ingress_event(
     if not policies.is_allowed_ingress_event(event_type):
         raise InvalidIngressEventError(f"event_type not allowed: {event_type!r}")
 
+    scoring_context: Optional[ScoringContext] = None
+    if event_type == "cv_submitted":
+        scoring_context = _require_ready_scoring_context(runtime)
+    elif event_type == "deep_scoring_completed":
+        current_context = get_active_scoring_context(runtime)
+        if current_context is not None and current_context.status == ScoringContextStatus.READY:
+            scoring_context = current_context
+
     _ensure_candidate_state(runtime, candidate_id)
     seq = runtime.next_publish_sequence()
     corr = correlation_id if correlation_id is not None else candidate_id
@@ -129,6 +333,8 @@ def publish_ingress_event(
         merged_payload = policies.merge_non_governance_publish_payload(
             dict(env.payload), payload, seq=seq
         )
+        if event_type in ("cv_submitted", "deep_scoring_completed") and scoring_context is not None:
+            merged_payload["scoring_context"] = _model_dump_json(scoring_context)
     env = env.model_copy(update={"payload": merged_payload})
 
     pr = runtime.bundle.bus.publish(env)

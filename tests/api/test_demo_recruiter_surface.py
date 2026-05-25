@@ -27,7 +27,7 @@ def client() -> TestClient:
         yield c
 
 
-def _assert_criteria_shape(crit: list) -> None:
+def _assert_criteria_shape(crit: list, *, expect_scores: bool) -> None:
     assert isinstance(crit, list)
     assert len(crit) >= 2
     for c in crit:
@@ -37,8 +37,12 @@ def _assert_criteria_shape(crit: list) -> None:
             "role_specific",
             "recruiter_preference",
         )
-        assert c.get("score") is None
-        assert c.get("confidence") is None
+        if expect_scores:
+            assert isinstance(c.get("score"), (int, float))
+            assert isinstance(c.get("confidence"), (int, float))
+        else:
+            assert c.get("score") is None
+            assert c.get("confidence") is None
 
 
 def _assert_overall_score_shape(overall: dict) -> None:
@@ -68,7 +72,7 @@ def test_get_candidate_by_id_returns_projection(client: TestClient) -> None:
     assert data["decision"]["current_outcome"] == "undecided"
     assert data["evaluation"] is None
     assert data["flags"]["was_inactive"] is False
-    _assert_criteria_shape(data["scores"]["criteria"])
+    _assert_criteria_shape(data["scores"]["criteria"], expect_scores=False)
     _assert_overall_score_shape(data["scores"]["overall_score"])
     assert data["scores"]["overall_score"]["value"] is None
     assert data["scores"]["overall_score"]["type"] is None
@@ -99,7 +103,7 @@ def test_get_candidate_after_demo_run_scores_and_ranking_match_extensions(client
     assert data["status"]["kind"] == "active"
     assert data["summary"] == CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
 
-    _assert_criteria_shape(data["scores"]["criteria"])
+    _assert_criteria_shape(data["scores"]["criteria"], expect_scores=True)
 
     rt = client.app.state.vertical_slice
     got = rt.bundle.store.get_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)

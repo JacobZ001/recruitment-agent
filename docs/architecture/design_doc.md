@@ -83,7 +83,7 @@ The **current codebase** includes a **reference vertical slice** used to prove a
 
 - **Single-process and single-tenant**: the reference API now defaults to a local SQLite-backed runtime so workflow state survives restart in development. It is still a proving environment, not a production deployment claim or multi-tenant architecture.
 - **Event-driven progression**: each step is triggered by **events**; a deterministic orchestration layer applies **validated** state changes. **Programs** advance the workflow; **AI is not** choosing the next pipeline state in this reference path.
-- **Screening and scoring today**: CV ingress accepts bounded real text via `cv_submitted`. A constrained `skills/llm/` provider path extracts profile + light evaluation signals, while hard filtering, deeper scoring, ranking, and state transitions remain deterministic. Tests/default local runs still use the deterministic `stub` provider unless explicitly overridden.
+- **Screening and scoring today**: candidate CV ingress is gated by an explicit typed `scoring_context`. Outside the candidate event bus, bounded APIs author `organization_context`, `recruiter_actor_context`, and `job_context` (text, PDF, or recruiter-answer normalization), then mark that context `ready`. At `cv_submitted`, a constrained `skills/llm/` provider path first parses `ingress_profile`, then scores `cv + scoring_context` into layered `evaluation.light`. Hard filtering, deeper scoring, ranking, and state transitions remain deterministic. Tests/default local runs still use the deterministic `stub` provider unless explicitly overridden.
 - **Typed recruiter semantics**: recruiter-facing snapshot/API projections now separate governance `decision` from score/filter `evaluation`, with `profile` and ingress `flags` exposed explicitly instead of encoding current evaluation semantics in `extensions`.
 - **Human governance**: recruiter-style **approve / reject** actions exist as **bounded, audited event types** in the reference slice, aligned with the “humans retain authority” principle. Full operator products, persistence, and channel integrations (e.g. Telegram) are **not** implied by this slice.
 - **Intentional bounds (not omissions by accident):** there is no migration framework for old local SQLite rows in this cutover stage; local `data/app.db` reset is the accepted developer path when typed-evaluation cutovers land. Multi-tenant orchestration, distributed execution, and production-grade infrastructure remain later platform concerns.
@@ -137,7 +137,7 @@ The system also supports manual uploads for channels AI cannot directly access.
 
 AI extracts structured information from candidate submissions.
 
-In the **reference implementation today**, `cv_submitted` accepts bounded CV-like text and routes it through an explicit provider-backed LLM skill. That skill emits typed `ingress_profile` and `evaluation.light` data only; it does **not** choose transitions or mutate workflow routing. Deterministic `stub` mode remains the default for tests and local dry runs, while `.env` configuration can opt into OpenAI/OpenRouter for live smoke or manual validation.
+In the **reference implementation today**, `cv_submitted` accepts bounded CV-like text only when the active `scoring_context.status == ready`. The deterministic pipeline persists `cv_received` first, then `cv_parsed`, and only afterwards emits job-aware light scoring. Provider-backed LLM skills may parse typed `ingress_profile` and return per-layer score signals, but deterministic program logic computes final aggregate score/confidence, validates the layered schema, and owns workflow routing. Deterministic `stub` mode remains the default for tests and local dry runs, while `.env` configuration can opt into OpenAI/OpenRouter for live smoke or manual validation.
 
 Examples:
 
@@ -161,27 +161,27 @@ This minimizes unnecessary AI cost.
 
 ## Step 6 - Initial Scoring
 
-Qualified candidates are evaluated across three dimensions. In the current slice, light evaluation is persisted as typed `evaluation.light` with per-criterion scores, while later stages may add `evaluation.hard_filter` and `evaluation.deep` on the same snapshot.
+Qualified candidates are evaluated across three dimensions. In the current slice, light evaluation is persisted as typed `evaluation.light` with explicit `l1_universal`, `l2_role_specific`, and `l3_recruiter_preference` layers plus deterministic aggregate score/confidence and `context_version`. Later stages may add `evaluation.hard_filter` and `evaluation.deep` on the same snapshot, with deep following the same layered schema.
 
-### Universal Competencies
+### Universal Competencies (`l1_universal`)
 
 - Communication 25%
 - Ownership 25%
 - Reliability 30%
 - Thinking clarity 20%
 
-### Role-Specific Competencies
+### Role-Specific Competencies (`l2_role_specific`)
 
-Examples for executive assistant roles:
+Derived primarily from `job_context`, with `organization_context` allowed to shape how the role is interpreted in the current environment.
 
 - Executive exposure
 - Confidentiality handling
 - Multitasking capability
 - Coordination maturity
 
-### Recruiter Preference Layer
+### Recruiter Preference Layer (`l3_recruiter_preference`)
 
-Customized recruiter preferences may include:
+Derived from `organization_context` plus `recruiter_actor_context`. This remains a scoring layer only, not a separate canonical preference aggregate.
 
 - Integrity
 - Professionalism
