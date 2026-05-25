@@ -21,3 +21,7 @@ class DemoRunPreconditionError(RecruitmentUseCaseError):
 
 class InvalidCandidateActionError(RecruitmentUseCaseError):
     """Action key is not allowed for the candidate's current pipeline phase."""
+
+
+class ScoringFailedError(RecruitmentUseCaseError):
+    """A required scoring/evaluation step failed during ingress processing."""

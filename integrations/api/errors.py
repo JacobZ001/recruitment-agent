@@ -13,6 +13,7 @@ from modules.recruitment.exceptions import (
     InvalidCandidateActionError,
     InvalidIngressEventError,
     RecruitmentUseCaseError,
+    ScoringFailedError,
 )
 
 
@@ -56,6 +57,14 @@ def recruitment_error_to_http(
         )
     if isinstance(exc, DemoRunPreconditionError):
         return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, ScoringFailedError):
+        return HTTPException(
+            status_code=502,
+            detail={
+                "status": "failed",
+                "error": "scoring_failed",
+            },
+        )
     return HTTPException(
         status_code=400,
         detail={

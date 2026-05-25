@@ -17,7 +17,11 @@ from orchestrator.vertical_slice_planner import (
 from .fixtures import DEMO_CANDIDATE_DISPLAY
 from .inspection.timeline import vertical_slice_timeline_text
 from runtime.inspection import skill_decision_summary_parts
-from schemas.state_schema import OrchestrationState, PipelinePhase
+from schemas.state_schema import (
+    EvaluationState,
+    OrchestrationState,
+    PipelinePhase,
+)
 
 from .exceptions import CandidateNotFoundError
 from .policies import get_available_actions_for_phase
@@ -30,8 +34,9 @@ _RANKING_NOTE = "ranking not available in single-candidate mode"
 
 _CRITERIA_LAYOUT: Tuple[Tuple[str, str], ...] = (
     ("communication", "universal"),
-    ("technical", "role_specific"),
-    ("professionalism", "recruiter_preference"),
+    ("ownership", "universal"),
+    ("reliability", "universal"),
+    ("thinking", "universal"),
 )
 
 
@@ -66,32 +71,53 @@ def _float_or_null(value: Any) -> Optional[float]:
         return None
 
 
-def _criteria_from_layout() -> List[Dict[str, Any]]:
+def _model_dump_json(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")
+    return model.dict()
+
+
+def _evaluation_from_snapshot(snapshot: OrchestrationState) -> Optional[EvaluationState]:
+    return snapshot.evaluation
+
+
+def _summary_from_snapshot(snapshot: OrchestrationState) -> str:
+    profile = snapshot.ingress_profile
+    if profile is not None and profile.summary.strip():
+        return profile.summary
+    return CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+
+
+def _criteria_from_layout(evaluation: Optional[EvaluationState]) -> List[Dict[str, Any]]:
+    light = evaluation.light if evaluation is not None else None
     return [
         {
             "name": name,
-            "score": None,
-            "confidence": None,
+            "score": None if light is None or name not in light.criteria else float(light.criteria[name].score),
+            "confidence": (
+                None
+                if light is None or name not in light.criteria
+                else float(light.criteria[name].confidence)
+            ),
             "source": source,
+            "reason": None if light is None or name not in light.criteria else light.criteria[name].reason,
         }
         for name, source in _CRITERIA_LAYOUT
     ]
 
 
-def _overall_score_from_extensions(ext: Mapping[str, Any]) -> Dict[str, Any]:
-    deep_s = _float_or_null(ext.get("decision.deep_score"))
-    if deep_s is not None:
-        return {"value": deep_s, "type": "deep"}
-    light_s = _float_or_null(ext.get("decision.light_score"))
-    if light_s is not None:
-        return {"value": light_s, "type": "light"}
+def _overall_score_from_evaluation(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
+    if evaluation is not None and evaluation.deep is not None:
+        return {"value": float(evaluation.deep.normalized_score), "type": "deep"}
+    if evaluation is not None and evaluation.light is not None:
+        return {"value": float(evaluation.light.normalized_score), "type": "light"}
     return {"value": None, "type": None}
 
 
-def _scores_section(ext: Mapping[str, Any]) -> Dict[str, Any]:
+def _scores_section(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
     return {
-        "criteria": _criteria_from_layout(),
-        "overall_score": _overall_score_from_extensions(ext),
+        "criteria": _criteria_from_layout(evaluation),
+        "overall_score": _overall_score_from_evaluation(evaluation),
     }
 
 
@@ -149,9 +175,8 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
     (via :func:`_overall_score_from_extensions`). Does not include criteria, timeline,
     ranking detail, or evaluation summary.
     """
-    ext = dict(snapshot.extensions or {})
     stage = snapshot.pipeline.phase.value
-    overall = _overall_score_from_extensions(ext)
+    overall = _overall_score_from_evaluation(_evaluation_from_snapshot(snapshot))
     cid = _candidate_id_from_snapshot(snapshot)
     if cid is None:
         raise ValueError("snapshot has no candidate StateLink")
@@ -160,6 +185,8 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
         "stage": stage,
         "status": _status_block(stage),
         "overall_score": overall,
+        "rank": None,
+        "total_candidates": None,
         "available_actions": get_available_actions_for_phase(stage),
     }
 
@@ -171,15 +198,20 @@ def build_candidate_view(snapshot: OrchestrationState) -> Dict[str, Any]:
     ``pipeline.phase`` (exposed as ``stage``) is the single source of truth for UI state;
     no secondary status layer is maintained beyond aggregate ``status.kind``.
     """
-    ext = dict(snapshot.extensions or {})
     stage = snapshot.pipeline.phase.value
     status = _status_block(stage)
+    evaluation = _evaluation_from_snapshot(snapshot)
+    profile = snapshot.ingress_profile
     return {
         "stage": stage,
         "status": status,
-        "summary": CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER,
-        "scores": _scores_section(ext),
-        "ranking": _ranking_section(ext),
+        "summary": _summary_from_snapshot(snapshot),
+        "profile": None if profile is None else _model_dump_json(profile),
+        "decision": _model_dump_json(snapshot.decision),
+        "evaluation": None if evaluation is None else _model_dump_json(evaluation),
+        "flags": _model_dump_json(snapshot.ingress_flags),
+        "scores": _scores_section(evaluation),
+        "ranking": _ranking_section(snapshot.extensions or {}),
         "next_actions": _next_actions_for_phase(stage),
     }
 

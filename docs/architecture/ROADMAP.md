@@ -7,13 +7,13 @@ Purpose: preserve long-term development continuity, keep future AI agents and hu
 Build a deterministic, AI-native **human evaluation infrastructure** for recruitment workflows:
 
 - **Programs control workflow** (deterministic orchestration, verifiable transitions).
-- **LLMs provide cognition** (semantic understanding, extraction, generation) under strict interfaces—when that capability is switched on; the **reference vertical slice** today uses **deterministic fakes** instead of live models.
+- **LLMs provide cognition** (semantic understanding, extraction, generation) under strict interfaces. The **reference vertical slice** now includes a **bounded CV parsing/light-scoring pilot** behind an explicit provider contract, with deterministic `stub` mode kept as the default test path.
 - **Humans govern outcomes** (override, approval, calibration) with audit logs.
 
 ## System posture (architecture)
 
 - **Deterministic-first control plane** with explicit schemas, transition validation, and event ingress.
-- **Single-process, in-memory reference runtime** (bus + store + orchestrator + planner + bounded fake skills): this describes the **current reference implementation and proving environment**—how the repo runs today to validate contracts and orchestration semantics. It is **not** a statement of **intended final production topology** (which may use different persistence, messaging, ingress, process boundaries, and hosting).
+- **Single-process reference runtime** with SQLite-backed state, multi-candidate routing, deterministic orchestration, and a bounded LLM CV-ingress skill. It remains a **proving environment**, not a statement of intended final production topology (which may use different persistence, messaging, ingress, process boundaries, and hosting).
 - **Replay and inspection** are harness-backed and read-only projections; they prove control-plane semantics **before** a persisted event product exists.
 - **Governance** enters as **typed, event-carried ingress** validated by the same transition engine as system events—not as ad-hoc state edits.
 - **Governance of change**: ADRs and `tech_debt.md` record deliberate deferrals (persistence, brokers, typed payload graduation, semantic replay profiles).
@@ -27,9 +27,9 @@ Parallel to the numbered capability stages below—this is **delivery priority**
 | Stage | Meaning |
 | ----- | -------- |
 | **Stage A — Deterministic reference runtime** | Contracts, orchestrator, transition engine, harness replay, in-memory vertical slice—**completed** as a proving baseline. |
-| **Stage B — Single-tenant usable system** | **Current focus:** persistent workflow state, multiple candidates in one process/deployment, recruiter-visible progression **across sessions**. Not multi-tenant product infra yet. |
+| **Stage B — Single-tenant usable system** | **Current focus:** harden the persistent, multi-candidate recruiter slice for local repeated use (restart-safe SQLite, provider config, operator-visible progression). Not multi-tenant product infra yet. |
 | **Stage C — Multi-tenant + production infra** | Isolation, brokers/auth/SLO-grade ops—when Stage B behaviors are proven on durable state. |
-| **Stage D — Controlled cognition (LLM layer)** | Real `skills/llm/` / hybrid semantics behind contracts—**after** artifact and persistence paths exist; orchestration unchanged. |
+| **Stage D — Controlled cognition (LLM layer)** | Real `skills/llm/` / hybrid semantics behind contracts. The first bounded cognition pilot is CV parsing/light scoring at ingress; orchestration remains unchanged. |
 
 **Stage B goal:** A recruiter can **use the system across sessions**, **manage multiple candidates**, and **observe consistent workflow state**—same deterministic rules, **surviving restart**.
 
@@ -46,12 +46,12 @@ Stages describe **acquired or partial system capabilities**—things a recruiter
 | **1. Canonical contracts** | Versioned schemas (state, events, candidate), skill/event interfaces, pipeline registry vocabulary. | **Acquired** (payloads still largely `Dict[str, Any]`; graduation is debt-tracked). |
 | **2. Deterministic runtime** | Synchronous orchestrator loop, in-memory bus and store, registered fake skills, emission ordering discipline. | **Acquired** (reference runtime only). |
 | **3. Replayable orchestration** | Structural replay harnesses, negative paths, replay flags through engine/orchestrator; byte-stable artifacts where tests require them. | **Partial** — harness replay **yes**; append-only **store-backed replay runner** **no** (see `tech_debt.md`). |
-| **4. Recruiter-operable vertical slice** | **Recruiter- / operator-visible workflow execution**: end-to-end progression through the slice (e.g. to `deep_scored`), ingress that **drives** the bus (`POST /events`, `POST /demo/run`), read APIs for **phase and progression** (`GET /state/{id}`, `GET /timeline/{id}`, `GET /demo/candidate`), thin demo surface (`GET /demo`) so filter/scoring output and timeline text are **legible** in one sitting. **Stage B** extends this with **durable state** and **multiple candidates**; **then** bounded **real CV / text** ingress (**deterministic** projection, **artifact evidence refs**—**not** LLM cognition). | **Partial** — reference demo today; **Stage B** makes it **session-survivable** and **multi-candidate**. |
+| **4. Recruiter-operable vertical slice** | **Recruiter- / operator-visible workflow execution**: end-to-end progression through the slice (e.g. to `deep_scored`), ingress that **drives** the bus (`POST /events`, `POST /demo/run`), read APIs for **phase and progression** (`GET /state/{id}`, `GET /timeline/{id}`, `GET /demo/candidate`), and recruiter-facing typed projections (`profile`, governance `decision`, score/filter `evaluation`, flags). | **Partial** — durable SQLite state, multiple candidates, and bounded CV ingress are in place; operator UX and some stage continuity remain thin. |
 | **5. Human governance lifecycle** | **Post-evaluation human governance**: bounded `recruiter_*` (and related) ingress for **approve / reject / override** with typed payloads; **audit narratives** on transition records (who, why, evidence refs); inspection helpers that surface **governance lines** alongside decisions—not the same problem as “can I run and see the pipeline?” (Stage **4**). Durable long-term audit archives and full operator products remain **platform / hardening** scope. | **Partial** — **bounded** events and audit lines on the reference store; not a full operator product or production archive. |
-| **6. Controlled cognition** | **After** Stage 4 artifact ingress exists: real **`skills/llm/`** or **hybrid** skills for **semantic CV extraction / analysis** behind the same contracts (orchestration unchanged)—**LLM understands** the artifact; programs still validate transitions. | **Not started** (directory structure / principles only until first merged skill). |
+| **6. Controlled cognition** | Real **`skills/llm/`** or **hybrid** skills for bounded semantic extraction / analysis behind the same contracts (orchestration unchanged)—**LLM understands** the artifact; programs still validate transitions. | **Partial** — first CV parsing/light-scoring skill merged with explicit provider contract and deterministic `stub` default; broader cognition remains unstarted. |
 | **7. Talent intelligence platform** | Long-lived talent pool, cross-requisition matching, durable timelines, multi-aggregate orchestration, production-grade operations. | **Vision / not started** as an integrated platform (see Executive Overview for business direction). |
 
-**Honest snapshot:** stages **1–3** are strong in code and tests. **4–5** are proven **in-memory** on a **single aggregate**; **Stage B** work makes that recruiter journey **durable** and **multi-candidate** without changing scope into cognition or multi-tenant production. **6–7** remain **principles and architecture** until Stage B exits are met.
+**Honest snapshot:** stages **1–3** are strong in code and tests. **4–5** now run on a durable, single-tenant SQLite-backed reference runtime with multiple candidates and typed recruiter projections. **6** has started in a deliberately narrow way through CV ingress cognition only. **7** remains architectural vision, not present-day product reality.
 
 ---
 
@@ -61,7 +61,7 @@ Stages describe **acquired or partial system capabilities**—things a recruiter
 - **`orchestrator/`** — planning policy (e.g. `vertical_slice_planner.py`); **no** LLM calls.
 - **`modules/recruitment/`** — application boundary: **`policies`**, **`use_cases`**, **`projection`**, **`runtime`** (API holder), **`bootstrap`** (vertical-slice wiring only), **`fixtures`**, **`ranking`**, **`ingress`**, **`inspection/`**, **`domain/`** (multi-candidate aggregate placeholder). Does **not** own HTTP.
 - **`runtime/`** — generic infrastructure: bus, store, SQLite persistence, recording bus, **`runtime/inspection/`**. **`bootstrap_vertical_slice.py`**, **`demo_candidate_fixture.py`**, **`vertical_slice_ranking.py`** remain **compatibility shims** to `modules/recruitment` during migration.
-- **`skills/deterministic/`** — vertical-slice fakes; **`skills/llm/`**, **`skills/hybrid/`** — reserved for cognition when stage **6** begins.
+- **`skills/deterministic/`** — programmatic policy and scoring/filtering logic; **`skills/llm/`** — bounded cognition entry points (today: CV parsing/light scoring provider path); **`skills/hybrid/`** — reserved for future mixed cognition + deterministic policy layers.
 - **`integrations/api/`** — thin FastAPI ingress, HTTP models, demo HTML; imports **`modules/recruitment`** for business actions (API manages lifespan).
 - **`tests/`** — contract, replay, governance, API, inspection, module boundary tests.
 
@@ -84,7 +84,7 @@ Aligned with the original vision:
 
 **Still missing relative to the overview (by design in the reference slice):**
 
-- JD generation, Telegram distribution, real CV parsing, adaptive questionnaire content, ranking/shortlisting **products**, talent pool persistence, continuous learning pipelines.
+- JD generation, Telegram distribution, adaptive questionnaire content, ranking/shortlisting **products**, talent pool persistence, continuous learning pipelines, and production-grade cognition operations.
 - Those remain **business direction**; they land as **later capability stages** and **platform evolution**, not as claims of the current repo.
 
 **Superseded wording in planning sense:**
@@ -95,18 +95,18 @@ Aligned with the original vision:
 
 ## Immediate next capabilities (engineering)
 
-Ordered for **Stage B — single-tenant usability** (not expanded scope): durable state first, then multi-candidate, then bounded real input—still thin adapters; **no** workflow policy in HTTP handlers.
+Ordered for the **current single-tenant slice**: capability-oriented hardening after persistence, multi-candidate routing, typed evaluation cutover, and the first bounded cognition pilot. Still **no** workflow policy in HTTP handlers.
 
-1. **Persistent orchestration state (SQLite first)** (**Stage B**): replace **in-memory-only** runtime state with **durably stored** snapshots (SQLite as first implementation); **goal: system survives restart** with the same orchestration semantics and contracts. Event/immutability discipline preserved.
-2. **Multiple `candidate_id` aggregates** (**Stage B**, immediately after persistence): today the reference API/runtime is a **single aggregate**; next step is **several candidates** in one deployment with **isolation per candidate** (state + API routing)—still single-tenant, not Stage C multi-tenant product infra.
-3. **Bounded real CV / text artifact ingress** (**Stage 4 / B**): **only once** the workflow is **persistent**—thin **paste/upload** of CV-like **text**; **deterministic** projection into existing structured skill inputs; timelines and **evidence refs** carry **artifact provenance**. **Not** LLM parsing, **not** complex ingestion pipelines—bounded input path only. Demo fixture remains **fallback** when no artifact is supplied. Ingress **idempotency / dedupe** stay secondary unless a milestone requires them.
-4. **Deeper post-evaluation governance** where demos expose gaps—still event-sourced and transition-validated (Stages **4–5**); distinct from “more demo UI.”
+1. **Provider-hardening for bounded cognition**: make local provider configuration explicit and repeatable, preserve deterministic default tests, and evolve from coarse dependency failures toward deterministic retryability/error semantics.
+2. **Questionnaire/deep-evaluation continuity**: carry the typed `evaluation` model consistently through later pipeline stages so recruiter-visible progression stays legible beyond light scoring.
+3. **Operator-grade read models**: improve candidate list/view/timeline outputs, ranking visibility, and inspection exports without reintroducing dual semantics between governance and evaluation.
+4. **Single-tenant operational playbook**: document reset, validation, and deployment expectations for the SQLite-backed local runtime before any Stage C infrastructure work.
 
 **Later-stage enhancements** (explicitly deprioritized vs Stage B usability—keep in backlog, no removal):
 
 - Structured inspection exports (typed JSON projections).
 - Layered replay assertions (structural vs semantic vs governance) per `tech_debt.md`.
-- First controlled cognition skill (**Stage 6** / **Stage D**): LLM/hybrid **semantic** extraction or analysis **after** bounded artifact + durable paths exist—not LLM-driven routing.
+- Additional controlled cognition skills (**Stage 6** / **Stage D**): expand beyond ingress parsing only when bounded contracts, provider operations, and read-model semantics remain clear.
 - Persistence abstraction **beyond** SQLite (pluggable backends, migration story)—after SQLite proves restart-safe usage.
 
 ---

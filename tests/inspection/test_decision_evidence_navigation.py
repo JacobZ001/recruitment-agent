@@ -31,10 +31,12 @@ from runtime.inspection.decision_evidence import (
 from runtime.inspection.timeline import render_vertical_slice_timeline_text
 from schemas.state_schema import (
     DecisionActorType,
+    EvaluationState,
     OrchestrationState,
     PipelinePhase,
     PipelineState,
     PipelineStatus,
+    ScoreEvaluation,
     StateActor,
     StateAudit,
     StateDomain,
@@ -105,7 +107,7 @@ def test_skill_decision_timeline_lines_include_score_summary() -> None:
     assert any("evidence.refs=" in ln for ln in lines)
 
 
-def test_skill_decision_summary_prefers_snapshot_extensions() -> None:
+def test_skill_decision_summary_prefers_snapshot_evaluation() -> None:
     sr = SkillExecutionResult(
         metadata=_light_meta(),
         status=ExecutionStatus.SUCCEEDED,
@@ -121,17 +123,20 @@ def test_skill_decision_summary_prefers_snapshot_extensions() -> None:
     state = OrchestrationState(
         id=uuid4(),
         links=[],
-        extensions={
-            "decision.light_score": 0.88,
-            "decision.light_confidence": 0.66,
-            "decision.evidence_refs": ["persisted://ref"],
-        },
+        evaluation=EvaluationState(
+            light=ScoreEvaluation(
+                normalized_score=0.88,
+                confidence=0.66,
+                explanation="persisted",
+                source="test",
+                evidence_refs=["persisted://ref"],
+            )
+        ),
     )
     p = skill_decision_summary_parts(sr, state_snapshot=state)
     assert "from snapshot" in p["score.summary"]
     assert "0.88" in p["score.summary"]
     assert p.get("evidence.refs") == ["persisted://ref"]
-
 
 def test_transition_trail_rows_include_governance_codes() -> None:
     tr = StateTransitionRecord(

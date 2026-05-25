@@ -23,6 +23,7 @@ from .exceptions import (
     DemoRunPreconditionError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
+    ScoringFailedError,
 )
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
 
@@ -130,6 +131,8 @@ def publish_ingress_event(
     env = env.model_copy(update={"payload": merged_payload})
 
     pr = runtime.bundle.bus.publish(env)
+    if event_type == "cv_submitted" and pr.status != DeliveryStatus.ACCEPTED:
+        raise ScoringFailedError("scoring_failed")
     pub_dump = pr.model_dump(mode="json")
 
     return EventIngressResult(
@@ -174,7 +177,7 @@ def submit_cv(
     """
     Ingest raw CV text for a candidate (single ``cv_submitted`` event).
 
-    Triggers deterministic parse-and-score skill; results persist on snapshot extensions.
+    Triggers LLM parse-and-score; results persist on typed snapshot profile/evaluation fields.
     """
     text = cv_text.strip()
     if not text:
@@ -251,6 +254,10 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
             return (1, 0.0, row["candidate_id"])
 
     items.sort(key=_score_sort_key)
+    total = len(items)
+    for idx, row in enumerate(items, start=1):
+        row["rank"] = idx
+        row["total_candidates"] = total
     return items
 
 

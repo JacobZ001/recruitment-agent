@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,20 +31,8 @@ def test_two_candidates_progress_independently(client: TestClient) -> None:
     cid_a = str(uuid4())
     cid_b = str(uuid4())
 
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid_a},
-        ).status_code
-        == 200
-    )
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid_b},
-        ).status_code
-        == 200
-    )
+    rt = client.app.state.vertical_slice
+    publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {"source": "test"})
     assert (
         client.post(
             "/events",
@@ -77,20 +65,14 @@ def test_unknown_candidate_returns_404(client: TestClient) -> None:
 
 def test_timeline_non_default_candidate_returns_404_even_with_state(client: TestClient) -> None:
     cid = str(uuid4())
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid},
-        ).status_code
-        == 200
-    )
+    rt = client.app.state.vertical_slice
+    publish_recruitment_event(rt, UUID(cid), "candidate_created", {"source": "test"})
     assert client.get(f"/state/{cid}").status_code == 200
     assert client.get(f"/timeline/{cid}").status_code == 404
 
 
 def test_timeline_default_candidate_works(client: TestClient) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    client.post("/events", json={"event_type": "candidate_created", "candidate_id": cid})
     tr = client.get(f"/timeline/{cid}")
     assert tr.status_code == 200
     assert "workflow timeline" in tr.json()["timeline_text"]
@@ -98,13 +80,6 @@ def test_timeline_default_candidate_works(client: TestClient) -> None:
 
 def test_default_candidate_unchanged_after_multi_candidate(client: TestClient) -> None:
     cid_default = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid_default},
-        ).status_code
-        == 200
-    )
     assert client.get(f"/state/{cid_default}").json()["pipeline_phase"] == PipelinePhase.NEW.value
 
 

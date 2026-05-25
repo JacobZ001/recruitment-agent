@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from integrations.api.app import create_app
+from modules.recruitment.use_cases import publish_recruitment_event
 from schemas.state_schema import PipelinePhase
 
 
@@ -28,20 +29,8 @@ def test_list_candidates_empty_except_bootstrap_default(client: TestClient) -> N
 def test_list_candidates_returns_all_created(client: TestClient) -> None:
     cid_a = str(uuid4())
     cid_b = str(uuid4())
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid_a},
-        ).status_code
-        == 200
-    )
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "candidate_created", "candidate_id": cid_b},
-        ).status_code
-        == 200
-    )
+    rt = client.app.state.vertical_slice
+    publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {})
     assert (
         client.post(
             "/events",
@@ -66,8 +55,8 @@ def test_list_candidates_returns_all_created(client: TestClient) -> None:
 def test_list_candidates_no_cross_contamination(client: TestClient) -> None:
     cid_a = str(uuid4())
     cid_b = str(uuid4())
-    client.post("/events", json={"event_type": "candidate_created", "candidate_id": cid_a})
-    client.post("/events", json={"event_type": "candidate_created", "candidate_id": cid_b})
+    rt = client.app.state.vertical_slice
+    publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {})
     client.post("/events", json={"event_type": "cv_uploaded", "candidate_id": cid_a})
 
     rows = client.get("/candidates").json()

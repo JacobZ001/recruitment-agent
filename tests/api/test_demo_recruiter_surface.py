@@ -65,6 +65,9 @@ def test_get_candidate_by_id_returns_projection(client: TestClient) -> None:
     assert data["stage"] == PipelinePhase.NEW.value
     assert data["status"]["kind"] == "active"
     assert data["summary"] == CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+    assert data["decision"]["current_outcome"] == "undecided"
+    assert data["evaluation"] is None
+    assert data["flags"]["was_inactive"] is False
     _assert_criteria_shape(data["scores"]["criteria"])
     _assert_overall_score_shape(data["scores"]["overall_score"])
     assert data["scores"]["overall_score"]["value"] is None
@@ -101,12 +104,14 @@ def test_get_candidate_after_demo_run_scores_and_ranking_match_extensions(client
     rt = client.app.state.vertical_slice
     got = rt.bundle.store.get_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     assert got.ok and got.snapshot is not None
-    ext = dict(got.snapshot.extensions or {})
+    assert got.snapshot.evaluation is not None
+    assert got.snapshot.evaluation.deep is not None
 
     overall = data["scores"]["overall_score"]
     _assert_overall_score_shape(overall)
     assert overall["type"] == "deep"
-    assert overall["value"] == ext.get("decision.deep_score")
+    assert overall["value"] == got.snapshot.evaluation.deep.normalized_score
+    assert data["evaluation"]["deep"]["normalized_score"] == got.snapshot.evaluation.deep.normalized_score
 
     assert data["ranking"]["rank"] is None
     assert data["ranking"]["total_candidates"] is None

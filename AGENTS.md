@@ -225,12 +225,14 @@ Prefer:
 - explicit typing
 - deterministic behavior
 - modular implementation
+- approved cutovers that remove obsolete compatibility paths instead of preserving silent dual semantics
 
 Avoid:
 
 - large uncontrolled refactors
 - autonomous architecture rewrites
 - implicit assumptions
+- compatibility-shim creep after a PM-approved cutover unless the current `PLAN.md` explicitly requires a migration window
 
 ---
 
@@ -324,4 +326,5 @@ Each round follows this sequence:
 - Builder Agent should avoid opportunistic scope expansion.
 - Schema or state-machine contract changes require explicit PM approval in the current round scope.
 - If implementation reality conflicts with `PLAN.md`, Builder reports in `FEEDBACK.md` and pauses further out-of-scope changes.
+- Approved cutovers are real removals: Builder and Architect should not preserve or reintroduce legacy compatibility readers/writers unless the current `PLAN.md` explicitly authorizes that compatibility window.
 

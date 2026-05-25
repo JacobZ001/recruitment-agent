@@ -7,10 +7,10 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
-from modules.recruitment.policies import ALLOWED_INGRESS_EVENT_TYPES
+from modules.recruitment.policies import PUBLIC_API_INGRESS_EVENT_TYPES
 
 
-_ALLOWED_INGRESS = frozenset(ALLOWED_INGRESS_EVENT_TYPES)
+_ALLOWED_INGRESS = frozenset(PUBLIC_API_INGRESS_EVENT_TYPES)
 
 
 class VerticalSliceIngressEventBody(BaseModel):
@@ -98,6 +98,10 @@ class CandidateViewResponse(BaseModel):
     stage: str
     status: CandidateViewStatus
     summary: str
+    profile: Optional[Dict[str, Any]] = None
+    decision: Dict[str, Any] = Field(default_factory=dict)
+    evaluation: Optional[Dict[str, Any]] = None
+    flags: Dict[str, Any] = Field(default_factory=dict)
     scores: Dict[str, Any] = Field(default_factory=dict)
     ranking: Dict[str, Any] = Field(default_factory=dict)
     next_actions: List[str] = Field(default_factory=list)
@@ -124,6 +128,8 @@ class CandidateListItem(BaseModel):
     stage: str
     status: CandidateViewStatus
     overall_score: Optional[CandidateListItemOverallScore] = None
+    rank: Optional[int] = None
+    total_candidates: Optional[int] = None
     available_actions: List[RecruiterActionItem] = Field(default_factory=list)
 
 

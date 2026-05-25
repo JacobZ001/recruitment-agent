@@ -35,6 +35,8 @@ def client() -> TestClient:
 
 def _advance_primary_sequence(client: TestClient, candidate_id: str) -> None:
     for event_type in PRIMARY_VERTICAL_SLICE_EVENT_TYPES:
+        if event_type == "candidate_created":
+            continue
         r = client.post(
             "/events",
             json={"event_type": event_type, "candidate_id": candidate_id},

@@ -211,8 +211,8 @@ def test_wire_vertical_slice_sqlite_second_process_reuses_row(tmp_path) -> None:
     store2.close()
 
 
-def test_sqlite_full_pipeline_decision_extensions_survive_reload(tmp_path) -> None:
-    """Decision keys in ``OrchestrationState.extensions`` round-trip through SQLite."""
+def test_sqlite_full_pipeline_typed_evaluation_survives_reload(tmp_path) -> None:
+    """Typed evaluation fields round-trip through SQLite."""
     db = tmp_path / "decisions.db"
     cfg = InMemoryStateStoreConfig(clock=lambda: _FIXED_CLOCK)
     store = SQLiteStateStore(str(db), config=cfg)
@@ -221,19 +221,18 @@ def test_sqlite_full_pipeline_decision_extensions_survive_reload(tmp_path) -> No
     sid = bundle.state_id
     fin = store.get(sid)
     assert fin.ok and fin.snapshot is not None
-    ex = fin.snapshot.extensions
-    assert ex.get("decision.hard_filter_pass") is True
-    assert ex.get("decision.light_score") is not None
-    assert ex.get("decision.deep_score") is not None
-    assert isinstance(ex.get("decision.evidence_refs"), list)
+    assert fin.snapshot.evaluation is not None
+    assert fin.snapshot.evaluation.hard_filter is not None
+    assert fin.snapshot.evaluation.light is not None
+    assert fin.snapshot.evaluation.deep is not None
     store.close()
 
     store2 = SQLiteStateStore(str(db), config=cfg)
     reloaded = store2.get(sid)
     assert reloaded.ok and reloaded.snapshot is not None
-    ex2 = reloaded.snapshot.extensions
-    assert ex2.get("decision.light_score") is not None
-    assert ex2.get("decision.deep_score") is not None
+    assert reloaded.snapshot.evaluation is not None
+    assert reloaded.snapshot.evaluation.light is not None
+    assert reloaded.snapshot.evaluation.deep is not None
     store2.close()
 
 

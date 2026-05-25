@@ -81,11 +81,12 @@ This significantly reduces token consumption and operational cost.
 
 The **current codebase** includes a **reference vertical slice** used to prove architecture—not a finished recruiting product.
 
-- **Single-process and in-memory**: one deterministic runtime in a developer or demo environment; **no** production deployment claim, **no** multi-tenant database in this path.
+- **Single-process and single-tenant**: the reference API now defaults to a local SQLite-backed runtime so workflow state survives restart in development. It is still a proving environment, not a production deployment claim or multi-tenant architecture.
 - **Event-driven progression**: each step is triggered by **events**; a deterministic orchestration layer applies **validated** state changes. **Programs** advance the workflow; **AI is not** choosing the next pipeline state in this reference path.
-- **Screening and scoring today**: implemented with **deterministic stand-in skills** and, for demonstrations, **fixed sample candidate data**—so teams can see filters, scores, evidence references, and timelines **without** live CV parsing or paid model calls. The **business vision** for AI-assisted parsing and questionnaires is unchanged; those are **later capabilities** on the same architectural spine.
+- **Screening and scoring today**: CV ingress accepts bounded real text via `cv_submitted`. A constrained `skills/llm/` provider path extracts profile + light evaluation signals, while hard filtering, deeper scoring, ranking, and state transitions remain deterministic. Tests/default local runs still use the deterministic `stub` provider unless explicitly overridden.
+- **Typed recruiter semantics**: recruiter-facing snapshot/API projections now separate governance `decision` from score/filter `evaluation`, with `profile` and ingress `flags` exposed explicitly instead of encoding current evaluation semantics in `extensions`.
 - **Human governance**: recruiter-style **approve / reject** actions exist as **bounded, audited event types** in the reference slice, aligned with the “humans retain authority” principle. Full operator products, persistence, and channel integrations (e.g. Telegram) are **not** implied by this slice.
-- **Intentional bounds (not omissions by accident):** durable persistence, multi-tenant orchestration, distributed execution, and production-grade infrastructure are **later platform evolution** concerns. They are deferred so the **deterministic reference runtime** can prove orchestration semantics and contracts first; they are **not** forgotten requirements.
+- **Intentional bounds (not omissions by accident):** there is no migration framework for old local SQLite rows in this cutover stage; local `data/app.db` reset is the accepted developer path when typed-evaluation cutovers land. Multi-tenant orchestration, distributed execution, and production-grade infrastructure remain later platform concerns.
 
 # High-Level Workflow
 
@@ -136,7 +137,7 @@ The system also supports manual uploads for channels AI cannot directly access.
 
 AI extracts structured information from candidate submissions.
 
-In the **reference implementation today**, structured fields are **simulated** with deterministic inputs so the pipeline can be tested end-to-end **without** live document extraction. **Full AI parsing** remains part of the product direction once contracts and governance are stable.
+In the **reference implementation today**, `cv_submitted` accepts bounded CV-like text and routes it through an explicit provider-backed LLM skill. That skill emits typed `ingress_profile` and `evaluation.light` data only; it does **not** choose transitions or mutate workflow routing. Deterministic `stub` mode remains the default for tests and local dry runs, while `.env` configuration can opt into OpenAI/OpenRouter for live smoke or manual validation.
 
 Examples:
 
@@ -160,7 +161,7 @@ This minimizes unnecessary AI cost.
 
 ## Step 6 - Initial Scoring
 
-Qualified candidates are evaluated across three dimensions:
+Qualified candidates are evaluated across three dimensions. In the current slice, light evaluation is persisted as typed `evaluation.light` with per-criterion scores, while later stages may add `evaluation.hard_filter` and `evaluation.deep` on the same snapshot.
 
 ### Universal Competencies
 
@@ -189,14 +190,14 @@ Customized recruiter preferences may include:
 
 ## Step 7 - Adaptive Questionnaire
 
-Only selected candidates proceed to additional AI-driven questionnaires.
+Only selected candidates proceed to additional questionnaires.
 
 Questionnaires are triggered based on:
 
 - Candidate ranking
 - Information confidence level
 
-The system dynamically asks only for missing or uncertain information.
+The target design is still dynamic and evidence-seeking, but the current reference slice keeps questionnaire orchestration bounded and deterministic; full adaptive content generation is not yet implemented.
 
 Examples:
 
@@ -219,7 +220,7 @@ The system combines:
 
 To produce:
 
-- Structured scores
+- Structured scores (`evaluation.deep` when that stage runs)
 - Evidence-backed reasoning
 - Confidence levels
 - Risk analysis
@@ -244,9 +245,9 @@ The recruitment system operates through a structured candidate lifecycle.
 Examples of pipeline stages (the exact set evolves with the product; engineering uses explicit named states for traceability):
 
 - New intake
-- CV received and parsed
+- CV submitted and light-scored
 - Hard filter passed (or closed if rejected)
-- Initial (light) scoring
+- Initial (light) scoring persisted as typed evaluation
 - Questionnaire pending, sent, and completed
 - Deep evaluation / scoring
 - Shortlisted

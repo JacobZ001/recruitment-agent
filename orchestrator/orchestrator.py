@@ -443,6 +443,15 @@ def _touch_audit(
     return _model_copy(state, audit=new_audit)  # type: ignore[return-value]
 
 
+def _apply_ingress_flag_updates(state: OrchestrationState, *, event_type: str) -> OrchestrationState:
+    if event_type != "recruiter_reconsider_candidate":
+        return state
+    if state.ingress_flags.was_inactive:
+        return state
+    new_flags = _model_copy(state.ingress_flags, was_inactive=True)
+    return _model_copy(state, ingress_flags=new_flags)  # type: ignore[return-value]
+
+
 def _commit_transition(
     state: OrchestrationState,
     *,
@@ -804,22 +813,9 @@ class Orchestrator:
                     transition_result=tv,
                 )
 
-        decision_snapshot_extensions: Dict[str, Any] = {}
-        if plan.skills:
-            from orchestrator.vertical_slice_planner import merge_vertical_slice_decision_snapshot_extensions
-
-            decision_snapshot_extensions = merge_vertical_slice_decision_snapshot_extensions(
-                plan.skills, skill_results, prior_extensions=dict(state.extensions)
-            )
-
         occurred_at = envelope.occurred_at
         if plan.proposed_transition is None:
             new_state = _touch_audit(state, updated_by=self._ctx.updated_by, occurred_at=occurred_at)
-            if decision_snapshot_extensions:
-                new_state = _model_copy(
-                    new_state,
-                    extensions={**new_state.extensions, **decision_snapshot_extensions},  # type: ignore[arg-type]
-                )
             if not plan.skills and not plan.emissions:
                 decisions.append(
                     OrchestrationDecisionRecord(
@@ -837,7 +833,6 @@ class Orchestrator:
                 matched_rule_id=tv.matched_rule_id,
                 updated_by=self._ctx.updated_by,
                 occurred_at=occurred_at,
-                snapshot_extensions=decision_snapshot_extensions or None,
             )
             decisions.append(
                 OrchestrationDecisionRecord(
@@ -905,6 +900,12 @@ class Orchestrator:
                     )
                 )
                 tv = tv_secondary
+
+        if plan.skills:
+            from orchestrator.vertical_slice_planner import apply_vertical_slice_skill_state_updates
+
+            new_state = apply_vertical_slice_skill_state_updates(new_state, plan.skills, skill_results)
+        new_state = _apply_ingress_flag_updates(new_state, event_type=envelope.event_type)
 
         if self._ctx.publisher is not None:
             for emission_index, draft in enumerate(plan.emissions):

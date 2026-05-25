@@ -19,7 +19,7 @@ merge into aggregate ``OrchestrationState.extensions`` on commit (see orchestrat
 
 from __future__ import annotations
 
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
@@ -41,7 +41,18 @@ from schemas.governance_schema import (
     parse_governance_ingress,
     parse_governance_override_ingress,
 )
-from schemas.state_schema import DecisionActorType, OrchestrationState, PipelinePhase, StateActor, StateDomain
+from schemas.state_schema import (
+    CriterionScore,
+    DecisionActorType,
+    EvaluationState,
+    HardFilterEvaluation,
+    IngressProfile,
+    OrchestrationState,
+    PipelinePhase,
+    ScoreEvaluation,
+    StateActor,
+    StateDomain,
+)
 
 from modules.recruitment.fixtures import merge_demo_profile_into_skill_payload
 from modules.recruitment.ranking import resolve_ranking_branch
@@ -316,7 +327,7 @@ class VerticalSlicePlanner:
             proposed_transition=ProposedTransition(
                 state_domain=StateDomain.PIPELINE,
                 from_state=PipelinePhase.NEW.value,
-                to_state=PipelinePhase.CV_PARSED.value,
+                to_state=PipelinePhase.LIGHT_SCORED.value,
                 trigger=_event_trigger("cv_submitted"),
                 human_override=_human_override(envelope),
                 transition_actor=_system_actor(envelope),
@@ -915,6 +926,24 @@ class VerticalSlicePlanner:
 _MAX_PERSISTED_DECISION_EVIDENCE_REFS = 48
 
 
+def _model_copy_local(model: Any, **updates: Any) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(update=updates)
+    return model.copy(update=updates)
+
+
+def _model_deep_copy_local(model: Any) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(deep=True)
+    return model.copy(deep=True)
+
+
+def _model_validate_local(model_cls: Any, value: Any) -> Any:
+    if hasattr(model_cls, "model_validate"):
+        return model_cls.model_validate(value)
+    return model_cls.parse_obj(value)
+
+
 def _evidence_ref_strings_from_skill_result(res: SkillExecutionResult) -> List[str]:
     out = res.output
     if out is None or not out.evidence_refs:
@@ -945,98 +974,151 @@ def _confidence_numeric_from_skill_result(
     return None
 
 
-def skill_result_to_vertical_slice_decision_extensions(
-    skill_name: str, res: SkillExecutionResult
-) -> Dict[str, Any]:
-    """
-    Flat ``OrchestrationState.extensions`` keys for vertical-slice scoring skills.
+def _base_evaluation_state(state: OrchestrationState) -> EvaluationState:
+    if state.evaluation is not None:
+        return _model_deep_copy_local(state.evaluation)
+    return EvaluationState()
 
-    Called by the orchestrator after skills execute so values reflect
-    :class:`~interfaces.skill_interface.SkillExecutionResult` outputs.
-    """
-    out: Dict[str, Any] = {}
-    if res.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL_SUCCESS):
-        return out
-    if res.output is None:
-        return out
-    pl = res.output.payload or {}
 
-    if skill_name == SKILL_HARD_FILTER:
-        if "filter.computed_pass" in pl:
-            out["decision.hard_filter_pass"] = bool(pl["filter.computed_pass"])
-        refs = _evidence_ref_strings_from_skill_result(res)
-        if refs:
-            out["_evidence_refs_partial"] = refs
-        return out
+def _score_eval_from_llm_payload(payload: Mapping[str, Any]) -> ScoreEvaluation:
+    return _model_validate_local(ScoreEvaluation, payload)
 
-    if skill_name == SKILL_LIGHT_SCORING:
-        if "scoring.normalized_score" in pl:
-            out["decision.light_score"] = float(pl["scoring.normalized_score"])
-        cn = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
-        if cn is not None:
-            out["decision.light_confidence"] = cn
-        refs = _evidence_ref_strings_from_skill_result(res)
-        if refs:
-            out["_evidence_refs_partial"] = refs
-        return out
 
-    if skill_name == SKILL_DEEP_SCORING:
-        if "scoring.deep.normalized_score" in pl:
-            out["decision.deep_score"] = float(pl["scoring.deep.normalized_score"])
-        cn = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=True)
-        if cn is not None:
-            out["decision.deep_confidence"] = cn
-        refs = _evidence_ref_strings_from_skill_result(res)
-        if refs:
-            out["_evidence_refs_partial"] = refs
-        return out
-
-    if skill_name == SKILL_CV_PARSE_AND_SCORE:
-        if "cv.raw_text" in pl:
-            out["cv.raw_text"] = pl["cv.raw_text"]
-        if "cv.signals" in pl:
-            out["cv.signals"] = pl["cv.signals"]
-        if "scoring.normalized_score" in pl:
-            out["decision.light_score"] = float(pl["scoring.normalized_score"])
-        if "scoring.confidence_score" in pl:
-            out["decision.light_confidence"] = float(pl["scoring.confidence_score"])
-        return out
-
+def _criteria_from_mapping(raw: Any) -> Dict[str, CriterionScore]:
+    if not isinstance(raw, Mapping):
+        return {}
+    out: Dict[str, CriterionScore] = {}
+    for key, value in raw.items():
+        try:
+            out[str(key)] = _model_validate_local(CriterionScore, value)
+        except Exception:
+            continue
     return out
 
 
-def merge_vertical_slice_decision_snapshot_extensions(
+def _hard_filter_evaluation_from_skill_result(res: SkillExecutionResult) -> Optional[HardFilterEvaluation]:
+    if res.output is None:
+        return None
+    pl = res.output.payload or {}
+    if "filter.computed_pass" not in pl:
+        return None
+    reason_codes = pl.get("filter.rejection.reason_codes")
+    explanation = None
+    if isinstance(reason_codes, list) and reason_codes:
+        explanation = ", ".join(str(x) for x in reason_codes[:8])
+    elif pl.get("filter.decision") is not None:
+        explanation = f"filter decision={pl.get('filter.decision')!r}"
+    return HardFilterEvaluation(
+        computed_pass=bool(pl["filter.computed_pass"]),
+        confidence=_confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False),
+        explanation=explanation,
+        source="deterministic_skill",
+        evidence_refs=_evidence_ref_strings_from_skill_result(res),
+    )
+
+
+def _light_score_evaluation_from_skill_result(res: SkillExecutionResult) -> Optional[ScoreEvaluation]:
+    if res.output is None:
+        return None
+    pl = res.output.payload or {}
+    if "scoring.normalized_score" not in pl:
+        return None
+    explanation = str(pl.get("scoring.explainability") or "")
+    criteria = _criteria_from_mapping(pl.get("criteria"))
+    confidence = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=False)
+    return ScoreEvaluation(
+        normalized_score=float(pl["scoring.normalized_score"]),
+        confidence=0.0 if confidence is None else float(confidence),
+        explanation=explanation,
+        source="system_llm" if res.metadata.skill_name == SKILL_CV_PARSE_AND_SCORE else "deterministic_skill",
+        criteria=criteria,
+        evidence_refs=_evidence_ref_strings_from_skill_result(res),
+    )
+
+
+def _deep_score_evaluation_from_skill_result(res: SkillExecutionResult) -> Optional[ScoreEvaluation]:
+    if res.output is None:
+        return None
+    pl = res.output.payload or {}
+    if "scoring.deep.normalized_score" not in pl:
+        return None
+    confidence = _confidence_numeric_from_skill_result(res, prefer_deep_payload_score=True)
+    return ScoreEvaluation(
+        normalized_score=float(pl["scoring.deep.normalized_score"]),
+        confidence=0.0 if confidence is None else float(confidence),
+        explanation=str(pl.get("scoring.deep.explainability") or ""),
+        source="deterministic_skill",
+        criteria=_criteria_from_mapping(pl.get("criteria")),
+        evidence_refs=_evidence_ref_strings_from_skill_result(res),
+    )
+
+
+def apply_vertical_slice_skill_state_updates(
+    state: OrchestrationState,
     skills: Sequence[SkillInvocationSpec],
     skill_results: Sequence[SkillExecutionResult],
-    *,
-    prior_extensions: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> OrchestrationState:
     """
-    Merge per-skill decision keys into one dict for ``OrchestrationState.extensions``.
+    Apply typed snapshot updates derived from vertical-slice skill outputs.
 
-    Evidence refs from prior snapshot extensions are preserved (dedupe, cap), then
-    refs from this plan's skills are appended.
+    Canonical writes target ``ingress_profile`` / ``evaluation`` rather than
+    ``extensions['decision.*']``.
     """
-    merged: Dict[str, Any] = {}
-    evidence_ordered: List[str] = []
-
-    prior = prior_extensions or {}
-    prev_refs = prior.get("decision.evidence_refs")
-    if isinstance(prev_refs, list):
-        for r in prev_refs:
-            s = str(r)
-            if s not in evidence_ordered:
-                evidence_ordered.append(s)
+    new_state = state
+    evaluation = _base_evaluation_state(state)
+    evaluation_changed = False
+    profile = state.ingress_profile
+    profile_changed = False
 
     for spec, res in zip(skills, skill_results):
-        part = skill_result_to_vertical_slice_decision_extensions(spec.skill_name, res)
-        refs = part.pop("_evidence_refs_partial", None)
-        if isinstance(refs, list):
-            for r in refs:
-                if r not in evidence_ordered:
-                    evidence_ordered.append(r)
-        merged.update(part)
+        if res.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL_SUCCESS):
+            continue
+        if res.output is None:
+            continue
+        pl = res.output.payload or {}
 
-    if evidence_ordered:
-        merged["decision.evidence_refs"] = evidence_ordered[:_MAX_PERSISTED_DECISION_EVIDENCE_REFS]
-    return merged
+        if spec.skill_name == SKILL_CV_PARSE_AND_SCORE:
+            raw_profile = pl.get("profile")
+            if isinstance(raw_profile, Mapping):
+                profile = _model_validate_local(IngressProfile, raw_profile)
+                profile_changed = True
+            raw_eval = pl.get("evaluation")
+            if isinstance(raw_eval, Mapping) and isinstance(raw_eval.get("light"), Mapping):
+                evaluation = _model_copy_local(
+                    evaluation,
+                    light=_score_eval_from_llm_payload(raw_eval["light"]),
+                )
+                evaluation_changed = True
+                continue
+
+            light_eval = _light_score_evaluation_from_skill_result(res)
+            if light_eval is not None:
+                evaluation = _model_copy_local(evaluation, light=light_eval)
+                evaluation_changed = True
+            continue
+
+        if spec.skill_name == SKILL_HARD_FILTER:
+            hard_filter = _hard_filter_evaluation_from_skill_result(res)
+            if hard_filter is not None:
+                evaluation = _model_copy_local(evaluation, hard_filter=hard_filter)
+                evaluation_changed = True
+            continue
+
+        if spec.skill_name == SKILL_LIGHT_SCORING:
+            light_eval = _light_score_evaluation_from_skill_result(res)
+            if light_eval is not None:
+                evaluation = _model_copy_local(evaluation, light=light_eval)
+                evaluation_changed = True
+            continue
+
+        if spec.skill_name == SKILL_DEEP_SCORING:
+            deep_eval = _deep_score_evaluation_from_skill_result(res)
+            if deep_eval is not None:
+                evaluation = _model_copy_local(evaluation, deep=deep_eval)
+                evaluation_changed = True
+
+    if profile_changed:
+        new_state = _model_copy_local(new_state, ingress_profile=profile)
+    if evaluation_changed:
+        new_state = _model_copy_local(new_state, evaluation=evaluation)
+    return new_state

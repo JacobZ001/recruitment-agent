@@ -20,10 +20,10 @@ from orchestrator.vertical_slice_planner import (
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
 from runtime.inspection.decision_explainer import (
-    evidence_refs_from_extensions,
-    format_deep_scoring_from_extensions,
-    format_hard_filter_from_extensions,
-    format_light_scoring_from_extensions,
+    evidence_refs_from_snapshot,
+    format_deep_scoring_from_snapshot,
+    format_hard_filter_from_snapshot,
+    format_light_scoring_from_snapshot,
 )
 
 
@@ -52,41 +52,45 @@ def _evidence_ref_strings(refs: Optional[Sequence[EvidenceRef]], *, limit: int) 
     return out
 
 
-def _decision_summary_from_orchestration_extensions(
-    sr: SkillExecutionResult, ex: Dict[str, Any]
+def _decision_summary_from_snapshot(
+    sr: SkillExecutionResult, state_snapshot: OrchestrationState
 ) -> Optional[Dict[str, Any]]:
-    """If ``OrchestrationState.extensions`` holds persisted decision keys for this skill, build summary."""
+    """If the snapshot holds persisted evaluation data for this skill, build summary."""
     name = sr.metadata.skill_name
     parts: Dict[str, Any] = {
         "skill_name": name,
         "status": sr.status.value,
     }
     if name == SKILL_HARD_FILTER:
-        summary = format_hard_filter_from_extensions(ex)
+        summary = format_hard_filter_from_snapshot(state_snapshot)
         if summary is None:
             return None
         parts["decision.summary"] = summary
-        refs = evidence_refs_from_extensions(ex)
+        refs = evidence_refs_from_snapshot(state_snapshot)
         if refs is not None:
             parts["evidence.refs"] = refs
         return parts
 
     if name == SKILL_LIGHT_SCORING:
-        summary = format_light_scoring_from_extensions(ex)
+        summary = format_light_scoring_from_snapshot(state_snapshot)
         if summary is None:
             return None
         parts["score.summary"] = summary
-        refs = evidence_refs_from_extensions(ex)
+        refs = evidence_refs_from_snapshot(state_snapshot)
         if refs is not None:
             parts["evidence.refs"] = refs
         return parts
 
-    if name == SKILL_DEEP_SCORING:
-        summary = format_deep_scoring_from_extensions(ex)
+    if name in (SKILL_DEEP_SCORING, "recruitment.vertical_slice.cv_parse_and_score"):
+        summary = (
+            format_light_scoring_from_snapshot(state_snapshot)
+            if name == "recruitment.vertical_slice.cv_parse_and_score"
+            else format_deep_scoring_from_snapshot(state_snapshot)
+        )
         if summary is None:
             return None
         parts["score.summary"] = summary
-        refs = evidence_refs_from_extensions(ex)
+        refs = evidence_refs_from_snapshot(state_snapshot)
         if refs is not None:
             parts["evidence.refs"] = refs
         return parts
@@ -103,13 +107,11 @@ def skill_decision_summary_parts(
     Compact, stable key/value summary for one skill execution (for navigation APIs).
 
     Keys are inspection-oriented strings; values are JSON-serializable where possible.
-    When ``state_snapshot`` is set, reads persisted ``decision.*`` keys from
-    ``OrchestrationState.extensions`` first, then falls back to skill output shape.
+    When ``state_snapshot`` is set, reads persisted typed evaluation data first,
+    then falls back to skill output shape.
     """
     if state_snapshot is not None:
-        from_snap = _decision_summary_from_orchestration_extensions(
-            sr, dict(state_snapshot.extensions or {})
-        )
+        from_snap = _decision_summary_from_snapshot(sr, state_snapshot)
         if from_snap is not None:
             return from_snap
 

@@ -32,7 +32,7 @@ def test_post_events_one_event_returns_publish_and_state_summary(client: TestCli
     r = client.post(
         "/events",
         json={
-            "event_type": "candidate_created",
+            "event_type": "cv_uploaded",
             "candidate_id": cid,
             "payload": {"source": "api_test"},
         },
@@ -41,16 +41,13 @@ def test_post_events_one_event_returns_publish_and_state_summary(client: TestCli
     body = r.json()
     assert body["ingress_accepted"] is True
     assert body["publish_status"] == "accepted"
-    assert body["event_type"] == "candidate_created"
+    assert body["event_type"] == "cv_uploaded"
     assert "event_id" in body
-    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.NEW.value
+    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
 
 
 def test_sequential_events_progress_pipeline(client: TestClient) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    assert (
-        client.post("/events", json={"event_type": "candidate_created"}).status_code == 200
-    )
     assert client.post("/events", json={"event_type": "cv_uploaded"}).status_code == 200
 
     st = client.get(f"/state/{cid}")
@@ -60,7 +57,7 @@ def test_sequential_events_progress_pipeline(client: TestClient) -> None:
 
 def test_timeline_returns_inspection_text(client: TestClient) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    client.post("/events", json={"event_type": "candidate_created"})
+    client.post("/events", json={"event_type": "cv_uploaded"})
     tr = client.get(f"/timeline/{cid}")
     assert tr.status_code == 200
     data = tr.json()
@@ -84,7 +81,7 @@ def test_post_events_accepts_new_candidate_id(client: TestClient) -> None:
     r = client.post(
         "/events",
         json={
-            "event_type": "candidate_created",
+            "event_type": "cv_uploaded",
             "candidate_id": cid,
         },
     )
@@ -92,9 +89,14 @@ def test_post_events_accepts_new_candidate_id(client: TestClient) -> None:
     assert client.get(f"/state/{cid}").status_code == 200
 
 
+def test_candidate_created_rejected_from_public_api(client: TestClient) -> None:
+    cid = str(uuid4())
+    r = client.post("/events", json={"event_type": "candidate_created", "candidate_id": cid})
+    assert r.status_code == 422
+
+
 def test_admin_reset_in_memory_restores_new(client: TestClient) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    client.post("/events", json={"event_type": "candidate_created"})
     client.post("/events", json={"event_type": "cv_uploaded"})
     assert (
         client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
@@ -116,7 +118,6 @@ def test_admin_reset_sqlite_truncates_and_restores(tmp_path) -> None:
     db = tmp_path / "reset.db"
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     with TestClient(create_app(db_path=str(db))) as client:
-        client.post("/events", json={"event_type": "candidate_created"})
         client.post("/events", json={"event_type": "cv_uploaded"})
         assert (
             client.get(f"/state/{cid}").json()["pipeline_phase"]
@@ -135,7 +136,6 @@ def test_admin_reset_sqlite_truncates_and_restores(tmp_path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM state_transition_audit").fetchone()[0] == 0
         conn.close()
 
-        client.post("/events", json={"event_type": "candidate_created"})
         assert (
             client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.NEW.value
         )

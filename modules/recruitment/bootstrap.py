@@ -121,11 +121,11 @@ from schemas.state_schema import (
     StateAudit,
     StateLink,
 )
-from skills.deterministic.cv_parse_and_score_skill import CvParseAndScoreSkill
 from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill
 from skills.deterministic.fake_hard_filter_skill import FakeHardFilterSkill
 from skills.deterministic.fake_light_scoring_skill import FakeLightScoringSkill
+from skills.llm.cv_llm_parse_and_score import CvLlmParseAndScoreSkill
 from state_machine.transition_engine import TransitionEngine, default_pipeline_registry
 
 from .ingress import BOOT_NS as _BOOT_NS
@@ -280,7 +280,7 @@ def _skill_registry() -> Dict[str, Skill]:
             runtime_label="runtime.stub.candidate_created",
         ),
         SKILL_CV_UPLOADED: FakeCvUploadedSkill(),
-        SKILL_CV_PARSE_AND_SCORE: CvParseAndScoreSkill(),
+        SKILL_CV_PARSE_AND_SCORE: CvLlmParseAndScoreSkill(),
         SKILL_CV_PARSED: _StubVerticalSliceSkill(
             skill_name=SKILL_CV_PARSED,
             runtime_label="runtime.stub.cv_parsed",

@@ -256,7 +256,10 @@ class DecisionRecord(_SchemaBase):
 
 class DecisionState(_SchemaBase):
     """
-    Tracks recommendations, human overrides, and the current validated outcome.
+    Governance-only state: recommendations, human/system outcomes, and audit history.
+
+    This model does not carry scoring/filtering results. Those belong on
+    ``OrchestrationState.evaluation``.
     """
 
     current_outcome: DecisionOutcome = Field(default=DecisionOutcome.UNDECIDED)
@@ -268,6 +271,60 @@ class DecisionState(_SchemaBase):
     history: List[DecisionRecord] = Field(default_factory=list)
 
     extensions: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IngressProfile(_SchemaBase):
+    """Structured candidate profile extracted during ingress."""
+
+    years_experience: Optional[int] = Field(default=None, ge=0, le=80)
+    seniority: Optional[Literal["junior", "mid", "senior"]] = Field(default=None)
+    roles: List[str] = Field(default_factory=list)
+    skills: List[str] = Field(default_factory=list)
+    industries: List[str] = Field(default_factory=list)
+    summary: str = Field(default="", description="Single recruiter-facing profile summary.")
+
+
+class CriterionScore(_SchemaBase):
+    """Bounded score + confidence pair for one evaluation criterion."""
+
+    score: float = Field(..., ge=0.0, le=1.0)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    reason: str = Field(default="")
+
+
+class HardFilterEvaluation(_SchemaBase):
+    """Binary eligibility gate outcome captured as evaluation data."""
+
+    computed_pass: bool
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    explanation: Optional[str] = Field(default=None)
+    source: str = Field(..., min_length=1)
+    evidence_refs: List[str] = Field(default_factory=list)
+
+
+class ScoreEvaluation(_SchemaBase):
+    """Normalized score payload for light/deep evaluation stages."""
+
+    normalized_score: float = Field(..., ge=0.0, le=1.0)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    explanation: str = Field(default="")
+    source: str = Field(..., min_length=1)
+    criteria: Dict[str, CriterionScore] = Field(default_factory=dict)
+    evidence_refs: List[str] = Field(default_factory=list)
+
+
+class EvaluationState(_SchemaBase):
+    """Canonical home for scoring and filtering results."""
+
+    hard_filter: Optional[HardFilterEvaluation] = Field(default=None)
+    light: Optional[ScoreEvaluation] = Field(default=None)
+    deep: Optional[ScoreEvaluation] = Field(default=None)
+
+
+class IngressFlags(_SchemaBase):
+    """Ingress-lifecycle flags derived from deterministic workflow events."""
+
+    was_inactive: bool = Field(default=False)
 
 
 class MessageRecord(_SchemaBase):
@@ -364,6 +421,9 @@ class OrchestrationState(_SchemaBase):
 
     pipeline: PipelineState = Field(default_factory=PipelineState)
     decision: DecisionState = Field(default_factory=DecisionState)
+    ingress_profile: Optional[IngressProfile] = Field(default=None)
+    evaluation: Optional[EvaluationState] = Field(default=None)
+    ingress_flags: IngressFlags = Field(default_factory=IngressFlags)
     communication: CommunicationState = Field(default_factory=CommunicationState)
 
     transitions: List[StateTransitionRecord] = Field(
@@ -377,10 +437,9 @@ class OrchestrationState(_SchemaBase):
         default_factory=dict,
         description=(
             "Forward-compatible expansion point for cross-cutting fields. "
-            "Vertical-slice scoring persistence (flat keys, JSON-serializable): "
-            "decision.hard_filter_pass (bool), decision.light_score, decision.light_confidence, "
-            "decision.deep_score, decision.deep_confidence (numbers in [0,1]), "
-            "decision.evidence_refs (list[str])."
+            "Do not use as the canonical home for scoring/filtering results; those belong "
+            "on ingress_profile / evaluation / ingress_flags. Legacy rows may still contain "
+            "older decision.* score keys and remain readable during migration."
         ),
     )
 

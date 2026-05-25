@@ -10,6 +10,7 @@ from .exceptions import (
     InvalidCandidateActionError,
     InvalidIngressEventError,
     RecruitmentUseCaseError,
+    ScoringFailedError,
 )
 from .projection import (
     CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER,
@@ -58,6 +59,7 @@ __all__ = (
     "InvalidCandidateActionError",
     "InvalidIngressEventError",
     "RecruitmentUseCaseError",
+    "ScoringFailedError",
     "build_candidate_list_item",
     "build_candidate_view",
     "get_candidate_view_for_runtime",

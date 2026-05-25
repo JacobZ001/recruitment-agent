@@ -114,3 +114,31 @@ Purpose: preserve long-term architectural reasoning, prevent drift, and provide 
 - **Tradeoffs**: Some duplication of runtime typing via Protocols until a shared ports module exists; projections may still read bootstrap/inspection helpers directly.
 - **Future Considerations**: Move additional runtime wiring behind explicit ports; grow modules only when a second bounded context appears (avoid premature microservices).
 
+---
+
+## ADR-009 — Bounded LLM cognition at CV ingress
+
+- **ADR ID**: ADR-009
+- **Title**: First controlled cognition pilot at CV ingress
+- **Status**: Accepted
+- **Decision date**: 2026-05-25
+- **Context**: The single-tenant recruiter slice now has durable state, multi-candidate routing, and typed recruiter projections. The next capability step is bounded semantic understanding of CV text without allowing model output to own workflow control.
+- **Decision**: Introduce a single `skills/llm/` CV parse-and-score skill at `cv_submitted` ingress. The skill may extract typed profile data and light-evaluation signals, but deterministic program logic retains ownership of transitions, routing, ranking, retries, and fail-closed behavior. Provider selection is explicit through local environment configuration; automated tests keep deterministic `stub` mode as the default.
+- **Consequences**: The repo now exercises a real cognition boundary while preserving architecture rules. Teams can validate provider wiring and structured output contracts without turning prompts into workflow logic.
+- **Tradeoffs**: Introduces external dependency failure modes, provider configuration overhead, and a temporary coarse error surface (`scoring_failed`) until taxonomy hardening catches up.
+- **Future Considerations**: Expand cognition only through explicit contracts, deterministic provider-failure mapping, and harness coverage; do not let additional LLM skills backslide into orchestration control.
+
+---
+
+## ADR-010 — Typed evaluation cutover over legacy `decision.*` compatibility
+
+- **ADR ID**: ADR-010
+- **Title**: Typed evaluation is the sole canonical score/filter path
+- **Status**: Accepted
+- **Decision date**: 2026-05-25
+- **Context**: Earlier migration work temporarily kept compatibility readers for score/filter data stored in `extensions["decision.*"]`. That dual path blurred governance `decision` vs evaluation semantics and extended the burden of old local SQLite rows.
+- **Decision**: Use typed snapshot fields (`ingress_profile`, `evaluation`, `ingress_flags`) as the only supported read/write path for current recruiter semantics. Remove runtime compatibility readers that reinterpret `extensions["decision.*"]` as evaluation. When this cutover breaks old local SQLite state, local `data/app.db` reset is the accepted developer workflow for this round.
+- **Consequences**: Snapshot and API semantics are clearer, projections are simpler, and future development no longer needs to preserve dual evaluation meanings. Old local rows that depended on compatibility readers are intentionally outside the supported path after this cutover.
+- **Tradeoffs**: Developers must reset local SQLite state after the cutover if they were carrying pre-cutover rows. There is no general migration framework for historical local snapshots in this round.
+- **Future Considerations**: If retained historical data becomes a product requirement, solve it with an explicit migration/upcaster strategy rather than reviving ad-hoc compatibility readers in runtime code.
+

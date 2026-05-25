@@ -57,6 +57,48 @@ def get_runtime(request: Request) -> VerticalSliceApiRuntime:
 
 
 DEFAULT_VERTICAL_SLICE_DB_PATH = "data/app.db"
+DEFAULT_ENV_FILE_NAME = ".env"
+ENV_FILE_ENV_VAR = "VERTICAL_SLICE_ENV_FILE"
+
+
+def _strip_env_value(raw: str) -> str:
+    s = raw.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1]
+    return s
+
+
+def _load_local_env_file(explicit_path: Optional[str] = None) -> Optional[str]:
+    """
+    Load local environment variables at the API boundary.
+
+    Existing process environment wins. This keeps tests deterministic and avoids
+    hidden provider configuration deeper in the stack.
+    """
+    candidate_paths: List[Path] = []
+    raw_explicit = explicit_path if explicit_path is not None else os.environ.get(ENV_FILE_ENV_VAR)
+    if raw_explicit:
+        candidate_paths.append(Path(raw_explicit))
+    repo_root_env = Path(__file__).resolve().parents[2] / DEFAULT_ENV_FILE_NAME
+    cwd_env = Path.cwd() / DEFAULT_ENV_FILE_NAME
+    for p in (repo_root_env, cwd_env):
+        if p not in candidate_paths:
+            candidate_paths.append(p)
+
+    target = next((p for p in candidate_paths if p.exists() and p.is_file()), None)
+    if target is None:
+        return None
+
+    for raw_line in target.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env_key = key.strip()
+        if not env_key or env_key in os.environ:
+            continue
+        os.environ[env_key] = _strip_env_value(value)
+    return str(target)
 
 
 def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
@@ -74,6 +116,7 @@ def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
 def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.loaded_env_file = _load_local_env_file()
         resolved = _resolve_vertical_slice_db_path(db_path)
         if resolved:
             Path(resolved).parent.mkdir(parents=True, exist_ok=True)

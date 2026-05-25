@@ -7,7 +7,7 @@ to human-readable ``ranking_decision`` payloads for timelines and tooling.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Optional
 
 from schemas.state_schema import OrchestrationState, StateTransitionRecord
 
@@ -46,51 +46,59 @@ def build_ranking_decision_dict(extensions: Dict[str, Any]) -> Optional[Dict[str
     }
 
 
-def evidence_refs_from_extensions(ex: Mapping[str, Any]) -> Optional[List[str]]:
-    refs = ex.get("decision.evidence_refs")
-    if isinstance(refs, list) and refs:
-        return [str(x) for x in refs[:_MAX_EVIDENCE_REFS]]
-    return None
-
-
-def format_hard_filter_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
-    """Single-line summary from persisted ``decision.hard_filter_pass`` (snapshot only)."""
-    if "decision.hard_filter_pass" not in ex:
+def evidence_refs_from_snapshot(state: OrchestrationState) -> Optional[List[str]]:
+    evaluation = state.evaluation
+    ordered: List[str] = []
+    if evaluation is None:
         return None
-    return f"filter computed_pass={ex.get('decision.hard_filter_pass')!r} (from snapshot)"
+    for part in (evaluation.hard_filter, evaluation.light, evaluation.deep):
+        if part is None:
+            continue
+        for ref in part.evidence_refs[:_MAX_EVIDENCE_REFS]:
+            s = str(ref)
+            if s not in ordered:
+                ordered.append(s)
+    return ordered or None
 
 
-def format_light_scoring_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
-    """Single-line summary from persisted light score keys (snapshot only)."""
-    if "decision.light_score" not in ex:
+def format_hard_filter_from_snapshot(state: OrchestrationState) -> Optional[str]:
+    evaluation = state.evaluation
+    if evaluation is None or evaluation.hard_filter is None:
         return None
     return (
-        f"kind=light normalized={ex.get('decision.light_score')!r} "
-        f"confidence_numeric={ex.get('decision.light_confidence')!r} (from snapshot)"
+        f"filter computed_pass={evaluation.hard_filter.computed_pass!r} "
+        f"source={evaluation.hard_filter.source!r} (from snapshot)"
     )
 
 
-def format_deep_scoring_from_extensions(ex: Mapping[str, Any]) -> Optional[str]:
-    """Single-line summary from persisted deep score keys (snapshot only)."""
-    if "decision.deep_score" not in ex:
+def format_light_scoring_from_snapshot(state: OrchestrationState) -> Optional[str]:
+    evaluation = state.evaluation
+    if evaluation is None or evaluation.light is None:
         return None
     return (
-        f"kind=deep normalized={ex.get('decision.deep_score')!r} "
-        f"confidence_numeric={ex.get('decision.deep_confidence')!r} (from snapshot)"
+        f"kind=light normalized={evaluation.light.normalized_score!r} "
+        f"confidence_numeric={evaluation.light.confidence!r} (from snapshot)"
     )
 
 
-def build_decision_summary_text(ex: Mapping[str, Any]) -> str:
-    """
-    Human-readable aggregate of persisted ``decision.*`` keys (read-only; no skill payloads).
-    """
+def format_deep_scoring_from_snapshot(state: OrchestrationState) -> Optional[str]:
+    evaluation = state.evaluation
+    if evaluation is None or evaluation.deep is None:
+        return None
+    return (
+        f"kind=deep normalized={evaluation.deep.normalized_score!r} "
+        f"confidence_numeric={evaluation.deep.confidence!r} (from snapshot)"
+    )
+
+
+def build_evaluation_summary_text(state: OrchestrationState) -> str:
     bits: List[str] = []
     for fn in (
-        format_hard_filter_from_extensions,
-        format_light_scoring_from_extensions,
-        format_deep_scoring_from_extensions,
+        format_hard_filter_from_snapshot,
+        format_light_scoring_from_snapshot,
+        format_deep_scoring_from_snapshot,
     ):
-        s = fn(ex)
+        s = fn(state)
         if s:
             bits.append(s)
     return " ".join(bits)

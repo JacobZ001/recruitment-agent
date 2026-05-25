@@ -249,55 +249,55 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Priority**: Medium
 - **Recommended future direction**: Document **concurrency guarantees** (per-process, per-aggregate, or “external lock required”); or introduce a small **write lock** / queue abstraction around the store for multi-threaded hosts; consider WAL + timeout policy when load grows.
 
-## Decision persistence
+## Evaluation and extension persistence
 
-### Decision namespace structure
+### Extensions namespace structure after evaluation cutover
 - **Status**: OPEN
 - **Scope**: Persistence+Contracts
-- **Revisit when**: When extension keys multiply or second producer writes decision.*
-- **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: ``OrchestrationState.extensions`` holds flat keys such as ``decision.*``, ``inactive.*``, and ``governance.*`` without a formal namespace contract or collision policy.
-- **Rationale**: Ship persisted evaluation signals quickly on top of the existing extensions escape hatch.
-- **Future impact**: Unstructured growth and accidental key collisions across producers (skills, planner, governance).
+- **Revisit when**: When extension keys multiply or a second producer starts writing the same diagnostic/governance prefixes
+- **Introduced in**: 2026-05-25
+- **Last reviewed**: 2026-05-25
+- **Current decision**: Current score/filter semantics no longer live in ``extensions``. Typed snapshot fields (``ingress_profile``, ``evaluation``, ``ingress_flags``) are canonical. ``extensions`` remains a flat escape hatch for diagnostic or governance-adjacent facts such as ``inactive.*`` and ``governance.*``.
+- **Rationale**: The approved decision/evaluation cutover removed dual semantics and made typed snapshot fields the only supported read/write path for evaluation.
+- **Future impact**: Remaining flat extension keys can still grow without collision policy, especially as more diagnostic and operator-facing metadata accumulates.
 - **Priority**: Medium
 - **Recommended future direction**: Define typed logical namespaces or a versioned schema contract for extension keys (prefix rules, allowlists, or nested typed sub-documents).
 
-### Decision evidence lineage
+### Evaluation evidence lineage
 - **Status**: OPEN
 - **Scope**: Persistence
 - **Revisit when**: When operator UI needs per-skill evidence attribution
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: ``decision.evidence_refs`` merges refs across pipeline steps into one deduped list; source skill/step is not recorded.
-- **Rationale**: Keeps snapshot shape small and avoids extra columns while proving end-to-end persistence.
-- **Future impact**: Operators and audits cannot tell which skill emitted which ref without correlating run history manually.
+- **Last reviewed**: 2026-05-25
+- **Current decision**: Evidence references now live on typed evaluation surfaces (``evaluation.hard_filter.evidence_refs``, ``evaluation.light.evidence_refs``, ``evaluation.deep.evidence_refs``), but there is still no first-class linkage to the exact skill execution id or transition that produced each ref.
+- **Rationale**: The typed evaluation cutover preserves per-surface evidence without introducing a second lineage model in the same round.
+- **Future impact**: Operators and audits can distinguish surface-level evidence, but cannot yet pinpoint the precise producing execution without correlating run history manually.
 - **Priority**: Medium
-- **Recommended future direction**: Add per-step or per-skill attribution (e.g. ``decision.evidence_sources`` mapping ref → producer, or structured entries per transition).
+- **Recommended future direction**: Add per-step or per-skill attribution (e.g. structured entries with producer, execution id, and transition/event lineage) while keeping typed evaluation as the canonical read model.
 
-### Decision-to-transition linkage
+### Evaluation-to-transition linkage
 - **Status**: OPEN
 - **Scope**: Persistence+Orchestrator
 - **Revisit when**: When audit tooling needs transition-scoped decision facts
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: Decision fields live on the aggregate snapshot and are copied into ``StateTransitionRecord.extensions`` for the committing transition, but there is no explicit link (e.g. id) tying a given decision key set to a specific transition or event id beyond ordering.
-- **Rationale**: Reuse the same flat merge for audit rows and snapshot without a second linkage model.
-- **Future impact**: Harder targeted audit/debug (“which transition wrote this score?”) under concurrent or replay tooling.
+- **Last reviewed**: 2026-05-25
+- **Current decision**: Evaluation state lives on the aggregate snapshot and is read directly from typed fields. There is still no explicit lineage id tying a given evaluation surface update to a specific transition or skill execution beyond temporal ordering and run history.
+- **Rationale**: Keeps the cutover simple and avoids introducing a second persistence contract during the same round.
+- **Future impact**: Targeted audit/debug remains harder than necessary when asking “which transition or execution wrote this evaluation surface?”.
 - **Priority**: Low
-- **Recommended future direction**: Introduce explicit lineage (transition id, ingested ``event_id``, or step index) on decision blobs or transition extensions.
+- **Recommended future direction**: Introduce explicit lineage (transition id, ingested ``event_id``, execution id, or step index) for evaluation updates and align operator read models to that provenance.
 
-### Decision overwrite semantics
+### Evaluation precedence semantics
 - **Status**: OPEN
 - **Scope**: Persistence
 - **Revisit when**: When UI/API must show single authoritative score
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: ``decision.light_score`` / ``decision.deep_score`` (and confidences) coexist; no documented rule for which layer is authoritative for downstream consumers.
-- **Rationale**: Light and deep are different stages; both remain visible for inspection.
-- **Future impact**: UI or policy may disagree on “the” candidate score without an explicit precedence contract.
+- **Last reviewed**: 2026-05-25
+- **Current decision**: ``evaluation.light`` and ``evaluation.deep`` coexist. Current recruiter-facing read models use a simple deep-over-light precedence for overall score display, while still exposing both surfaces separately.
+- **Rationale**: Light and deep remain different evaluation stages, but the typed cutover makes their separation explicit instead of hiding it in flat keys.
+- **Future impact**: UI or policy may still disagree on “the” candidate score unless precedence stays documented and versioned.
 - **Priority**: Low
-- **Recommended future direction**: Document and enforce precedence (e.g. deep overrides light for display/ranking) or split into versioned stage records instead of a single flat key set.
+- **Recommended future direction**: Keep precedence explicit for display/ranking, or evolve toward versioned stage records if product semantics need stronger audit guarantees.
 
 ## Execution Architecture
 
@@ -437,12 +437,24 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Scope**: Skills+API
 - **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
 - **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-22
-- **Current decision**: Real CV text enters via a single ingress event ``cv_submitted`` and one deterministic skill ``cv_parse_and_score``. Snapshot extensions store ``cv.raw_text``, ``cv.signals`` (small dict), and ``decision.light_score`` (+ optional ``decision.light_confidence``). Demo/replay still uses ``cv_uploaded`` → ``cv_parsed`` in ``PRIMARY_VERTICAL_SLICE_EVENT_TYPES``.
-- **Rationale**: One business action per event for MVP usability; parsing/scoring stay inside the skill layer so the planner remains event→transition→skill only.
-- **Future impact**: Later stages can add ``cv_parsed`` (LLM), ``cv_enriched``, and ``scoring_updated`` as **new skills and registry edges** without leaking CV semantics into the planner.
+- **Last reviewed**: 2026-05-25
+- **Current decision**: Real CV text enters via a single ingress event ``cv_submitted`` and one bounded LLM skill ``cv_parse_and_score``. The skill emits typed ``ingress_profile`` plus ``evaluation.light``; deterministic stages still own hard filtering, deep scoring, ranking, and routing. Demo flows may still use ``cv_uploaded`` in scripted sequences, but current recruiter semantics come from the typed snapshot path.
+- **Rationale**: One business action per event preserves usable ingress while allowing bounded cognition where it matters: semantic extraction from CV text.
+- **Future impact**: Later stages can add richer artifact references, multi-stage enrichment, or separate parse/score edges without leaking workflow control into prompts or reviving flat score keys.
 - **Priority**: Medium
-- **Recommended future direction**: Split or wrap ``cv_parse_and_score``; add typed ``cv_text`` payload validation at ingress; optional artifact refs when a document store exists—keep orchestration contracts stable.
+- **Recommended future direction**: Split or wrap ``cv_parse_and_score`` only when bounded artifact storage, payload contracts, and provider operations need it; keep orchestration contracts stable and deterministic.
+
+### Coarse `scoring_failed` failure taxonomy
+- **Status**: OPEN
+- **Scope**: API+Skills
+- **Revisit when**: When retry policy, operator messaging, or provider observability needs differ by failure class
+- **Introduced in**: 2026-05-25
+- **Last reviewed**: 2026-05-25
+- **Current decision**: `cv_submitted` fail-closed behavior currently collapses provider/config/validation failures into a single application/API surface: `scoring_failed`.
+- **Rationale**: Keeps the cutover stable and predictable while the first bounded provider path is being hardened; avoids accidental workflow continuation on partial cognition failures.
+- **Future impact**: Retries, alerting, operator guidance, and API ergonomics cannot distinguish authorization vs network vs invalid-response vs not-configured failures.
+- **Priority**: High
+- **Recommended future direction**: Preserve fail-closed behavior, but split `scoring_failed` into deterministic subcodes with explicit retryability and provider-category mapping at the application boundary.
 
 ### Recruiter action label ownership
 - **Status**: OPEN
@@ -1042,12 +1054,12 @@ Summary (v2 cleanup):
 - **Scope**: API read model (`integrations/api/candidate_view.py`) + inspection explainer
 - **Revisit when**: Audit/replay requirements demand bit-stable human copy on old snapshots
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-12
-- **Current decision**: ``GET /candidate`` ``summary`` is a **fixed placeholder** (not derived). The ``ranking`` object in that response is a **single-candidate stub** (no internal branch/stage). **Criteria scores** in ``scores.criteria`` are mapped read-only from ``decision.light_*`` / ``decision.deep_*`` in ``snapshot.extensions``. Elsewhere (e.g. timelines), human copy may still be derived at read time via :mod:`runtime.inspection.decision_explainer` from persisted keys.
-- **Rationale**: Product-facing read model avoids synthetic narrative until evaluation copy is persisted; numeric signals stay tied to stored ``decision.*`` keys.
-- **Future impact**: If ``decision.*`` key shapes change, **candidate view criteria mapping** must stay in sync; timeline/explainer-derived text can still drift from historical operator expectations unless versioned or persisted.
+- **Last reviewed**: 2026-05-25
+- **Current decision**: ``GET /candidate`` ``summary`` now prefers typed ``ingress_profile.summary`` and otherwise falls back to a placeholder. ``scores`` and ``evaluation`` are read from typed snapshot fields, while ``ranking`` remains a single-candidate stub and human-readable explanation text is still derived at read time.
+- **Rationale**: The typed evaluation cutover makes score/filter semantics explicit on the snapshot, but product-facing narrative remains intentionally lightweight.
+- **Future impact**: Ranking visibility is still thin, and explainer-derived text can drift from historical operator expectations unless versioned or persisted.
 - **Priority**: Low
-- **Recommended future direction**: Optionally persist explanation strings in ``snapshot.extensions`` at commit time for audit-stable display, or version explainer outputs behind an explicit schema/revision flag.
+- **Recommended future direction**: Persist or version human-facing explanation strings when audit-stable copy becomes necessary, and replace the ranking stub once multi-candidate read models mature.
 
 ### Legacy governance event types
 - **Status**: OPEN

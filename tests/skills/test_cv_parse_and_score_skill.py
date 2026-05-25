@@ -1,4 +1,4 @@
-"""CvParseAndScoreSkill contract tests."""
+"""CvLlmParseAndScoreSkill contract tests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from uuid import uuid4
 import pytest
 
 from interfaces.skill_interface import ExecutionContext, ExecutionStatus, SkillInputEnvelope
-from skills.deterministic.cv_parse_and_score_skill import CvParseAndScoreSkill
+from skills.llm.cv_llm_parse_and_score import CvLlmParseAndScoreSkill
+from skills.llm.llm_provider import StubLLMProvider
 
 
 _CV = """
@@ -26,7 +27,7 @@ def _context() -> ExecutionContext:
 
 
 def test_skill_requires_cv_text() -> None:
-    skill = CvParseAndScoreSkill()
+    skill = CvLlmParseAndScoreSkill(provider=StubLLMProvider())
     result = skill.execute(
         SkillInputEnvelope(
             payload={
@@ -42,8 +43,8 @@ def test_skill_requires_cv_text() -> None:
     assert "cv_text" in result.failure.message
 
 
-def test_skill_success_emits_minimal_payload() -> None:
-    skill = CvParseAndScoreSkill()
+def test_skill_success_emits_typed_payload() -> None:
+    skill = CvLlmParseAndScoreSkill(provider=StubLLMProvider())
     result = skill.execute(
         SkillInputEnvelope(
             payload={
@@ -58,8 +59,10 @@ def test_skill_success_emits_minimal_payload() -> None:
     assert result.status == ExecutionStatus.SUCCEEDED
     assert result.output is not None
     pl = result.output.payload
-    assert "cv.raw_text" in pl
-    assert isinstance(pl["cv.signals"], dict)
-    assert "scoring.normalized_score" in pl
-    assert "artifact" not in str(pl.keys())
-    assert not any(k.startswith("declared.") for k in pl)
+    assert "profile" in pl
+    assert "evaluation" in pl
+    assert "light" in pl["evaluation"]
+    assert "summary" in pl["profile"]
+    assert "normalized_score" in pl["evaluation"]["light"]
+    assert "cv.raw_text" not in pl
+    assert "cv.signals" not in pl

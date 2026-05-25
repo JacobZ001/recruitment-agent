@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from modules.recruitment.runtime import VerticalSliceApiRuntime
-from modules.recruitment.use_cases import publish_recruitment_event, submit_cv
+from modules.recruitment.use_cases import submit_cv
 from schemas.state_schema import PipelinePhase
 
 _CV = """
@@ -18,25 +18,25 @@ sam@hire.test
 def test_submit_cv_persists_extensions() -> None:
     rt = VerticalSliceApiRuntime()
     cid = uuid4()
-    publish_recruitment_event(rt, cid, "candidate_created", {"source": "test"})
     result = submit_cv(rt, cid, _CV)
     assert result.ingress_accepted is True
 
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
     snap = got.snapshot
-    assert snap.pipeline.phase == PipelinePhase.CV_PARSED
-    ext = snap.extensions
-    assert ext.get("cv.raw_text")
-    assert isinstance(ext.get("cv.signals"), dict)
-    assert ext["cv.signals"].get("matched_keywords")
-    assert ext.get("decision.light_score") is not None
+    assert snap.pipeline.phase == PipelinePhase.LIGHT_SCORED
+    assert snap.ingress_profile is not None
+    assert snap.evaluation is not None
+    assert snap.evaluation.light is not None
+    assert snap.ingress_profile.summary
+    assert snap.evaluation.light.normalized_score is not None
+    assert "cv.raw_text" not in snap.extensions
+    assert snap.decision.current_outcome.value == "undecided"
 
 
 def test_submit_cv_empty_raises() -> None:
     rt = VerticalSliceApiRuntime()
     cid = uuid4()
-    publish_recruitment_event(rt, cid, "candidate_created", {})
     try:
         submit_cv(rt, cid, "   ")
     except Exception as exc:
