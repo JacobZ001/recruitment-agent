@@ -166,6 +166,36 @@ def test_stub_provider_returns_expected_shape() -> None:
     assert result["profile"]["seniority"] == "senior"
 
 
+def test_stub_provider_materializes_scoring_context_shape() -> None:
+    result = StubLLMProvider().generate_structured(
+        system_prompt=(
+            "Required top-level keys: organization_context, recruiter_actor_context, "
+            "job_context, derived_l2_criteria, derived_l3_criteria, explanation."
+        ),
+        user_prompt=json.dumps(
+            {
+                "organization_authoring_text": (
+                    "BlueOcean is a recruitment company. The Talent Ops team operates in a "
+                    "fast-moving environment. The organization values clear communication."
+                ),
+                "recruiter_actor_authoring_text": (
+                    "Recruiter test-recruiter is a lead recruiter who values ownership and "
+                    "avoids unclear communication."
+                ),
+                "job_authoring_text": (
+                    "We are hiring for a Recruiting Operations Specialist. Must-have signals "
+                    "include stakeholder communication and process ownership."
+                ),
+            }
+        ),
+    )
+    assert result["organization_context"]["company_name"] == "BlueOcean"
+    assert result["recruiter_actor_context"]["actor_id"] == "test-recruiter"
+    assert result["job_context"]["title"] == "Recruiting Operations Specialist"
+    assert result["derived_l2_criteria"]
+    assert result["derived_l3_criteria"]
+
+
 def test_load_local_env_file_sets_missing_values_only(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(

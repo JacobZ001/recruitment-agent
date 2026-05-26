@@ -55,50 +55,66 @@ def test_scoring_context_authoring_routes_and_refresh() -> None:
         org = client.post(
             "/scoring-context/organization",
             json={
-                "company_name": "BlueOcean",
-                "industry": "recruitment",
-                "environment_signals": ["fast-moving operations"],
-                "preference_signals": ["clear communication"],
+                "raw_text": (
+                    "BlueOcean is a recruitment company. The Talent Ops team operates in a "
+                    "fast-moving operations environment. The organization values clear "
+                    "communication and structured follow-through."
+                ),
+                "source_ref": "test://organization",
             },
         )
         assert org.status_code == 200, org.text
         assert org.json()["status"] == "collecting"
+        assert org.json()["organization_authoring_text"]
+        assert org.json()["organization_context"] is None
 
         recruiter = client.post(
             "/scoring-context/recruiter-actor",
             json={
-                "actor_id": "route-recruiter",
-                "preference_signals": ["ownership"],
-                "avoid_signals": ["unclear updates"],
+                "raw_text": (
+                    "Recruiter route-recruiter is a lead recruiter focused on ownership and "
+                    "operator-ready execution. The recruiter values ownership and stakeholder "
+                    "communication, and avoids unclear updates."
+                ),
+                "source_ref": "test://recruiter",
             },
         )
         assert recruiter.status_code == 200, recruiter.text
         assert recruiter.json()["status"] == "collecting"
+        assert recruiter.json()["recruiter_actor_authoring_text"]
+        assert recruiter.json()["recruiter_actor_context"] is None
 
         job = client.post(
-            "/scoring-context/job/recruiter-answers",
+            "/scoring-context/job/text",
             json={
-                "role_title": "Recruiting Operations Specialist",
-                "must_haves_answer": "stakeholder communication\nprocess ownership",
-                "preferred_answer": "ATS familiarity",
-                "success_answer": "keep candidate flow organized",
-                "responsibilities_answer": "coordinate interviews\nsurface blockers early",
+                "raw_text": (
+                    "We are hiring for a Recruiting Operations Specialist. Must-have signals "
+                    "include stakeholder communication and process ownership. Preferred signals "
+                    "include ATS familiarity. Success in the role means keeping candidate flow "
+                    "organized. Responsibilities include coordinating interviews and surfacing "
+                    "blockers early."
+                ),
+                "source_ref": "test://job",
             },
         )
         assert job.status_code == 200, job.text
         assert job.json()["status"] == "collecting"
-        assert job.json()["job_context"]["title"] == "Recruiting Operations Specialist"
+        assert job.json()["job_authoring_text"]
+        assert job.json()["job_context"] is None
 
         ready = client.post("/scoring-context/refresh")
         assert ready.status_code == 200, ready.text
         assert ready.json()["status"] == "ready"
         assert ready.json()["job_context"]["title"] == "Recruiting Operations Specialist"
+        assert ready.json()["organization_context"]["company_name"] == "BlueOcean"
+        assert ready.json()["recruiter_actor_context"]["actor_id"] == "route-recruiter"
         assert ready.json()["derived_l2_criteria"]
         assert ready.json()["derived_l3_criteria"]
 
         get_ready = client.get("/scoring-context")
         assert get_ready.status_code == 200
         assert get_ready.json()["status"] == "ready"
+        assert get_ready.json()["organization_authoring_text"]
 
 
 def test_scoring_context_refresh_rejects_insufficient_derivation_signals() -> None:
@@ -106,27 +122,23 @@ def test_scoring_context_refresh_rejects_insufficient_derivation_signals() -> No
         client.post(
             "/scoring-context/organization",
             json={
-                "company_name": "BlueOcean",
-                "environment_signals": ["fast-moving operations"],
-                "preference_signals": [],
+                "raw_text": "BlueOcean is a recruitment company with a fast-moving operations environment.",
             },
         )
         client.post(
             "/scoring-context/recruiter-actor",
             json={
-                "actor_id": "route-recruiter",
-                "preference_signals": [],
-                "avoid_signals": [],
+                "raw_text": "Recruiter route-recruiter is a lead recruiter.",
             },
         )
         client.post(
-            "/scoring-context/job/recruiter-answers",
+            "/scoring-context/job/text",
             json={
-                "role_title": "Recruiting Operations Specialist",
-                "must_haves_answer": "stakeholder communication",
-                "preferred_answer": "",
-                "success_answer": "keep candidate flow organized",
-                "responsibilities_answer": "coordinate interviews",
+                "raw_text": (
+                    "We are hiring for a Recruiting Operations Specialist. Must-have signals "
+                    "include stakeholder communication. Success in the role means keeping "
+                    "candidate flow organized."
+                ),
             },
         )
 
@@ -148,12 +160,12 @@ def test_job_context_pdf_route_success_and_failure() -> None:
             json={
                 "file_name": "job_context.pdf",
                 "pdf_base64": _build_pdf_base64(
-                    "Role: Recruiting Operations Specialist\nMust: communication, ownership\nSuccess: keep candidate flow organized"
+                    "We are hiring for a Recruiting Operations Specialist. Must-have signals include communication and ownership. Success in the role means keeping candidate flow organized."
                 ),
             },
         )
         assert good.status_code == 200, good.text
-        assert good.json()["job_context"]["title"] == "Recruiting Operations Specialist"
+        assert "Recruiting Operations Specialist" in good.json()["job_authoring_text"]
 
         bad = client.post(
             "/scoring-context/job/pdf",

@@ -14,6 +14,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Protocol
 from urllib import error, request
 
+from modules.recruitment.scoring_context_service import (
+    derive_l2_labels,
+    derive_l3_labels,
+    normalize_job_context_from_text,
+    normalize_organization_context_from_text,
+    normalize_recruiter_actor_context_from_text,
+)
+
 
 class LLMProvider(Protocol):
     def generate_structured(self, *, system_prompt: str, user_prompt: str) -> Dict[str, Any]: ...
@@ -209,6 +217,48 @@ def _payload_for_layered_score(user_prompt: str) -> Dict[str, Any]:
     }
 
 
+def _payload_for_scoring_context_materialization(user_prompt: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(user_prompt)
+    except Exception:
+        payload = {}
+    organization_text = str(payload.get("organization_authoring_text") or "")
+    recruiter_text = str(payload.get("recruiter_actor_authoring_text") or "")
+    job_text = str(payload.get("job_authoring_text") or "")
+
+    organization_context = normalize_organization_context_from_text(
+        organization_text,
+        source_refs=["normalized://organization_authoring_text"],
+    )
+    recruiter_actor_context = normalize_recruiter_actor_context_from_text(
+        recruiter_text,
+        source_refs=["normalized://recruiter_actor_authoring_text"],
+    )
+    job_context = normalize_job_context_from_text(
+        job_text,
+        source_refs=["normalized://job_authoring_text"],
+    )
+    if hasattr(organization_context, "model_dump"):
+        org_payload = organization_context.model_dump(mode="json")
+        recruiter_payload = recruiter_actor_context.model_dump(mode="json")
+        job_payload = job_context.model_dump(mode="json")
+    else:  # pragma: no cover
+        org_payload = organization_context.dict()
+        recruiter_payload = recruiter_actor_context.dict()
+        job_payload = job_context.dict()
+    return {
+        "organization_context": {**org_payload},
+        "recruiter_actor_context": {**recruiter_payload},
+        "job_context": {**job_payload},
+        "derived_l2_criteria": derive_l2_labels(job_context, organization_context),
+        "derived_l3_criteria": derive_l3_labels(organization_context, recruiter_actor_context),
+        "explanation": (
+            "Stub provider normalized recruiter-authored prose into typed scoring context "
+            "fields and bounded derived criteria."
+        ),
+    }
+
+
 class StubLLMProvider:
     """
     Deterministic local provider used in tests.
@@ -220,6 +270,8 @@ class StubLLMProvider:
     def generate_structured(self, *, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if "l1_universal" in system_prompt and "l2_role_specific" in system_prompt:
             return _payload_for_layered_score(user_prompt)
+        if "derived_l2_criteria" in system_prompt and "organization_context" in system_prompt:
+            return _payload_for_scoring_context_materialization(user_prompt)
         return _payload_for_profile(user_prompt)
 
 

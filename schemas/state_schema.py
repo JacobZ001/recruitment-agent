@@ -331,6 +331,9 @@ class ScoringContext(_SchemaBase):
 
     context_version: int = Field(default=1, ge=1)
     status: ScoringContextStatus = Field(default=ScoringContextStatus.COLLECTING)
+    organization_authoring_text: str = Field(default="")
+    recruiter_actor_authoring_text: str = Field(default="")
+    job_authoring_text: str = Field(default="")
     organization_context: Optional[OrganizationContext] = Field(default=None)
     recruiter_actor_context: Optional[RecruiterActorContext] = Field(default=None)
     job_context: Optional[JobContext] = Field(default=None)

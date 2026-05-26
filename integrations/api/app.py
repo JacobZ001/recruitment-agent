@@ -43,8 +43,8 @@ from modules.recruitment import (
     author_job_context_from_pdf,
     author_job_context_from_recruiter_answers,
     author_job_context_from_text,
-    author_organization_context,
-    author_recruiter_actor_context,
+    author_organization_context_from_text,
+    author_recruiter_actor_context_from_text,
     get_active_scoring_context,
     get_candidate_view_for_runtime,
     get_demo_candidate,
@@ -61,7 +61,6 @@ from modules.recruitment import (
     submit_cv_pdf,
 )
 from modules.recruitment.bootstrap import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
-from schemas.state_schema import OrganizationContext, RecruiterActorContext
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 
 
@@ -130,11 +129,6 @@ def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
 
 
 def create_app(*, db_path: Optional[str] = None) -> FastAPI:
-    def _body_dump(model: object) -> dict:
-        if hasattr(model, "model_dump"):
-            return model.model_dump()
-        return model.dict()
-
     def _context_response(rt: VerticalSliceApiRuntime) -> ScoringContextResponse:
         context = get_active_scoring_context(rt)
         if context is None:
@@ -202,7 +196,7 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> ScoringContextResponse:
         try:
-            author_organization_context(rt, OrganizationContext(**_body_dump(body)))
+            author_organization_context_from_text(rt, body.raw_text, source_ref=body.source_ref)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)
@@ -213,7 +207,7 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         rt: VerticalSliceApiRuntime = Depends(get_runtime),
     ) -> ScoringContextResponse:
         try:
-            author_recruiter_actor_context(rt, RecruiterActorContext(**_body_dump(body)))
+            author_recruiter_actor_context_from_text(rt, body.raw_text, source_ref=body.source_ref)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)

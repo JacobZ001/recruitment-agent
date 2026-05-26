@@ -6,11 +6,14 @@ import pytest
 
 from modules.recruitment.use_cases import (
     author_job_context_from_text,
-    author_organization_context,
-    author_recruiter_actor_context,
+    author_organization_context_from_text,
+    author_recruiter_actor_context_from_text,
     refresh_active_scoring_context,
 )
-from schemas.state_schema import OrganizationContext, RecruiterActorContext
+from skills.llm.llm_provider import StubLLMProvider
+from skills.llm.scoring_context_materialize_from_prose import (
+    ScoringContextMaterializeFromProseSkill,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -24,43 +27,38 @@ def _configure_stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def establish_ready_scoring_context():
     def _apply(runtime) -> None:
-        author_organization_context(
+        author_organization_context_from_text(
             runtime,
-            OrganizationContext(
-                company_name="BlueOcean",
-                industry="recruitment",
-                team_name="Talent Ops",
-                environment_signals=["fast-moving recruiter workflow"],
-                preference_signals=["clear communication", "structured follow-through"],
-                summary="Single-tenant recruiter evaluation baseline.",
-                source_refs=["test://organization"],
+            (
+                "BlueOcean is a recruitment company and the Talent Ops team operates in a "
+                "fast-moving recruiter workflow. The organization values clear communication "
+                "and structured follow-through."
             ),
+            source_ref="test://organization",
         )
-        author_recruiter_actor_context(
+        author_recruiter_actor_context_from_text(
             runtime,
-            RecruiterActorContext(
-                actor_id="test-recruiter",
-                actor_role="lead_recruiter",
-                hiring_focus=["operator-ready execution"],
-                preference_signals=["stakeholder communication", "ownership"],
-                avoid_signals=["unclear communication"],
-                summary="Default recruiter preference context for deterministic tests.",
-                source_refs=["test://recruiter"],
+            (
+                "Recruiter test-recruiter is a lead recruiter focused on operator-ready execution. "
+                "The recruiter values stakeholder communication and ownership, and avoids "
+                "unclear communication."
             ),
+            source_ref="test://recruiter",
         )
         author_job_context_from_text(
             runtime,
-            "\n".join(
-                [
-                    "Role: Recruiting Operations Specialist",
-                    "Must: recruiter coordination, stakeholder communication, process ownership",
-                    "Preferred: ATS familiarity, reporting discipline",
-                    "Success: keep hiring workflow organized, surface risks early",
-                    "Responsibilities: coordinate candidate flow, maintain process hygiene",
-                ]
+            (
+                "We are hiring for a Recruiting Operations Specialist. Must-have signals include "
+                "recruiter coordination, stakeholder communication, and process ownership. "
+                "Preferred signals include ATS familiarity and reporting discipline. Success in "
+                "the role means keeping the hiring workflow organized and surfacing risks early. "
+                "Responsibilities include coordinating candidate flow and maintaining process hygiene."
             ),
             source_ref="test://job_text",
         )
-        refresh_active_scoring_context(runtime)
+        refresh_active_scoring_context(
+            runtime,
+            materializer=ScoringContextMaterializeFromProseSkill(provider=StubLLMProvider()),
+        )
 
     return _apply

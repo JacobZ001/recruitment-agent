@@ -28,6 +28,8 @@ _LAYER_WEIGHTS = {
     "l3_recruiter_preference": 0.20,
 }
 _TEXT_SPLIT_RE = re.compile(r"[\n;,]+")
+_CLAUSE_SPLIT_RE = re.compile(r"[\n;,]+|\band\b", flags=re.IGNORECASE)
+_SENTENCE_SPLIT_RE = re.compile(r"[\r\n]+|(?<=[.!?])\s+")
 
 
 def _now_utc() -> datetime:
@@ -36,6 +38,12 @@ def _now_utc() -> datetime:
 
 def _clean_text(value: str, *, limit: int = 400) -> str:
     return " ".join(value.split())[:limit].strip()
+
+
+def _clean_authored_text(value: str, *, limit: int = 2_000) -> str:
+    lines = [" ".join(str(line).split()).strip() for line in str(value).splitlines()]
+    cleaned = "\n".join(line for line in lines if line)
+    return cleaned[:limit].strip()
 
 
 def _bounded_items(values: Iterable[str]) -> List[str]:
@@ -55,6 +63,118 @@ def _split_items(raw: str) -> List[str]:
     return _bounded_items(part for part in _TEXT_SPLIT_RE.split(raw or ""))
 
 
+def _split_items_loose(raw: str) -> List[str]:
+    return _bounded_items(part for part in _CLAUSE_SPLIT_RE.split(raw or ""))
+
+
+def _split_sentences(raw: str) -> List[str]:
+    return _bounded_items(part for part in _SENTENCE_SPLIT_RE.split(raw or ""))
+
+
+def _strip_leading_article(value: str) -> str:
+    return re.sub(r"^(?:a|an|the)\s+", "", value.strip(), flags=re.IGNORECASE)
+
+
+def _extract_first_match(raw_text: str, patterns: Sequence[str]) -> str:
+    for pattern in patterns:
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE | re.MULTILINE)
+        if match is None:
+            continue
+        value = _clean_text(match.group(1), limit=160)
+        if value:
+            return value
+    return ""
+
+
+def _extract_items_after_markers(raw_text: str, markers: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for marker in markers:
+        pattern = rf"{marker}\s*[:\-]?\s*([^\n.]+)"
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        out.extend(_split_items_loose(match.group(1)))
+    return _bounded_items(out)
+
+
+def _sentences_with_keywords(raw_text: str, keywords: Sequence[str], *, limit: int = 2) -> List[str]:
+    lowered_keywords = [item.lower() for item in keywords]
+    out: List[str] = []
+    for sentence in _split_sentences(raw_text):
+        lowered = sentence.lower()
+        if not any(keyword in lowered for keyword in lowered_keywords):
+            continue
+        out.append(sentence)
+        if len(out) >= limit:
+            break
+    return _bounded_items(out)
+
+
+def organization_context_to_authoring_text(context: OrganizationContext) -> str:
+    lines = [f"Company: {context.company_name}"]
+    if context.industry:
+        lines.append(f"Industry: {context.industry}")
+    if context.team_name:
+        lines.append(f"Team: {context.team_name}")
+    if context.environment_signals:
+        lines.append(f"Environment: {', '.join(context.environment_signals)}")
+    if context.preference_signals:
+        lines.append(f"Preferences: {', '.join(context.preference_signals)}")
+    if context.summary:
+        lines.append(f"Summary: {context.summary}")
+    return _clean_authored_text("\n".join(lines))
+
+
+def recruiter_actor_context_to_authoring_text(context: RecruiterActorContext) -> str:
+    lines = [f"Recruiter: {context.actor_id}"]
+    if context.actor_role:
+        lines.append(f"Role: {context.actor_role}")
+    if context.hiring_focus:
+        lines.append(f"Hiring focus: {', '.join(context.hiring_focus)}")
+    if context.preference_signals:
+        lines.append(f"Preferences: {', '.join(context.preference_signals)}")
+    if context.avoid_signals:
+        lines.append(f"Avoid: {', '.join(context.avoid_signals)}")
+    if context.summary:
+        lines.append(f"Summary: {context.summary}")
+    return _clean_authored_text("\n".join(lines))
+
+
+def job_context_to_authoring_text(context: JobContext) -> str:
+    lines = [f"Role: {context.title}"]
+    if context.hard_requirements:
+        lines.append(f"Must have: {', '.join(context.hard_requirements)}")
+    if context.preferred_requirements:
+        lines.append(f"Preferred: {', '.join(context.preferred_requirements)}")
+    if context.success_signals:
+        lines.append(f"Success: {', '.join(context.success_signals)}")
+    if context.responsibilities:
+        lines.append(f"Responsibilities: {', '.join(context.responsibilities)}")
+    if context.summary:
+        lines.append(f"Summary: {context.summary}")
+    return _clean_authored_text("\n".join(lines))
+
+
+def recruiter_answers_to_job_authoring_text(
+    *,
+    role_title: str,
+    must_haves_answer: str,
+    preferred_answer: str,
+    success_answer: str,
+    responsibilities_answer: str,
+) -> str:
+    parts = [f"We are hiring for {role_title.strip()}."]
+    if must_haves_answer.strip():
+        parts.append(f"Must-have signals include {must_haves_answer.strip()}.")
+    if preferred_answer.strip():
+        parts.append(f"Preferred signals include {preferred_answer.strip()}.")
+    if success_answer.strip():
+        parts.append(f"Success in the role means {success_answer.strip()}.")
+    if responsibilities_answer.strip():
+        parts.append(f"Responsibilities include {responsibilities_answer.strip()}.")
+    return _clean_authored_text("\n".join(parts))
+
+
 def _job_context_has_required_signals(job: JobContext) -> bool:
     return bool(job.title.strip()) and bool(
         job.hard_requirements or job.preferred_requirements or job.success_signals or job.responsibilities
@@ -71,12 +191,135 @@ def _recruiter_actor_context_has_required_signals(recruiter: RecruiterActorConte
     )
 
 
-def _materialize_derived_criteria(
-    context: ScoringContext,
+def normalize_organization_context_from_text(
+    raw_text: str,
+    *,
+    source_refs: Optional[Sequence[str]] = None,
+) -> OrganizationContext:
+    authored = _clean_authored_text(raw_text)
+    if not authored:
+        raise ValueError("organization_context text must be non-empty")
+    company_name = _extract_first_match(
+        authored,
+        (
+            r"company\s*:\s*([^\n.]+)",
+            r"organization\s*:\s*([^\n.]+)",
+            r"^\s*([A-Z][A-Za-z0-9&' /-]{1,80}?)\s+(?:is|runs|operates|builds)\b",
+        ),
+    )
+    if not company_name:
+        raise ValueError("organization_context prose must identify a company_name")
+    industry = _extract_first_match(
+        authored,
+        (
+            r"industry\s*:\s*([^\n.]+)",
+            r"\b(recruitment|saas|fintech|healthcare|ecommerce|education|consulting)\b",
+        ),
+    )
+    team_name = _extract_first_match(
+        authored,
+        (
+            r"team\s*:\s*([^\n.]+)",
+            r"([A-Z][A-Za-z0-9&' /-]{1,80} team)\b",
+        ),
+    ).removesuffix(" team").strip()
+    environment_signals = _extract_items_after_markers(
+        authored,
+        (
+            "environment",
+            "operating environment",
+            "pace",
+            "workflow",
+            "team works in",
+        ),
+    ) or _sentences_with_keywords(
+        authored,
+        ("environment", "pace", "workflow", "operations", "coordination", "cross-functional"),
+    )
+    preference_signals = _extract_items_after_markers(
+        authored,
+        ("values", "value", "prefers", "prefer", "looks for", "cares about", "care about"),
+    ) or _sentences_with_keywords(
+        authored,
+        ("values", "prefer", "looks for", "care", "communication", "follow-through"),
+    )
+    return OrganizationContext(
+        company_name=company_name,
+        industry=industry,
+        team_name=team_name,
+        environment_signals=environment_signals,
+        preference_signals=preference_signals,
+        summary=_clean_text(authored, limit=260),
+        source_refs=_bounded_items(source_refs or ()),
+    )
+
+
+def normalize_recruiter_actor_context_from_text(
+    raw_text: str,
+    *,
+    source_refs: Optional[Sequence[str]] = None,
+) -> RecruiterActorContext:
+    authored = _clean_authored_text(raw_text)
+    if not authored:
+        raise ValueError("recruiter_actor_context text must be non-empty")
+    actor_id = _extract_first_match(
+        authored,
+        (
+            r"recruiter\s*:\s*([^\n.]+)",
+            r"actor\s*:\s*([^\n.]+)",
+            r"^\s*([A-Z][A-Za-z0-9&' /-]{1,80}?)\s+is\b",
+        ),
+    )
+    actor_id = re.sub(r"^recruiter\s+", "", actor_id, flags=re.IGNORECASE).strip()
+    if not actor_id:
+        raise ValueError("recruiter_actor_context prose must identify an actor_id")
+    actor_role = _extract_first_match(
+        authored,
+        (
+            r"role\s*:\s*([^\n.]+)",
+            r"\bis\s+(?:the\s+)?([a-z][a-z0-9 /-]{2,60}?)(?:[.,]|\s+who\b|\s+focused\b|\s+with\b)",
+        ),
+    )
+    hiring_focus = _extract_items_after_markers(
+        authored,
+        ("hiring focus", "focused on", "focuses on", "focus", "cares most about"),
+    ) or _sentences_with_keywords(
+        authored,
+        ("focus", "hiring", "execution", "delivery"),
+    )
+    preference_signals = _extract_items_after_markers(
+        authored,
+        ("values", "prefers", "preference", "looks for", "wants"),
+    ) or _sentences_with_keywords(
+        authored,
+        ("values", "prefers", "looks for", "ownership", "communication"),
+    )
+    avoid_signals = _extract_items_after_markers(
+        authored,
+        ("avoid", "avoids", "dislikes", "should not", "watch out for"),
+    )
+    return RecruiterActorContext(
+        actor_id=actor_id,
+        actor_role=actor_role,
+        hiring_focus=hiring_focus,
+        preference_signals=preference_signals,
+        avoid_signals=avoid_signals,
+        summary=_clean_text(authored, limit=260),
+        source_refs=_bounded_items(source_refs or ()),
+    )
+
+
+def _validate_materialized_payload(
+    *,
+    organization_context: Optional[OrganizationContext],
+    recruiter_actor_context: Optional[RecruiterActorContext],
+    job_context: Optional[JobContext],
+    derived_l2_criteria: Sequence[str],
+    derived_l3_criteria: Sequence[str],
 ) -> tuple[List[str], List[str]]:
-    org = context.organization_context
-    recruiter = context.recruiter_actor_context
-    job = context.job_context
+    org = organization_context
+    recruiter = recruiter_actor_context
+    job = job_context
     if org is None or not _organization_context_has_required_signals(org):
         raise ValueError(
             "organization_context must include non-empty company_name plus bounded "
@@ -91,12 +334,12 @@ def _materialize_derived_criteria(
         raise ValueError(
             "job_context must include title plus bounded role signals before ready"
         )
-    l2 = derive_l2_labels(job, org)
-    l3 = derive_l3_labels(org, recruiter)
+    l2 = _bounded_items(derived_l2_criteria)[:3]
+    l3 = _bounded_items(derived_l3_criteria)[:3]
     if not l2:
-        raise ValueError("deterministic L2 derivation must yield non-empty criteria before ready")
+        raise ValueError("materialized L2 criteria must be non-empty before ready")
     if not l3:
-        raise ValueError("deterministic L3 derivation must yield non-empty criteria before ready")
+        raise ValueError("materialized L3 criteria must be non-empty before ready")
     return l2, l3
 
 
@@ -104,19 +347,59 @@ def scoring_context_is_ready(context: ScoringContext) -> bool:
     if context.status != ScoringContextStatus.READY:
         return False
     try:
-        l2, l3 = _materialize_derived_criteria(context)
+        l2, l3 = _validate_materialized_payload(
+            organization_context=context.organization_context,
+            recruiter_actor_context=context.recruiter_actor_context,
+            job_context=context.job_context,
+            derived_l2_criteria=context.derived_l2_criteria,
+            derived_l3_criteria=context.derived_l3_criteria,
+        )
     except ValueError:
         return False
     return list(context.derived_l2_criteria) == list(l2) and list(context.derived_l3_criteria) == list(l3)
 
 
-def refresh_scoring_context(existing: Optional[ScoringContext]) -> ScoringContext:
+def refresh_scoring_context(
+    existing: Optional[ScoringContext],
+    *,
+    organization_context: Optional[OrganizationContext] = None,
+    recruiter_actor_context: Optional[RecruiterActorContext] = None,
+    job_context: Optional[JobContext] = None,
+    derived_l2_criteria: Optional[Sequence[str]] = None,
+    derived_l3_criteria: Optional[Sequence[str]] = None,
+) -> ScoringContext:
     base = existing or ScoringContext()
+    next_organization = organization_context if organization_context is not None else base.organization_context
+    next_recruiter = (
+        recruiter_actor_context
+        if recruiter_actor_context is not None
+        else base.recruiter_actor_context
+    )
+    next_job = job_context if job_context is not None else base.job_context
+    next_l2 = (
+        list(derived_l2_criteria)
+        if derived_l2_criteria is not None
+        else list(base.derived_l2_criteria)
+    )
+    next_l3 = (
+        list(derived_l3_criteria)
+        if derived_l3_criteria is not None
+        else list(base.derived_l3_criteria)
+    )
     try:
-        l2, l3 = _materialize_derived_criteria(base)
+        l2, l3 = _validate_materialized_payload(
+            organization_context=next_organization,
+            recruiter_actor_context=next_recruiter,
+            job_context=next_job,
+            derived_l2_criteria=next_l2,
+            derived_l3_criteria=next_l3,
+        )
     except ValueError:
         return _copy_context(
             base,
+            organization_context=next_organization,
+            recruiter_actor_context=next_recruiter,
+            job_context=next_job,
             status=ScoringContextStatus.COLLECTING,
             updated_at=_now_utc(),
             ready_at=None,
@@ -126,6 +409,9 @@ def refresh_scoring_context(existing: Optional[ScoringContext]) -> ScoringContex
     now = _now_utc()
     return _copy_context(
         base,
+        organization_context=next_organization,
+        recruiter_actor_context=next_recruiter,
+        job_context=next_job,
         status=ScoringContextStatus.READY,
         updated_at=now,
         ready_at=now,
@@ -138,6 +424,9 @@ def refresh_scoring_context(existing: Optional[ScoringContext]) -> ScoringContex
 def update_scoring_context(
     existing: Optional[ScoringContext],
     *,
+    organization_authoring_text: Optional[str] = None,
+    recruiter_actor_authoring_text: Optional[str] = None,
+    job_authoring_text: Optional[str] = None,
     organization_context: Optional[OrganizationContext] = None,
     recruiter_actor_context: Optional[RecruiterActorContext] = None,
     job_context: Optional[JobContext] = None,
@@ -158,6 +447,21 @@ def update_scoring_context(
     return _copy_context(
         context,
         context_version=next_version,
+        organization_authoring_text=(
+            _clean_authored_text(organization_authoring_text)
+            if organization_authoring_text is not None
+            else context.organization_authoring_text
+        ),
+        recruiter_actor_authoring_text=(
+            _clean_authored_text(recruiter_actor_authoring_text)
+            if recruiter_actor_authoring_text is not None
+            else context.recruiter_actor_authoring_text
+        ),
+        job_authoring_text=(
+            _clean_authored_text(job_authoring_text)
+            if job_authoring_text is not None
+            else context.job_authoring_text
+        ),
         organization_context=organization_context if organization_context is not None else context.organization_context,
         recruiter_actor_context=(
             recruiter_actor_context
@@ -176,7 +480,8 @@ def update_scoring_context(
 
 
 def normalize_job_context_from_text(raw_text: str, *, source_refs: Optional[Sequence[str]] = None) -> JobContext:
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    authored = _clean_authored_text(raw_text)
+    lines = [line.strip() for line in authored.splitlines() if line.strip()]
     if not lines:
         raise ValueError("job_context text must be non-empty")
 
@@ -188,10 +493,10 @@ def normalize_job_context_from_text(raw_text: str, *, source_refs: Optional[Sequ
 
     for index, line in enumerate(lines):
         lowered = line.lower()
-        if lowered.startswith(("title:", "role:")):
+        if lowered.startswith(("title:", "role:", "position:")):
             title = _clean_text(line.split(":", 1)[1], limit=120)
             continue
-        if lowered.startswith(("must:", "must_have:", "requirements:", "hard_requirements:")):
+        if lowered.startswith(("must:", "must_have:", "requirements:", "hard_requirements:", "must have:")):
             hard_requirements.extend(_split_items(line.split(":", 1)[1]))
             continue
         if lowered.startswith(("prefer:", "preferred:", "nice_to_have:", "preferred_requirements:")):
@@ -204,12 +509,53 @@ def normalize_job_context_from_text(raw_text: str, *, source_refs: Optional[Sequ
             responsibilities.extend(_split_items(line.split(":", 1)[1]))
             continue
         if index == 0 and not title:
+            if lowered.startswith(("we are hiring", "hiring ", "role is", "position is")):
+                continue
             title = _clean_text(line, limit=120)
         else:
             responsibilities.append(_clean_text(line, limit=_MAX_ITEM_LEN))
 
+    if not title:
+        title = _strip_leading_article(
+            _extract_first_match(
+            authored,
+            (
+                r"(?:hiring for|hiring an|hiring a|role is|position is)\s+([^\n.]+)",
+                r"(?:we are hiring for|we need)\s+([^\n.]+)",
+            ),
+        )
+        )
+    if not hard_requirements:
+        hard_requirements.extend(
+            _extract_items_after_markers(
+                authored,
+                ("must have", "must-have signals include", "requires", "needs"),
+            )
+        )
+    if not preferred_requirements:
+        preferred_requirements.extend(
+            _extract_items_after_markers(
+                authored,
+                ("preferred", "nice to have", "bonus", "ideally"),
+            )
+        )
+    if not success_signals:
+        success_signals.extend(
+            _extract_items_after_markers(
+                authored,
+                ("success", "success means", "successful in the role means", "you will succeed by"),
+            )
+        )
+    if not responsibilities:
+        responsibilities.extend(
+            _extract_items_after_markers(
+                authored,
+                ("responsibilities include", "you will", "responsibility"),
+            )
+        )
+
     job = JobContext(
-        title=title or "Untitled role",
+        title=_strip_leading_article(title) or "Untitled role",
         summary=_clean_text(" ".join(lines), limit=260),
         responsibilities=_bounded_items(responsibilities),
         hard_requirements=_bounded_items(hard_requirements or responsibilities[:3]),

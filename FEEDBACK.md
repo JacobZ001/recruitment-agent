@@ -1,4 +1,4 @@
-# FEEDBACK (Round R-004.1)
+# FEEDBACK (Round R-005)
 
 ## Execution Status
 
@@ -7,194 +7,357 @@
 
 ## Plan Step Mapping
 
-- Step 1: done - Hardened `scoring_context.ready` so refresh now requires successful deterministic L2/L3 label materialization, not just object presence. Added persisted `derived_l2_criteria` / `derived_l3_criteria` on `ScoringContext`.
-- Step 2: done - Preserved `409 + scoring_context_not_ready` for `cv_submitted` and added stricter readiness tests covering contexts that remain `collecting` because derivation inputs are insufficient.
-- Step 3: done - Removed internal workflow events from the public `/events` allowlist. Public recruiter ingress is now bounded to `cv_submitted` plus governance events and `candidate_rejected`.
-- Step 4: done - Made deep-scoring ingress fail closed the same way as light scoring: `deep_scoring_completed` now requires an active ready `scoring_context` and always carries the validated context into the payload when accepted.
-- Step 5: done - Removed the deprecated combined parse+score compatibility path (`skills/llm/cv_llm_parse_and_score.py`), deleted its dedicated test, removed stub-provider fallback logic for it, and removed the inspection alias that treated it as canonical.
-- Step 6: done - Updated `docs/architecture/tech_debt.md` to reflect the now-tight public ingress, reaffirm the single-active-context limitation, and explicitly keep fake/deferred deep cognition open.
-- Step 7: verified - Major/minor naming practice and mandatory full-file `tech_debt.md` planning sweep were already present in `AGENTS.md` at execution start as part of the approved planning artifacts; no additional Builder-side doc mutation was required.
-- Step 8: done - Kept documentation semantics aligned with `R004` as the parent major capability round and `R004.1` as a corrective minor hardening round; no new capability scope was added.
+- Step 1: done - Added prose-first authoring contract for organization, recruiter, and job context. `ScoringContext` now persists authored prose alongside normalized typed context and derived criteria.
+- Step 2: done - Added bounded LLM materialization skill `recruitment.scoring_context.materialize_from_prose` that converts prose into typed canonical context plus candidate `derived_l2_criteria` / `derived_l3_criteria`.
+- Step 3: done - Preserved typed canonical `OrganizationContext`, `RecruiterActorContext`, and `JobContext` as the control-plane contract; internal typed authoring helpers now synthesize authoring prose so they still flow through the same refresh materialization path.
+- Step 4: done - Kept `refresh` as the only materialization gate: it now normalizes stored prose into typed context, persists canonical derived criteria, and establishes `ready`.
+- Step 5: done - Updated downstream light-scoring to consume persisted `ScoringContext.derived_l2_criteria` / `derived_l3_criteria` instead of locally re-deriving labels from context.
+- Step 6: done - Updated API response shape and persistence behavior so authored prose, normalized typed context, and derived criteria are all inspectable and reload correctly in both in-memory and SQLite modes.
+- Step 7: done - Added focused tests for prose authoring acceptance, bounded normalization output, refresh semantics, persistence, and score-time consumption of canonical persisted criteria.
 
 ## Full File Change List
 
-- M `docs/architecture/tech_debt.md` - Updated debt entries for public CV ingress posture and fake deep scoring maturity.
-- M `integrations/api/schemas_http.py` - Tightened public `/events` description and exposed derived scoring-context criteria in the response model.
-- M `modules/recruitment/policies.py` - Removed internal workflow events from the public ingress allowlist.
-- M `modules/recruitment/scoring_context_service.py` - Added stricter readiness validation, deterministic criteria materialization, and removed weak fallback label generation.
-- M `modules/recruitment/use_cases.py` - Enforced symmetric ready-context gating for light/deep scoring and provisioned a deterministic ready context for internal demo execution.
-- M `runtime/inspection/decision_evidence.py` - Removed legacy combined-skill inspection handling.
-- M `schemas/state_schema.py` - Added persisted `derived_l2_criteria` / `derived_l3_criteria` to `ScoringContext`.
-- D `skills/llm/cv_llm_parse_and_score.py` - Deleted deprecated combined parse+score compatibility skill.
-- M `skills/llm/llm_provider.py` - Removed legacy combined-output stub fallback; stub now supports only the canonical parse-profile or layered-score shapes.
-- M `tests/api/test_candidate_actions.py` - Switched helper setup away from public internal events and aligned candidate-action tests with ready-context semantics.
-- M `tests/api/test_candidate_list.py` - Stopped relying on removed public internal ingress events.
-- M `tests/api/test_cv_ingest.py` - Added stricter `409` coverage for weak/collecting contexts.
-- M `tests/api/test_cv_pdf_ingest.py` - Added stricter `409` coverage for weak/collecting contexts on PDF ingress.
-- M `tests/api/test_scoring_context_routes.py` - Added refresh failure coverage for insufficient derivation inputs and asserted materialized derived criteria on ready contexts.
-- M `tests/api/test_vertical_slice_api.py` - Moved public ingress tests to canonical `cv_submitted` and added explicit rejection coverage for removed internal events.
-- M `tests/modules/test_multi_candidate_registry.py` - Removed dependence on public internal event exposure.
-- M `tests/modules/test_scoring_context.py` - Added ready materialization assertions and deep-scoring fail-closed coverage.
-- M `tests/persistence/test_sqlite_cv_extensions.py` - Brought SQLite setup into compliance with stricter ready requirements.
-- D `tests/skills/test_cv_parse_and_score_skill.py` - Deleted deprecated combined-skill test.
-- M `tests/skills/test_llm_provider.py` - Updated stub-provider expectations to the canonical profile-only path.
+- M `docs/architecture/tech_debt.md` - Updated `TD-SKILLS-001`, `TD-PERSISTENCE-008`, and `TD-PERSISTENCE-009` to reflect prose-first authoring and persisted canonical criteria consumption.
+- M `integrations/api/app.py` - Switched public organization/recruiter authoring routes to prose-first use cases.
+- M `integrations/api/schemas_http.py` - Changed organization/recruiter authoring request bodies to `raw_text` + `source_ref` and exposed authored prose fields in `ScoringContextResponse`.
+- M `modules/recruitment/__init__.py` - Exported new prose-first authoring use cases.
+- M `modules/recruitment/scoring_context_service.py` - Added authored-prose helpers, prose normalization helpers, synthesized prose renderers, materialized-payload validation, and freeform job parsing improvements.
+- M `modules/recruitment/use_cases.py` - Added prose authoring use cases, refresh-time LLM materialization path, optional injected materializer for tests, and typed-authoring synthesis into authored prose.
+- M `schemas/state_schema.py` - Added `organization_authoring_text`, `recruiter_actor_authoring_text`, and `job_authoring_text` to `ScoringContext`.
+- M `skills/llm/cv_llm_score_candidate.py` - Switched score-time L2/L3 inputs to persisted derived criteria only.
+- A `skills/llm/scoring_context_materialize_from_prose.py` - New bounded LLM skill for prose normalization and criteria materialization.
+- M `skills/llm/llm_provider.py` - Added stub-provider support for scoring-context prose materialization.
+- M `tests/api/test_cv_ingest.py` - Updated weak-context setup to prose-first public authoring payloads.
+- M `tests/api/test_cv_pdf_ingest.py` - Updated weak-context setup to prose-first public authoring payloads.
+- M `tests/api/test_scoring_context_routes.py` - Reworked route coverage for prose-first authoring and refresh-time normalization/materialization.
+- M `tests/conftest.py` - Updated ready-context fixture to use prose-first authoring and explicit stub materializer injection.
+- M `tests/modules/test_scoring_context.py` - Added prose authoring materialization coverage and authored-text assertions.
+- M `tests/persistence/test_sqlite_cv_extensions.py` - Added persistence assertions for authored prose and derived criteria.
+- M `tests/skills/test_llm_provider.py` - Added stub coverage for scoring-context materialization payload shape.
+- A `tests/skills/test_cv_llm_score_candidate.py` - Added direct proof that score-time uses persisted derived criteria.
+- A `tests/skills/test_scoring_context_materialize_skill.py` - Added normalization/materialization skill output-shape coverage.
 
-## Exact Ready Rule Before / After
+## Exact Authoring Inputs Added / Changed
 
-### Before `R-004.1`
+### Public API authoring inputs
 
-- `refresh_active_scoring_context(...)` treated readiness as:
-  1. `organization_context` exists.
-  2. `recruiter_actor_context` exists.
-  3. `job_context` exists and has `title` plus at least one bounded role signal.
-- `derive_l2_labels(...)` and `derive_l3_labels(...)` had generic fallback labels, so a context could become `ready` even if the recruiter/organization signals needed for real L2/L3 derivation were effectively missing.
-- `ready` did not persist proof that deterministic criteria derivation had already succeeded.
+- `POST /scoring-context/organization`
+  - before: structured typed organization fields
+  - after:
+    ```json
+    {
+      "raw_text": "BlueOcean is a recruitment company ...",
+      "source_ref": "optional://source"
+    }
+    ```
+- `POST /scoring-context/recruiter-actor`
+  - before: structured typed recruiter fields
+  - after:
+    ```json
+    {
+      "raw_text": "Recruiter Maya is a lead recruiter ...",
+      "source_ref": "optional://source"
+    }
+    ```
+- `POST /scoring-context/job/text`
+  - still accepts `raw_text` + `source_ref`, but semantics changed:
+    - before: deterministic normalization into typed `job_context` happened immediately
+    - after: prose is staged as authored text and normalized during `refresh`
+- `POST /scoring-context/job/recruiter-answers`
+  - retained as a compatibility/helper route
+  - now converts structured answers into prose-first authored text before refresh-time materialization
 
-### After `R-004.1`
+### Persisted authored prose fields on `ScoringContext`
 
-`scoring_context.status` becomes `ready` only when all of the following are true during explicit refresh:
+- `organization_authoring_text`
+- `recruiter_actor_authoring_text`
+- `job_authoring_text`
 
-1. `organization_context.company_name` is non-empty.
-2. `organization_context.environment_signals` is non-empty.
-3. `organization_context.preference_signals` is non-empty.
-4. `recruiter_actor_context.actor_id` is non-empty.
-5. `recruiter_actor_context` has at least one of:
-   - `preference_signals`
-   - `avoid_signals`
-6. `job_context.title` is non-empty.
-7. `job_context` has at least one bounded role signal from:
-   - `hard_requirements`
-   - `preferred_requirements`
-   - `success_signals`
-   - `responsibilities`
-8. Deterministic derivation succeeds and yields non-empty outputs for both:
-   - `derived_l2_criteria`
-   - `derived_l3_criteria`
+These are now part of the canonical persisted active context and exposed by `GET /scoring-context`.
 
-Additional semantics:
+## Exact Canonical Typed Fields / Signals Retained
 
-- `derived_l2_criteria` and `derived_l3_criteria` are now persisted on `ScoringContext`.
-- Failed refresh clears derived criteria and leaves the context non-ready (`collecting`).
-- Mutating a previously-ready context still marks it `stale` immediately; ingress remains blocked until a later refresh succeeds again.
-- Fallback generic derivation labels were removed, so `ready` can no longer be satisfied by placeholder criteria.
+The following normalized typed fields remain the internal canonical control-plane semantics:
 
-## Exact `409` Not-Ready Coverage Added / Updated
+- `OrganizationContext`
+  - `company_name`
+  - `industry`
+  - `team_name`
+  - `environment_signals`
+  - `preference_signals`
+  - `summary`
+  - `source_refs`
+- `RecruiterActorContext`
+  - `actor_id`
+  - `actor_role`
+  - `hiring_focus`
+  - `preference_signals`
+  - `avoid_signals`
+  - `summary`
+  - `source_refs`
+- `JobContext`
+  - `title`
+  - `summary`
+  - `responsibilities`
+  - `hard_requirements`
+  - `preferred_requirements`
+  - `success_signals`
+  - `source_refs`
 
-- `tests/api/test_cv_ingest.py`
-  - retained baseline `cv_submitted` -> `409 + scoring_context_not_ready` coverage with no context at all
-  - added coverage for a context that has all three objects but still remains `collecting` because organization/recruiter derivation inputs are too weak
-- `tests/api/test_cv_pdf_ingest.py`
-  - retained baseline PDF CV -> `409 + scoring_context_not_ready` coverage with no context
-  - added the same weak-derivation / still-collecting coverage for PDF ingress
+How they are populated now:
+
+- public prose-first routes stage authored prose only
+- `refresh` calls the new materialization skill
+- the skill returns normalized typed context objects
+- deterministic program validation then decides whether those outputs are sufficient for `ready`
+
+Internal typed authoring use cases remain available and now synthesize prose from typed inputs so they still enter the same refresh-time materialization path.
+
+## Exact Bounded LLM Skill Inputs / Outputs
+
+### New skill
+
+- file: `skills/llm/scoring_context_materialize_from_prose.py`
+- skill name: `recruitment.scoring_context.materialize_from_prose`
+
+### Skill input payload
+
+```json
+{
+  "vertical_slice.planner_path": "scoring_context_refresh",
+  "organization_authoring_text": "...",
+  "recruiter_actor_authoring_text": "...",
+  "job_authoring_text": "..."
+}
+```
+
+### Skill output payload
+
+```json
+{
+  "organization_context": { "...typed organization fields..." },
+  "recruiter_actor_context": { "...typed recruiter fields..." },
+  "job_context": { "...typed job fields..." },
+  "derived_l2_criteria": ["..."],
+  "derived_l3_criteria": ["..."],
+  "explanation": "..."
+}
+```
+
+### Stub behavior
+
+- `StubLLMProvider` now recognizes the materialization prompt and deterministically:
+  - normalizes organization prose
+  - normalizes recruiter prose
+  - normalizes job prose
+  - derives candidate L2/L3 criteria
+
+## Exact `refresh` Semantics Before / After
+
+### Before `R-005`
+
+- public authoring primarily stored typed context objects directly
+- `refresh_active_scoring_context(...)` deterministically validated the already-stored typed context
+- `refresh` itself generated `derived_l2_criteria` / `derived_l3_criteria` from typed context using local deterministic derivation helpers
+- there was no persisted authored prose on `ScoringContext`
+
+### After `R-005`
+
+- authoring routes store prose on `ScoringContext` first
+- `refresh_active_scoring_context(...)` now:
+  1. gathers stored authored prose (or synthesized prose for internal typed authoring helpers)
+  2. calls `ScoringContextMaterializeFromProseSkill`
+  3. validates the returned typed context and derived criteria deterministically
+  4. persists:
+    - normalized `organization_context`
+    - normalized `recruiter_actor_context`
+    - normalized `job_context`
+    - canonical `derived_l2_criteria`
+    - canonical `derived_l3_criteria`
+  5. marks the context `ready`
+
+`ready` now means all of the following are simultaneously true:
+
+- authored prose exists for organization, recruiter, and job authoring
+- prose has been materialized into typed canonical context
+- materialized L2/L3 criteria were persisted on `ScoringContext`
+- the stored ready payload is sufficient for later scoring without hidden re-derivation
+
+Failed refresh:
+
+- still leaves the context non-ready
+- still keeps `derived_l2_criteria` / `derived_l3_criteria` empty on failed materialization
+- still preserves deterministic `context_version` / stale behavior from prior rounds
+
+## Exact Downstream Scoring Behavior Before / After
+
+### Before `R-005`
+
+`CvLlmScoreCandidateSkill` built required L2/L3 layers by locally calling:
+
+- `derive_l2_labels(job_context, organization_context)`
+- `derive_l3_labels(organization_context, recruiter_actor_context)`
+
+That meant score-time still had a hidden second source of truth for criteria.
+
+### After `R-005`
+
+`CvLlmScoreCandidateSkill` now reads:
+
+- `scoring_context.derived_l2_criteria`
+- `scoring_context.derived_l3_criteria`
+
+and fails validation if those persisted criteria are missing.
+
+Implication:
+
+- `refresh` materializes criteria
+- scoring consumes persisted criteria
+- score-time no longer silently rebuilds L2/L3 labels from context
+
+## Exact Persistence Changes
+
+- `ScoringContext` JSON persistence now includes:
+  - `organization_authoring_text`
+  - `recruiter_actor_authoring_text`
+  - `job_authoring_text`
+  - normalized typed context objects
+  - persisted `derived_l2_criteria`
+  - persisted `derived_l3_criteria`
+- `InMemoryScoringContextStore`
+  - no structural code changes required beyond schema-copy behavior
+  - now retains authored prose and derived criteria as part of the stored model
+- `SQLiteScoringContextStore`
+  - no table migration was needed because the store already persists the full context as JSON
+  - reload tests now confirm authored prose and derived criteria survive round-trip
+
+Single active-context scope remains unchanged.
+
+## Exact Tests Added / Updated
+
+### Added
+
+- `tests/skills/test_scoring_context_materialize_skill.py`
+  - validates bounded materialization skill output shape from prose
+- `tests/skills/test_cv_llm_score_candidate.py`
+  - proves score-time uses persisted derived criteria, not local re-derivation
+
+### Updated
+
 - `tests/api/test_scoring_context_routes.py`
-  - added explicit `POST /scoring-context/refresh` failure coverage (`422 + invalid_scoring_context`) when derivation prerequisites are insufficient
+  - prose-first route acceptance
+  - refresh-time normalization/materialization
+  - inspectable authoring text
+  - weak-context refresh failure
+- `tests/conftest.py`
+  - ready-context fixture now uses prose-first authoring and explicit stub materializer injection
 - `tests/modules/test_scoring_context.py`
-  - added module-level assertions that failed refresh leaves `derived_l2_criteria` / `derived_l3_criteria` empty and the context non-ready
+  - prose authoring materialization path
+  - authored-text assertions
+- `tests/persistence/test_sqlite_cv_extensions.py`
+  - authored prose / derived criteria persistence on reload
+- `tests/skills/test_llm_provider.py`
+  - stub-provider materialization payload support
+- `tests/api/test_cv_ingest.py`
+  - weak-context public setup aligned to prose-first contract
+- `tests/api/test_cv_pdf_ingest.py`
+  - weak-context public setup aligned to prose-first contract
 
-## Exact Public Ingress Event Types Removed / Retained
-
-### Removed from public `/events`
-
-- `cv_uploaded`
-- `cv_parsed`
-- `hard_filter_passed`
-- `light_scoring_completed`
-- `questionnaire_sent`
-- `questionnaire_completed`
-- `deep_scoring_completed`
-
-### Retained on public `/events`
-
-- `cv_submitted`
-  - canonical recruiter-facing CV ingress
-- governance event types from `GOVERNANCE_EVENT_TYPES`
-  - recruiter/operator governance actions remain valid public write operations
-- `candidate_rejected`
-  - preserved because it is not part of the internal workflow-event loophole targeted by this round
-
-### Internal paths preserved
-
-- `publish_recruitment_event(...)` still supports internal workflow events for harness/runtime progression.
-- `run_primary_demo_sequence(...)` now ensures a deterministic ready demo `scoring_context` before internal demo progression, so demo coverage still works without re-opening the public ingress loophole.
-
-## Exact Deep-Scoring Gating Before / After
-
-### Before `R-004.1`
-
-- `cv_submitted` required a ready active `scoring_context`.
-- `deep_scoring_completed` did **not** require one.
-- If an active ready context existed, it was injected opportunistically.
-- If no valid context existed, deep scoring could still be published, which left deep context-version semantics dependent on implicit fallback / missing-context behavior.
-
-### After `R-004.1`
-
-- `publish_ingress_event(...)` now calls `_require_ready_scoring_context(...)` for both:
-  - `cv_submitted`
-  - `deep_scoring_completed`
-- Both event types now fail closed with `ScoringContextNotReadyError` when the active context is missing, `collecting`, or `stale`.
-- When accepted, both event types receive the validated serialized `scoring_context` in the merged payload.
-- Demo/internal sequence compatibility is preserved by provisioning a deterministic ready context before demo progression, rather than by keeping deep scoring permissive.
-
-## Exact Deleted Legacy Compatibility Paths
-
-- Deleted file: `skills/llm/cv_llm_parse_and_score.py`
-- Deleted test: `tests/skills/test_cv_parse_and_score_skill.py`
-- Removed stub-provider fallback logic in `skills/llm/llm_provider.py` that generated the old combined `profile + criteria + explanation` shape as the default compatibility path
-- Removed inspection special-casing in `runtime/inspection/decision_evidence.py` that still treated `recruitment.vertical_slice.cv_parse_and_score` as a live canonical scoring skill
-
-## Technical Debt Review / Updates
+## Technical Debt Updates
 
 Full-file `docs/architecture/tech_debt.md` review was already completed in planning (`Last full registry sweep: 2026-05-26`). Builder executed only the debt actions frozen into `PLAN.md`.
 
-Reviewed / updated items:
+Updated entries:
 
-- `TD-PERSISTENCE-009` - reaffirmed OPEN
-  - single active `scoring_context` store remains the explicit known limitation
-  - no requisition-scoped or multi-context runtime expansion was introduced in this round
-- `TD-CONTRACTS-010` - updated and remains OPEN
-  - clarified that deep scoring is still intentionally deterministic/fake
-  - clarified that it now fails closed on ready-context availability
-- `TD-SKILLS-001` - updated and remains OPEN
-  - public recruiter ingress is now explicitly tightened to `cv_submitted`
-  - internal-only harness/runtime workflow events remain acceptable non-public mechanics
-  - deprecated combined parse+score compatibility path is now removed
+- `TD-SKILLS-001`
+  - clarified that scoring-context authoring is now prose-first
+  - clarified that `refresh` materializes canonical persisted criteria
+  - clarified that score-time no longer re-derives those criteria
+- `TD-PERSISTENCE-008`
+  - clarified that evaluation precedence now sits on top of canonical persisted scoring inputs rather than stage-local label derivation
+- `TD-PERSISTENCE-009`
+  - clarified that the single active context now stores richer draft state:
+    - authored prose
+    - normalized typed context
+    - persisted derived criteria
 
-No new debt items were replanned or added outside the Architect-approved `PLAN.md` scope.
+Deferred / unchanged:
 
-## Process / Governance Docs
+- no requisition-scoped context redesign
+- no deep-scoring cognition redesign
+- no broader API hardening or idempotency work
 
-- `AGENTS.md` already contained the approved governance updates at execution start:
-  - major vs minor round naming convention
-  - mandatory full-file `docs/architecture/tech_debt.md` review step during planning
-  - debt-ID based planning discipline
-- Builder verified those rules remained consistent with `PLAN.md`.
-- No additional Builder-side edit to `AGENTS.md` was required in order to satisfy the approved process scope.
+## Explicit No-Second-Source-of-Truth Confirmation
+
+- Canonical materialization point: `refresh_active_scoring_context(...)`
+- Canonical persisted criteria fields:
+  - `ScoringContext.derived_l2_criteria`
+  - `ScoringContext.derived_l3_criteria`
+- Canonical score-time consumer:
+  - `CvLlmScoreCandidateSkill`
+
+After this round, score-time no longer calls local derivation helpers to build its own L2/L3 criteria set.
+
+The remaining deterministic derivation helpers are now part of:
+
+- stub-provider materialization support
+- bounded normalization/test support
+
+not the live score-time consumption path.
 
 ## Tests and Validation
 
-- command: `python -m pytest tests/modules/test_scoring_context.py tests/api/test_scoring_context_routes.py tests/api/test_cv_ingest.py tests/api/test_cv_pdf_ingest.py tests/api/test_vertical_slice_api.py tests/api/test_candidate_list.py tests/modules/test_multi_candidate_registry.py tests/skills/test_llm_provider.py`
+- command: `python -m pytest tests/skills/test_scoring_context_materialize_skill.py tests/skills/test_cv_llm_score_candidate.py tests/skills/test_llm_provider.py tests/modules/test_scoring_context.py tests/api/test_scoring_context_routes.py tests/persistence/test_sqlite_cv_extensions.py -q`
   - result: pass
-  - notes: `51 passed, 1 skipped`
-- command: `python -m pytest tests/api/test_candidate_actions.py tests/persistence/test_sqlite_cv_extensions.py -q`
+  - notes: `23 passed`
+- command: `python -m pytest tests/api/test_cv_ingest.py tests/api/test_cv_pdf_ingest.py -q`
   - result: pass
-  - notes: `7 passed`
+  - notes: `10 passed, 1 skipped`
 - command: `python -m pytest -q`
   - result: pass
-  - notes: `164 passed, 2 skipped, 11 warnings`
+  - notes: `168 passed, 2 skipped, 13 warnings`
 - command: `ReadLints` on changed files
   - result: pass
   - notes: no linter errors found
 
-## Deviations, Risks, and Follow-Up
+## Deviations, Risks, and Explicit Confirmations
 
-- Deviation from `PLAN.md`:
-  - none in scope or architecture posture
-- Explicit confirmations:
+- deviation from `PLAN.md`:
+  - none in capability scope
+- explicit confirmations:
+  - no hidden second source of truth for L2/L3 criteria remains on the score-time path
   - debt handling remained Architect-planned and PM-approved; Builder did not perform execution-time debt replanning
-  - no new capability scope was introduced beyond `R-004`
-- Remaining open risks:
-  - single active `scoring_context` remains a global runtime singleton
+  - no out-of-scope capability work was added to `R-005`
+- remaining risks:
+  - single active `scoring_context` is still a runtime singleton, not requisition-scoped
+  - refresh-time materialization now depends on bounded LLM/provider availability
   - deep scoring remains deterministic/fake rather than real bounded cognition
-  - `candidate_rejected` remains publicly writable and was intentionally left outside this round's internal-workflow-event removal list
-  - provider/runtime scoring failures still collapse to coarse `scoring_failed` behavior
+  - provider/config/runtime failures in scoring/materialization still collapse to coarse `scoring_failed` behavior
+
+## Architect Post-Execution Review
+
+### Roadmap Reconciliation
+
+- no `docs/architecture/ROADMAP.md` change was required during closeout
+- `R-005` delivered the planned prose-first `scoring_context` authoring slice and can advance without reopening the selected roadmap item in-place
+
+### Debt Review Addendum
+
+- newly identified / confirmed during Architect review:
+  - `TD-CONTRACTS-015`
+    - public prose-first authoring accepts `source_ref`, but refresh-time materialization does not yet preserve those recruiter-authored refs on the resulting nested typed contexts
+    - current provenance is only partially retained via aggregated `ScoringContext.source_refs` plus normalized component refs
+- deferred by closeout decision:
+  - `TD-CONTRACTS-015` hardening is deferred to a later round and is not treated as a blocker for closing `R-005`
+
+## Lightweight Round Closeout (Architect / PM)
+
+- proposed routing outcome: `advance-major`
+- PM confirmed routing: `advance-major`
+- major-round snapshot needed: `yes`
+- closeout rationale: `R-005` achieved the planned major capability cutover to prose-first `scoring_context` authoring, refresh-owned materialization, and canonical persisted L2/L3 criteria consumption. The remaining `source_refs` provenance gap is real but bounded, has been recorded under `TD-CONTRACTS-015`, and does not justify holding the round open or forcing a corrective minor round.
+
+## Suggested Next-Round Focus
+
+- open the next major round from the roadmap queue; keep `source_refs` provenance hardening deferred unless auditability or evidence-tooling requirements make it urgent
 

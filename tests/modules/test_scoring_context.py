@@ -11,7 +11,9 @@ from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment.use_cases import (
     author_job_context_from_recruiter_answers,
     author_organization_context,
+    author_organization_context_from_text,
     author_recruiter_actor_context,
+    author_recruiter_actor_context_from_text,
     get_active_scoring_context,
     publish_recruitment_event,
     refresh_active_scoring_context,
@@ -40,6 +42,7 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
     )
     assert first.status.value == "collecting"
     assert first.context_version == 1
+    assert first.organization_authoring_text
 
     second = author_recruiter_actor_context(
         rt,
@@ -51,6 +54,7 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
     )
     assert second.status.value == "collecting"
     assert second.context_version == 2
+    assert second.recruiter_actor_authoring_text
 
     third = author_job_context_from_recruiter_answers(
         rt,
@@ -62,6 +66,7 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
     )
     assert third.status.value == "collecting"
     assert third.context_version == 3
+    assert third.job_authoring_text
 
     ready = refresh_active_scoring_context(rt)
     assert ready.status.value == "ready"
@@ -133,6 +138,45 @@ def test_recruiter_answers_normalization_requires_role_title() -> None:
         )
 
 
+def test_prose_authoring_materializes_on_refresh() -> None:
+    rt = VerticalSliceApiRuntime()
+    author_organization_context_from_text(
+        rt,
+        (
+            "BlueOcean is a recruitment company. The Talent Ops team operates in a fast-moving "
+            "workflow. The organization values clear communication and structured follow-through."
+        ),
+    )
+    author_recruiter_actor_context_from_text(
+        rt,
+        (
+            "Recruiter prose-recruiter is a lead recruiter focused on operator-ready execution. "
+            "The recruiter values stakeholder communication and ownership, and avoids unclear updates."
+        ),
+    )
+    author_job_context_from_recruiter_answers(
+        rt,
+        role_title="Operations Recruiter",
+        must_haves_answer="stakeholder communication\nprocess ownership",
+        preferred_answer="ATS familiarity",
+        success_answer="keep candidate flow organized",
+        responsibilities_answer="coordinate interviews\nsurface blockers early",
+    )
+
+    current = get_active_scoring_context(rt)
+    assert current is not None
+    assert current.organization_context is None
+    assert current.recruiter_actor_context is None
+    assert current.job_context is None
+
+    ready = refresh_active_scoring_context(rt)
+    assert ready.organization_context is not None
+    assert ready.recruiter_actor_context is not None
+    assert ready.job_context is not None
+    assert ready.derived_l2_criteria
+    assert ready.derived_l3_criteria
+
+
 def test_refresh_requires_non_empty_derived_l2_and_l3_signals() -> None:
     rt = VerticalSliceApiRuntime()
     author_organization_context(
@@ -160,7 +204,7 @@ def test_refresh_requires_non_empty_derived_l2_and_l3_signals() -> None:
         responsibilities_answer="coordinate interviews",
     )
 
-    with pytest.raises(InvalidScoringContextError, match="deterministic L2/L3 criteria derivation"):
+    with pytest.raises(InvalidScoringContextError, match="normalized into typed context"):
         refresh_active_scoring_context(rt)
 
     current = get_active_scoring_context(rt)

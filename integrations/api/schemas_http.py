@@ -74,23 +74,13 @@ class CandidatePdfIngressBody(BaseModel):
 
 
 class OrganizationContextBody(BaseModel):
-    company_name: str = Field(..., min_length=1)
-    industry: str = Field(default="")
-    team_name: str = Field(default="")
-    environment_signals: List[str] = Field(default_factory=list)
-    preference_signals: List[str] = Field(default_factory=list)
-    summary: str = Field(default="")
-    source_refs: List[str] = Field(default_factory=list)
+    raw_text: str = Field(..., min_length=1)
+    source_ref: Optional[str] = Field(default=None)
 
 
 class RecruiterActorContextBody(BaseModel):
-    actor_id: str = Field(..., min_length=1)
-    actor_role: str = Field(default="")
-    hiring_focus: List[str] = Field(default_factory=list)
-    preference_signals: List[str] = Field(default_factory=list)
-    avoid_signals: List[str] = Field(default_factory=list)
-    summary: str = Field(default="")
-    source_refs: List[str] = Field(default_factory=list)
+    raw_text: str = Field(..., min_length=1)
+    source_ref: Optional[str] = Field(default=None)
 
 
 class JobContextTextBody(BaseModel):
@@ -113,6 +103,9 @@ class RecruiterJobAnswersBody(BaseModel):
 class ScoringContextResponse(BaseModel):
     context_version: int
     status: str
+    organization_authoring_text: str = Field(default="")
+    recruiter_actor_authoring_text: str = Field(default="")
+    job_authoring_text: str = Field(default="")
     organization_context: Optional[Dict[str, Any]] = None
     recruiter_actor_context: Optional[Dict[str, Any]] = None
     job_context: Optional[Dict[str, Any]] = None

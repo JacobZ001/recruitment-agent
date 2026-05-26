@@ -137,17 +137,13 @@ def test_pdf_cv_ingest_rejects_collecting_context_with_weak_derivation_signals(
     client.post(
         "/scoring-context/organization",
         json={
-            "company_name": "BlueOcean",
-            "environment_signals": ["fast-moving operations"],
-            "preference_signals": [],
+            "raw_text": "BlueOcean is a recruitment company with a fast-moving operations environment.",
         },
     )
     client.post(
         "/scoring-context/recruiter-actor",
         json={
-            "actor_id": "route-recruiter",
-            "preference_signals": [],
-            "avoid_signals": [],
+            "raw_text": "Recruiter route-recruiter is a lead recruiter.",
         },
     )
     client.post(

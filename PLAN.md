@@ -1,148 +1,163 @@
-# PLAN (Round R-004.1)
+# PLAN (Round R-005)
 
 ## Round Type
 
-- Type: **Small round** (stabilization within parent capability round)
-- Parent capability round: `R-004`
-- Naming practice (new governance rule):
-  - **Major rounds** (`R003`, `R004`, ...) add scope/capabilities.
-  - **Minor rounds** (`R004.1`, `R004.2`, ...) refine/fix within an existing major round without adding new capabilities.
+- Type: **Major round** (new capability round)
+- Naming practice (governance rule):
+  - **Major rounds** (`R003`, `R004`, `R005`, ...) add scope/capabilities.
+  - **Minor rounds** (`R004.1`, `R004.2`, ...) refine/fix within an existing major round without adding new capability scope.
 
 ## Routing Context
 
-- Proposed routing outcome from prior closeout: `corrective-minor`
-- PM confirmed routing: `corrective-minor`
-- Major-round snapshot needed: `no`
-- Routing rationale: this round exists to harden and correct the still-open `R-004` major-round objective before any `advance-major` decision.
+- Proposed routing outcome from prior closeout: `advance-major`
+- PM confirmed routing: `advance-major`
+- Major-round snapshot needed: `yes`
+- Routing rationale: `R-004` closed after `R-004.1` corrective hardening. `R-005` opens a new major capability round for prose-first `scoring_context` authoring while preserving typed canonical context and persisted derived criteria.
+
+## Planning-Phase Roadmap Alignment (Architect-Owned)
+
+- `docs/architecture/ROADMAP.md` review is completed in planning.
+- Selected `Upcoming (Action Queue)` item for this round:
+  - **Job-aware three-layer evaluation hardening** (`TD-SKILLS-001`, `TD-PERSISTENCE-008`, `TD-PERSISTENCE-009`)
+- Capability areas advanced by this round:
+  - `Recruiter Workflow Operation`
+  - `Controlled Cognition`
+- Alignment rationale:
+  - this round continues hardening the `scoring_context` lifecycle,
+  - shifts user-facing authoring to prose-first input,
+  - preserves typed canonical context/signals,
+  - and makes persisted derived criteria the canonical downstream scoring input.
 
 ## Planning-Phase Debt Triage (Architect-Owned)
 
 - `docs/architecture/tech_debt.md` review is completed by Architect during planning (before Builder execution starts).
 - PM-approved debt handling for this round is frozen into this `PLAN.md`; Builder executes only those approved debt actions.
-- Debt handling decisions for `R-004.1`:
-  - tighten `scoring_context.ready` gating semantics where R-004 implementation remained weaker than planned;
-  - remove public API exposure of internal workflow events that bypass the canonical `cv_submitted` ingress path;
-  - make deep-scoring context gating symmetric with light-scoring gating;
-  - remove deprecated compatibility code/tests for the legacy combined `cv_parse_and_score` path;
-  - verify and keep explicit debt tracking for single active `scoring_context` and deep-scoring cognition maturity.
+- Debt IDs selected for this round:
+  - `TD-SKILLS-001` - extend canonical scorer-facing authoring around `cv + scoring_context` without reopening public ingress loopholes
+  - `TD-PERSISTENCE-008` - keep evaluation precedence semantics explicit while criteria generation/consumption becomes more canonical
+  - `TD-PERSISTENCE-009` - preserve and explicitly track the single active `scoring_context` store while the authoring shape evolves
+- Debt IDs explicitly deferred this round:
+  - `TD-ORCHESTRATOR-011` - deterministic hard-filter restoration remains a separate round
+  - `TD-API-011`, `TD-API-012` - API hardening remains a separate round
+  - `TD-CONTRACTS-009` - broader centralized scoring policy governance remains deferred beyond this bounded slice
+  - `TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004` - deep scoring continuity / questionnaire branching remain out of scope beyond compatibility-preserving alignment
+- Debt status corrections made during sweep:
+  - none planned in advance; update only if implementation reality explicitly resolves or supersedes an entry touched by this round
 
 ## Goal
 
-Harden R-004 implementation quality without expanding capabilities: tighten deterministic `scoring_context.ready` gating, formalize round naming practice, and institutionalize a per-round `tech_debt.md` review step.
+Introduce a bounded prose-first `scoring_context` authoring vertical slice: user input becomes freeform, a bounded LLM skill normalizes that input into internal typed canonical context/signals plus persisted `derived_l2_criteria` / `derived_l3_criteria`, and downstream scoring consumes those persisted criteria rather than silently re-deriving them.
 
 ## Scope In
 
-- Strengthen `scoring_context.status == ready` rule to match the stricter R-004 planning intent.
-- Require `ready` to mean deterministic L2/L3 criteria derivation has already succeeded, not just that source objects/signals are present.
-- Tighten public API ingress so internal workflow events cannot be posted through the same public surface as canonical recruiter ingress.
-- Make deep-scoring context gating symmetric with light-scoring context gating.
-- Remove the deprecated combined `cv_parse_and_score` compatibility path instead of preserving it for test convenience.
-- Keep single active `scoring_context` behavior unchanged (single-tenant/single-requisition), but ensure debt entry remains explicit and current.
-- Confirm deep scoring cognition remains intentionally fake/stub for now; ensure this is clearly tracked in technical debt as an open follow-up.
-- Add round naming practice (`major` vs `minor`) into collaboration/process docs.
-- Add a mandatory whole-file `docs/architecture/tech_debt.md` review + debt paydown opportunities step to round planning workflow.
+- Add freeform authoring support for `organization_context`, `recruiter_actor_context`, and `job_context`.
+- Allow prompts/forms to guide users toward signal-rich prose, but do **not** require explicit signal-form entry as the primary authoring UX.
+- Preserve typed canonical persistence in `ScoringContext` rather than collapsing the store to prose-only or criteria-only state.
+- Keep signal-like canonical fields as internal normalized semantics, generated from prose by a bounded LLM normalization/derivation skill.
+- Persist authored prose/source text alongside normalized typed context where it materially improves auditability and future re-derivation.
+- Keep `refresh` as the explicit materialization gate that establishes `ready` and persists canonical `derived_l2_criteria` / `derived_l3_criteria`.
+- Make downstream scoring consume persisted derived criteria as the canonical L2/L3 inputs instead of re-deriving labels at score time.
+- Add focused tests for prose normalization, refresh/readiness behavior, staleness/version semantics, persistence, and canonical criteria consumption.
 
 ## Scope Out
 
-- No new scoring layers, no new scoring capabilities.
-- No requisition-scoped/multi-context runtime changes.
-- No production-grade provider go-live validation requirement in this round.
-- No deep-scoring real cognition implementation.
+- No `Deterministic hard-filter restoration` work.
+- No recruiter-surface UX / action-surface redesign.
+- No API idempotency / ingress hardening beyond what the new authoring endpoints minimally require.
+- No requisition-scoped or multi-active `scoring_context` redesign.
+- No real deep-scoring cognition redesign; keep the current bounded fake/deferred posture.
+- No deletion of internal signal fields from canonical schemas in this round.
 
 ## Constraints
 
-- Preserve current R-004 architecture boundaries and contracts.
-- No capability expansion: this round is correction/hardening only.
-- Deterministic ownership remains in program logic (no prompt-owned workflow/control decisions).
-- Keep API fail-closed semantics for scoring ingress.
+- Deterministic ownership remains in program logic:
+  - LLM may extract/normalize/derive bounded context outputs,
+  - but LLM must **not** own `ready/stale` transitions, routing, retries, or orchestration control.
+- `ScoringContext` must remain the explicit deterministic contract used for gating, versioning, and persistence.
+- `refresh` remains the only action that can materialize canonical derived criteria and move context to `ready`.
+- Edits to authored prose or normalized canonical fields must continue to increment `context_version` and make prior evaluations stale under the current model.
+- Do not introduce a second competing source of truth for criteria:
+  - `refresh` materializes,
+  - downstream scoring consumes.
+- Preserve public recruiter ingress boundaries established in `R-004.1`.
 
 ## Execution Steps
 
-1. **Harden ready-rule semantics (deterministic)**
-   - Update scoring-context readiness checks to require not only component presence but also bounded minimum signal sufficiency aligned with R-004 intent.
-   - `ready` must mean that deterministic layer-criteria derivation has already succeeded for the active `scoring_context`.
-   - Explicitly validate:
-     - `organization_context` has required signals for intended L2/L3 derivations.
-     - `recruiter_actor_context` has required signals for L3 derivation.
-     - `job_context` remains required with bounded role signals.
-     - deterministic derivation of `l2_role_specific` and `l3_recruiter_preference` criteria succeeds and yields bounded non-empty outputs required by the current contract.
-   - Keep refresh as the explicit transition action to `ready`.
-   - For `R-004.1`, focus on enforcing the stricter ready gate and explicit successful criteria derivation/materialization semantics, without expanding this round into richer cognition-driven criteria-generation policy design.
+1. **Define the prose-first authoring contract**
+   - Introduce bounded freeform authoring inputs for organization, recruiter, and job context.
+   - Decide which authored prose is persisted directly in canonical context vs retained through explicit `source_refs` / authored-text fields.
+   - Keep user-facing authoring prose-first even when prompts/forms guide the user toward signal-rich content.
 
-2. **Lock API contract for not-ready ingress**
-   - Preserve and verify: `cv_submitted` with non-ready context returns HTTP `409` with code `scoring_context_not_ready`.
-   - Add/adjust tests for stricter ready-rule failures that should remain `collecting` (or `stale`) and therefore reject CV ingress.
+2. **Add a bounded LLM normalization / criteria-derivation path**
+   - Implement or wire a bounded LLM skill that converts authored prose into:
+     - internal typed canonical context/signals
+     - candidate `derived_l2_criteria`
+     - candidate `derived_l3_criteria`
+   - Keep outputs bounded, inspectable, and versionable.
+   - Do **not** let this skill mutate workflow state directly.
 
-3. **Close public-ingress compatibility loopholes**
-   - Remove internal workflow events from the public HTTP ingress allowlist when they are no longer canonical recruiter/operator entry points.
-   - At minimum, reassess public exposure of:
-     - `cv_uploaded`
-     - `cv_parsed`
-     - `hard_filter_passed`
-     - `light_scoring_completed`
-     - `questionnaire_sent`
-     - `questionnaire_completed`
-     - `deep_scoring_completed`
-   - Preserve harness/demo/internal execution paths as needed without keeping those event types publicly writable by default.
+3. **Preserve typed canonical context/signals as the control-plane contract**
+   - Store normalized organization/recruiter/job context in `ScoringContext`.
+   - Keep internal signal-like fields available as canonical semantics even though the user is no longer asked to author those fields directly.
+   - Do **not** remove internal signal fields in this round.
 
-4. **Make deep-scoring context gating symmetric**
-   - Ensure post-questionnaire deep scoring does not silently proceed with missing/non-ready scoring context while light scoring is gated.
-   - Preserve deterministic `context_version` semantics for `evaluation.deep`; do not allow implicit fallback to an arbitrary default version when active context is not valid for scoring.
+4. **Keep `refresh` as the explicit materialization gate**
+   - `collecting` / `stale` remain editable but non-ingress-ready.
+   - `ready` must mean:
+     - prose has been normalized into typed canonical context/signals,
+     - canonical `derived_l2_criteria` / `derived_l3_criteria` were successfully materialized and persisted,
+     - the stored ready-state payload is sufficient for later score-time consumption without hidden re-derivation.
 
-5. **Remove deprecated combined parse+score compatibility path**
-   - Delete deprecated compatibility code/tests for the old combined `cv_parse_and_score` runtime path unless a current round requirement explicitly justifies keeping a shim.
-   - Clean up related inspection/test/provider helper references so the canonical runtime path is unambiguous.
+5. **Make downstream scoring consume canonical persisted criteria**
+   - Update the scoring path so L2/L3 inputs come from persisted `derived_l2_criteria` / `derived_l3_criteria`.
+   - Remove the hidden second source of truth where score-time logic locally re-derives criteria from context.
+   - Preserve deterministic gating and context-version semantics already established in `R-004` / `R-004.1`.
 
-6. **Technical debt synchronization (mandatory in this round)**
-   - Apply only Architect-planned and PM-approved debt actions frozen in this `PLAN.md` (no execution-time debt replanning).
-   - Review the full `docs/architecture/tech_debt.md`, not only entries touched by R-004 implementation files.
-   - Ensure these are explicitly present and up to date:
-     - single active `scoring_context` (not requisition-scoped yet) remains OPEN.
-     - deep scoring cognition maturity / fake deep behavior remains OPEN and explicit.
-     - any newly confirmed R-004 compatibility loopholes that are not fixed in this round are added or updated explicitly.
-   - If any debt item was resolved in code this round, mark it resolved or update status/review date.
+6. **Align API responses and persistence**
+   - Expose the new authoring/normalized state only enough to keep it inspectable and testable.
+   - Persist the new `ScoringContext` shape consistently in both in-memory and SQLite-backed stores.
+   - Keep current single-active-context scope explicit and unchanged.
 
-7. **Institutionalize planning/process improvements**
-   - Add round naming practice guidance (major vs minor rounds) into process/governance docs.
-   - Add a required planning checklist step: each round must review `tech_debt.md` and identify:
-     - debt items to close this round (if in-scope),
-     - debt items to re-affirm as deferred (with reason).
-
-8. **Documentation consistency pass**
-   - Ensure `PLAN.md`/process docs and any touched architecture docs use the same naming and semantics:
-     - `R004` as major capability round,
-     - `R004.1` as minor hardening round,
-     - no implied capability expansion.
+7. **Test the bounded vertical slice**
+   - Add/adjust tests for:
+     - prose authoring input acceptance,
+     - bounded LLM normalization output shape,
+     - `refresh` success/failure,
+     - `ready` / `collecting` / `stale` semantics,
+     - SQLite persistence of new fields,
+     - downstream scoring consuming canonical persisted criteria rather than local re-derivation.
 
 ## Acceptance Criteria
 
-- [ ] `scoring_context.ready` transition enforces stricter deterministic signal-sufficiency checks (not just object presence).
-- [ ] `scoring_context.ready` means deterministic L2/L3 criteria derivation has already succeeded for the active context.
-- [ ] `cv_submitted` not-ready contract remains `409 + scoring_context_not_ready` and is covered by tests under stricter ready-rule scenarios.
-- [ ] Public HTTP ingress no longer exposes obsolete/internal workflow events that bypass the canonical `cv_submitted` path.
-- [ ] Deep-scoring context gating is symmetric with light-scoring gating, and `evaluation.deep.context_version` no longer relies on implicit fallback behavior when active context is invalid.
-- [ ] Deprecated combined `cv_parse_and_score` compatibility code/tests are removed unless explicitly justified in Builder feedback.
-- [ ] `tech_debt.md` explicitly and correctly tracks:
-  - single active scoring-context scope limitation,
-  - deep scoring cognition maturity gap (fake/deferred real skill).
-- [ ] Full-file `docs/architecture/tech_debt.md` review was performed in planning and reflected in round debt handling decisions.
-- [ ] Process docs include major/minor round naming practice.
-- [ ] Process docs include mandatory per-round `tech_debt.md` review step.
-- [ ] No new capabilities were introduced beyond R-004.
+- [ ] A user can author `organization_context`, `recruiter_actor_context`, and `job_context` through freeform inputs rather than signal-form-first input.
+- [ ] Prompts/forms may guide signal-rich prose, but the canonical user-authored surface is prose-first.
+- [ ] A bounded LLM skill normalizes prose into internal typed canonical context/signals.
+- [ ] Internal signal/context fields remain available as normalized canonical semantics; this round does not delete them.
+- [ ] `refresh` remains the only materialization gate for `derived_l2_criteria` / `derived_l3_criteria` and `ready` status.
+- [ ] `derived_l2_criteria` / `derived_l3_criteria` are persisted in `ScoringContext` and become the canonical source for downstream scoring.
+- [ ] Downstream scoring no longer silently re-derives L2/L3 labels at score time.
+- [ ] `ScoringContext` versioning, stale-marking, and ingress gating remain deterministic and explicit.
+- [ ] Persistence works in both in-memory and SQLite-backed runtime modes for the updated `ScoringContext` shape.
+- [ ] No unrelated roadmap items are pulled into `R-005` scope:
+  - no hard-filter restoration,
+  - no broad API hardening,
+  - no requisition-scoped context redesign,
+  - no deep-scoring cognition redesign.
 
 ## Required Builder Feedback
 
 Builder Agent must overwrite `FEEDBACK.md` and include:
 
 - round status (`done` / `partial` / `blocked`) and blockers
-- step-by-step mapping against the 8 execution steps above
+- step-by-step mapping against the 7 execution steps above
 - full file change list (`A` / `M` / `D`)
-- exact ready-rule before/after behavior (including signal sufficiency gates and deterministic L2/L3 criteria derivation requirements)
-- exact tests added/updated for `409 + scoring_context_not_ready` under stricter readiness checks
-- exact public ingress event types removed/retained and why
-- exact deep-scoring gating behavior before/after
-- exact deleted compatibility paths for legacy combined parse+score flow
+- exact authoring inputs added/changed for prose-first organization/recruiter/job context
+- exact canonical typed fields/signals retained internally and how they are populated from prose
+- exact bounded LLM skill inputs/outputs introduced for normalization / criteria derivation
+- exact `refresh` semantics before/after for prose normalization, criteria materialization, and `ready` gating
+- exact downstream scoring behavior before/after regarding persisted criteria vs local re-derivation
+- exact persistence changes made for `ScoringContext` in in-memory and SQLite stores
+- exact tests added/updated for normalization, `ready/stale`, persistence, and score consumption behavior
 - technical debt updates made (items reviewed, changed, deferred, or resolved)
-- process/governance docs updated for naming practice and mandatory debt review step
-- confirmation that debt handling remained Architect-planned and PM-approved (no Builder execution-time debt replanning)
-- confirmation that no new capability scope was added in `R-004.1`
+- confirmation that no hidden second source of truth for criteria remains after the round
+- confirmation that no out-of-scope capability work was added to `R-005`

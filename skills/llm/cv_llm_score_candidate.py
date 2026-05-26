@@ -37,14 +37,8 @@ from interfaces.skill_interface import (
     SkillOutputEnvelope,
     SkillInterfaceVersion,
 )
-from modules.recruitment.scoring_context_service import (
-    derive_l2_labels,
-    derive_l3_labels,
-)
 from schemas.state_schema import (
     CriterionScore,
-    OrganizationContext,
-    RecruiterActorContext,
     ScoringContext,
     ScoreLayerEvaluation,
 )
@@ -258,29 +252,37 @@ class CvLlmScoreCandidateSkill:
                 code="cv_llm_score_candidate.validation.scoring_context_invalid",
                 message=f"invalid scoring_context payload: {exc}",
             )
-        if scoring_context.organization_context is None or scoring_context.recruiter_actor_context is None:
+        if (
+            scoring_context.organization_context is None
+            or scoring_context.recruiter_actor_context is None
+            or scoring_context.job_context is None
+        ):
             return _fail(
                 self.metadata,
                 audit=audit,
                 timing=timing,
                 category=FailureCategory.VALIDATION_ERROR,
                 code="cv_llm_score_candidate.validation.scoring_context_components",
-                message="scoring_context must contain organization_context and recruiter_actor_context",
+                message=(
+                    "scoring_context must contain organization_context, recruiter_actor_context, "
+                    "and job_context"
+                ),
             )
 
         required_layers = {
             "l1_universal": list(_L1_NAMES),
-            "l2_role_specific": derive_l2_labels(
-                scoring_context.job_context,
-                scoring_context.organization_context,
-            )
-            if scoring_context.job_context is not None
-            else [],
-            "l3_recruiter_preference": derive_l3_labels(
-                scoring_context.organization_context,
-                scoring_context.recruiter_actor_context,
-            ),
+            "l2_role_specific": list(scoring_context.derived_l2_criteria),
+            "l3_recruiter_preference": list(scoring_context.derived_l3_criteria),
         }
+        if not required_layers["l2_role_specific"] or not required_layers["l3_recruiter_preference"]:
+            return _fail(
+                self.metadata,
+                audit=audit,
+                timing=timing,
+                category=FailureCategory.VALIDATION_ERROR,
+                code="cv_llm_score_candidate.validation.materialized_criteria",
+                message="scoring_context must contain persisted derived_l2_criteria and derived_l3_criteria",
+            )
 
         user_payload = {
             "cv_text": str(raw_cv).strip(),

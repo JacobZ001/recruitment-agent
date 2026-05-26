@@ -275,13 +275,14 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Revisit when**: When evidence storage / viewer MVP ships
 - **Introduced in**: 2026-05-08
 - **Last reviewed**: 2026-05-26
-- **Current decision**: Allow evidence references to remain heterogeneous while storage/provenance decisions evolve (e.g., `List[str]` in domain records; structured evidence objects in some execution contracts).
+- **Current decision**: Allow evidence references to remain heterogeneous while storage/provenance decisions evolve (e.g., `List[str]` in domain records; structured evidence objects in some execution contracts). In `R-005`, public prose-first `scoring_context` authoring also accepts `source_ref`, but refresh-time materialization does not yet preserve those recruiter-authored refs on the resulting nested typed contexts; provenance is only partially retained via aggregated `ScoringContext.source_refs` plus normalized component refs.
 - **Rationale**: The system needs evidence *referencing* immediately for auditability and explainability, but the evidence lifecycle (storage, hashing, provenance, access control) is not yet standardized. Keeping the shape flexible avoids premature coupling to a global storage model.
-- **Future impact**: Divergent evidence shapes across layers can produce brittle tooling (replay viewers, explainability UIs, audits), inconsistent provenance tracking, and ad-hoc normalization logic.
+- **Future impact**: Divergent evidence shapes across layers can produce brittle tooling (replay viewers, explainability UIs, audits), inconsistent provenance tracking, and ad-hoc normalization logic. For `scoring_context`, component-level lineage becomes lossy after materialization, which weakens source-level debugging, explanation, and future re-materialization controls.
 - **Priority**: High
 - **Recommended future direction**: Establish a single evidence reference contract usable across schemas and execution results (kind/ref/hash/created_at/provenance/extensions) and migrate gradually:
   - Permit dual representations during transition (strings + structured).
   - Centralize deterministic normalization/mapping rules in the deterministic layer (not prompts).
+  - Thread recruiter-authored `source_ref` lineage through `scoring_context` materialization so typed component `source_refs` can preserve originating evidence, not only normalized placeholder refs.
   - Validate via harness to prevent silent drift.
 
 
@@ -574,9 +575,9 @@ Summary (v2 cleanup):
 - **Revisit when**: When UI/API must show single authoritative score
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
-- **Current decision**: ``evaluation.light`` and ``evaluation.deep`` coexist. Current recruiter-facing read models use a simple deep-over-light precedence for overall score display, while still exposing both surfaces separately.
-- **Rationale**: Light and deep remain different evaluation stages, but the typed cutover makes their separation explicit instead of hiding it in flat keys.
-- **Future impact**: UI or policy may still disagree on “the” candidate score unless precedence stays documented and versioned.
+- **Current decision**: ``evaluation.light`` and ``evaluation.deep`` coexist, and recruiter-facing read models still use a simple deep-over-light precedence for overall score display while exposing both surfaces separately. Starting in `R-005`, the L2/L3 inputs consumed by scoring come from persisted `ScoringContext.derived_l2_criteria` / `derived_l3_criteria` rather than score-time re-derivation, so stage-precedence semantics remain explicit even as criteria materialization becomes more canonical.
+- **Rationale**: Light and deep remain different evaluation stages, but canonical persisted criteria keep the evaluation inputs inspectable and version-linked instead of letting each stage silently rebuild its own label set.
+- **Future impact**: UI or policy may still disagree on “the” candidate score unless precedence stays documented and versioned, especially once more than one scoring stage or criteria-materialization policy needs to be compared over time.
 - **Priority**: Low
 - **Recommended future direction**: Keep precedence explicit for display/ranking, or evolve toward versioned stage records if product semantics need stronger audit guarantees.
 
@@ -586,9 +587,9 @@ Summary (v2 cleanup):
 - **Revisit when**: When the reference runtime must support more than one concurrent requisition / job context
 - **Introduced in**: 2026-05-25
 - **Last reviewed**: 2026-05-26
-- **Current decision**: R-004 persists one canonical active `scoring_context` for the whole single-tenant runtime. Candidate snapshots store only the `context_version` used for scoring plus stale flags; the context object itself lives outside candidate workflow state.
-- **Rationale**: This keeps context canonical and versioned without introducing a premature requisition aggregate in the same round as the first job-aware scoring slice.
-- **Future impact**: Multiple simultaneous roles/jobs cannot yet carry isolated ready/stale context lifecycles or candidate-to-context binding semantics.
+- **Current decision**: The runtime still persists exactly one canonical active `scoring_context` for the whole single-tenant process. In `R-005`, that single object now stores prose-first authoring text, normalized typed context, and persisted `derived_l2_criteria` / `derived_l3_criteria`; candidate snapshots still store only the `context_version` used for scoring plus stale flags.
+- **Rationale**: This keeps prose authoring auditability, normalized control-plane semantics, and canonical scorer inputs together without introducing a premature requisition aggregate or duplicating context payloads onto candidate snapshots.
+- **Future impact**: Multiple simultaneous roles/jobs still cannot carry isolated authoring drafts, ready/stale context lifecycles, or candidate-to-context binding semantics; prose-first authoring increases the value of eventual requisition scoping because the active singleton now holds richer draft state.
 - **Priority**: High
 - **Recommended future direction**: Introduce requisition-scoped context ids and candidate-to-context binding explicitly in contracts and persistence; do not duplicate full context payloads onto every candidate snapshot as a shortcut.
 
@@ -696,9 +697,9 @@ Summary (v2 cleanup):
 - **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
-- **Current decision**: Real CV ingress supports bounded text/PDF upload, and `cv_submitted` is the canonical recruiter-facing public path gated on an active ready `scoring_context`. The canonical flow persists `cv_received`, then `cv_parsed`, then job-aware layered light scoring against `cv + scoring_context`. Internal workflow events remain available only for non-public harness/runtime paths; the deprecated combined `cv_parse_and_score` compatibility path has been removed.
-- **Rationale**: Keeps the candidate workflow event stable while making parsing, scoring, and context readiness explicit and auditable, without leaving public write surfaces that bypass the canonical recruiter ingress contract.
-- **Future impact**: Later stages can add richer artifact references or requisition-scoped context without leaking workflow control into prompts or reviving flat score keys. Internal harness paths still need discipline so tests/demo wiring do not become an accidental second public contract.
+- **Current decision**: Real CV ingress still uses bounded text/PDF upload and `cv_submitted` remains the canonical recruiter-facing public path gated on an active ready `scoring_context`. In `R-005`, recruiter-facing scoring-context authoring became prose-first: `refresh` now materializes normalized typed context plus canonical persisted `derived_l2_criteria` / `derived_l3_criteria`, and light scoring consumes those persisted criteria instead of re-deriving labels at score time. Internal workflow events remain available only for non-public harness/runtime paths.
+- **Rationale**: Keeps the candidate workflow event stable while making parsing, scoring, context authoring, and criteria materialization explicit and auditable, without leaving public write surfaces that bypass the canonical recruiter ingress contract or hidden scorer-side re-derivation.
+- **Future impact**: Later stages can add richer artifact references or requisition-scoped context without leaking workflow control into prompts or reviving flat score keys. Internal harness paths still need discipline so tests/demo wiring do not become an accidental second public contract, and future policy work may still need a clearer contract for how prose normalization evolves across versions.
 - **Priority**: Medium
 - **Recommended future direction**: Preserve the split parse/score path and keep `cv_submitted` as the only recruiter-facing public ingress for CV evaluation; if richer artifact storage or multi-step enrichment is needed, add explicit contracts around those steps instead of collapsing them back into one prompt-owned operation.
 

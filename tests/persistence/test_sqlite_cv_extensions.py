@@ -9,6 +9,7 @@ from modules.recruitment.use_cases import (
     author_job_context_from_text,
     author_organization_context,
     author_recruiter_actor_context,
+    get_active_scoring_context,
     refresh_active_scoring_context,
     submit_cv,
 )
@@ -49,6 +50,13 @@ def test_sqlite_cv_extensions_survive_reload(tmp_path) -> None:
     rt.bundle.store.close()
 
     rt2 = VerticalSliceApiRuntime(db_path=db)
+    active_context = get_active_scoring_context(rt2)
+    assert active_context is not None
+    assert active_context.organization_authoring_text
+    assert active_context.recruiter_actor_authoring_text
+    assert active_context.job_authoring_text
+    assert active_context.derived_l2_criteria
+    assert active_context.derived_l3_criteria
     got = rt2.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
     assert got.snapshot.ingress_profile is not None

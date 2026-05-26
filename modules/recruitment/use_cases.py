@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 from uuid import UUID
 
+from interfaces.skill_interface import (
+    ExecutionContext,
+    ExecutionStatus,
+    FailureCategory,
+    SkillInputEnvelope,
+)
 from interfaces.event_bus_interface import DeliveryStatus
 from runtime.in_memory_state_store import StateStoreFailureCode
 from .state_init import initial_orchestration_state
@@ -30,10 +36,12 @@ from .exceptions import (
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
 from .scoring_context_service import (
+    job_context_to_authoring_text,
     mark_evaluation_stale,
-    normalize_job_context_from_answers,
-    normalize_job_context_from_text,
+    organization_context_to_authoring_text,
     refresh_scoring_context,
+    recruiter_actor_context_to_authoring_text,
+    recruiter_answers_to_job_authoring_text,
     scoring_context_is_ready,
     update_scoring_context,
 )
@@ -45,6 +53,9 @@ from schemas.state_schema import (
     RecruiterActorContext,
     ScoringContext,
     ScoringContextStatus,
+)
+from skills.llm.scoring_context_materialize_from_prose import (
+    ScoringContextMaterializeFromProseSkill,
 )
 
 DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD: Dict[str, Any] = {
@@ -103,6 +114,90 @@ def _persist_scoring_context(runtime: IngressRuntime, context: ScoringContext) -
     return runtime.scoring_context_store.replace(context)
 
 
+def _materialization_input_text(current: Optional[str], fallback: Optional[str]) -> str:
+    text = str(current or "").strip()
+    if text:
+        return text
+    return str(fallback or "").strip()
+
+
+def _refresh_materialized_context_from_prose(
+    runtime: IngressRuntime,
+    current: Optional[ScoringContext],
+    *,
+    materializer: Optional[ScoringContextMaterializeFromProseSkill] = None,
+) -> ScoringContext:
+    base = current or ScoringContext()
+    organization_text = _materialization_input_text(
+        base.organization_authoring_text,
+        organization_context_to_authoring_text(base.organization_context)
+        if base.organization_context is not None
+        else None,
+    )
+    recruiter_text = _materialization_input_text(
+        base.recruiter_actor_authoring_text,
+        recruiter_actor_context_to_authoring_text(base.recruiter_actor_context)
+        if base.recruiter_actor_context is not None
+        else None,
+    )
+    job_text = _materialization_input_text(
+        base.job_authoring_text,
+        job_context_to_authoring_text(base.job_context) if base.job_context is not None else None,
+    )
+    if not organization_text or not recruiter_text or not job_text:
+        raise InvalidScoringContextError(
+            "scoring_context cannot become ready until organization, recruiter, and job prose "
+            "authoring inputs are all present"
+        )
+    skill = materializer or ScoringContextMaterializeFromProseSkill()
+    result = skill.execute(
+        SkillInputEnvelope(
+            payload={
+                "vertical_slice.planner_path": "scoring_context_refresh",
+                "organization_authoring_text": organization_text,
+                "recruiter_actor_authoring_text": recruiter_text,
+                "job_authoring_text": job_text,
+            }
+        ),
+        ExecutionContext(
+            run_reason="scoring_context_refresh",
+            subject_kind="scoring_context",
+            actor_id="recruitment-api",
+        ),
+    )
+    if result.status != ExecutionStatus.SUCCEEDED or result.output is None:
+        failure = result.failure
+        if failure is not None and failure.category == FailureCategory.VALIDATION_ERROR:
+            raise InvalidScoringContextError(str(failure.message))
+        raise ScoringFailedError("scoring_context_materialization_failed")
+    payload = result.output.payload or {}
+    try:
+        if hasattr(OrganizationContext, "model_validate"):
+            organization_context = OrganizationContext.model_validate(payload.get("organization_context") or {})
+            recruiter_actor_context = RecruiterActorContext.model_validate(
+                payload.get("recruiter_actor_context") or {}
+            )
+            job_context = JobContext.model_validate(payload.get("job_context") or {})
+        else:
+            organization_context = OrganizationContext.parse_obj(payload.get("organization_context") or {})
+            recruiter_actor_context = RecruiterActorContext.parse_obj(
+                payload.get("recruiter_actor_context") or {}
+            )
+            job_context = JobContext.parse_obj(payload.get("job_context") or {})
+    except Exception as exc:
+        raise InvalidScoringContextError(
+            f"invalid materialized scoring_context payload: {exc}"
+        ) from exc
+    return refresh_scoring_context(
+        base,
+        organization_context=organization_context,
+        recruiter_actor_context=recruiter_actor_context,
+        job_context=job_context,
+        derived_l2_criteria=list(payload.get("derived_l2_criteria") or []),
+        derived_l3_criteria=list(payload.get("derived_l3_criteria") or []),
+    )
+
+
 def _mark_existing_candidate_evaluations_stale(
     runtime: IngressRuntime, *, active_context_version: int
 ) -> None:
@@ -155,7 +250,12 @@ def author_organization_context(
     context: OrganizationContext,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
-    updated = update_scoring_context(current, organization_context=context, source_refs=context.source_refs)
+    updated = update_scoring_context(
+        current,
+        organization_authoring_text=organization_context_to_authoring_text(context),
+        organization_context=context,
+        source_refs=context.source_refs,
+    )
     persisted = _persist_scoring_context(runtime, updated)
     _mark_existing_candidate_evaluations_stale(
         runtime, active_context_version=persisted.context_version
@@ -170,6 +270,7 @@ def author_recruiter_actor_context(
     current = get_active_scoring_context(runtime)
     updated = update_scoring_context(
         current,
+        recruiter_actor_authoring_text=recruiter_actor_context_to_authoring_text(context),
         recruiter_actor_context=context,
         source_refs=context.source_refs,
     )
@@ -185,7 +286,56 @@ def author_job_context(
     context: JobContext,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
-    updated = update_scoring_context(current, job_context=context, source_refs=context.source_refs)
+    updated = update_scoring_context(
+        current,
+        job_authoring_text=job_context_to_authoring_text(context),
+        job_context=context,
+        source_refs=context.source_refs,
+    )
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def author_organization_context_from_text(
+    runtime: IngressRuntime,
+    raw_text: str,
+    *,
+    source_ref: Optional[str] = None,
+) -> ScoringContext:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise InvalidScoringContextError("organization_context text must be non-empty")
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(
+        current,
+        organization_authoring_text=text,
+        source_refs=[source_ref] if source_ref else None,
+    )
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def author_recruiter_actor_context_from_text(
+    runtime: IngressRuntime,
+    raw_text: str,
+    *,
+    source_ref: Optional[str] = None,
+) -> ScoringContext:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise InvalidScoringContextError("recruiter_actor_context text must be non-empty")
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(
+        current,
+        recruiter_actor_authoring_text=text,
+        source_refs=[source_ref] if source_ref else None,
+    )
     persisted = _persist_scoring_context(runtime, updated)
     _mark_existing_candidate_evaluations_stale(
         runtime, active_context_version=persisted.context_version
@@ -199,14 +349,20 @@ def author_job_context_from_text(
     *,
     source_ref: Optional[str] = None,
 ) -> ScoringContext:
-    try:
-        job = normalize_job_context_from_text(
-            raw_text,
-            source_refs=[source_ref] if source_ref else None,
-        )
-    except ValueError as exc:
-        raise InvalidScoringContextError(str(exc)) from exc
-    return author_job_context(runtime, job)
+    text = str(raw_text or "").strip()
+    if not text:
+        raise InvalidScoringContextError("job_context text must be non-empty")
+    current = get_active_scoring_context(runtime)
+    updated = update_scoring_context(
+        current,
+        job_authoring_text=text,
+        source_refs=[source_ref] if source_ref else None,
+    )
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
 
 
 def author_job_context_from_pdf(
@@ -233,28 +389,36 @@ def author_job_context_from_recruiter_answers(
     success_answer: str,
     responsibilities_answer: str,
 ) -> ScoringContext:
-    try:
-        job = normalize_job_context_from_answers(
+    if not str(role_title or "").strip():
+        raise InvalidScoringContextError("role_title must be non-empty")
+    return author_job_context_from_text(
+        runtime,
+        recruiter_answers_to_job_authoring_text(
             role_title=role_title,
             must_haves_answer=must_haves_answer,
             preferred_answer=preferred_answer,
             success_answer=success_answer,
             responsibilities_answer=responsibilities_answer,
-            source_refs=["normalized://recruiter_answers/job_context"],
-        )
-    except ValueError as exc:
-        raise InvalidScoringContextError(str(exc)) from exc
-    return author_job_context(runtime, job)
+        ),
+        source_ref="normalized://recruiter_answers/job_context",
+    )
 
 
-def refresh_active_scoring_context(runtime: IngressRuntime) -> ScoringContext:
+def refresh_active_scoring_context(
+    runtime: IngressRuntime,
+    *,
+    materializer: Optional[ScoringContextMaterializeFromProseSkill] = None,
+) -> ScoringContext:
     current = get_active_scoring_context(runtime)
-    refreshed = refresh_scoring_context(current)
+    refreshed = _refresh_materialized_context_from_prose(
+        runtime,
+        current,
+        materializer=materializer,
+    )
     if refreshed.status != ScoringContextStatus.READY:
         raise InvalidScoringContextError(
-            "scoring_context cannot become ready until organization_context, "
-            "recruiter_actor_context, and job_context contain sufficient signals and "
-            "deterministic L2/L3 criteria derivation succeeds"
+            "scoring_context cannot become ready until prose authoring is normalized into "
+            "typed context and materialized L2/L3 criteria succeed"
         )
     return _persist_scoring_context(runtime, refreshed)
 
