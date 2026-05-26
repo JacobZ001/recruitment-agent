@@ -391,6 +391,8 @@ Each round follows this sequence:
   - title format: `<type>(<scope>): <summary>`
   - choose `feat`, `fix`, `refactor`, `docs`, `test`, or another conventional type that best matches the dominant outcome of the completed major round
   - keep the title concise and outcome-oriented
+  - if a commit body is present, leave exactly one blank line after the title before starting the body
+  - write the commit body as flat bullet points rather than prose paragraphs
   - use the commit body for the major round context, such as the major round ID, capability outcome, roadmap/debt updates, and notable cutovers
 - Example title: `feat(agents): close R-005 governance refinements`
 - Example body topics:
