@@ -206,7 +206,7 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Revisit when**: When first external integration or typed-payload pilot is scheduled
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
-- **Current decision**: Fake deep scoring (``skills/deterministic/fake_deep_scoring_skill.py``) applies **deterministic workflow-stage priors**—for example, when questionnaire fields are omitted it assumes a **bounded default questionnaire component** and records a **stage prior** signal—so the vertical slice can simulate “richer post-questionnaire cognition” without wiring full questionnaire payloads into every harness case.
+- **Current decision**: Deep scoring remains intentionally **deterministic fake cognition** in ``skills/deterministic/fake_deep_scoring_skill.py``. It applies **deterministic workflow-stage priors**—for example, when questionnaire fields are omitted it assumes a **bounded default questionnaire component** and records a **stage prior** signal—and now fails closed unless a ready active `scoring_context` is available, so the slice can simulate post-questionnaire evaluation without pretending real deep cognition already exists.
 - **Rationale**: **Bounded** vertical-slice simulation: keeps execution **deterministic-first**, **explainable** (explicit flags such as ``used_questionnaire_stage_prior`` / signal codes), and **replay-stable** for the same inputs, while deferring centralized contextual policy infrastructure.
 - **Future impact**:
   - **Hidden contextual weighting drift**: priors embedded in skills can diverge from real pipeline context as graphs multiply unless policy identity is explicit in outputs.
@@ -422,7 +422,7 @@ Summary (v2 cleanup):
 
 ### TD-ORCHESTRATOR-011 Canonical hard-filter stage is not restored on recruiter ingress path
 - **Status**: OPEN
-- **Revisit when**: When the hard-filter restoration round is scheduled for the recruiter-facing workflow
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `Deterministic hard-filter restoration`, or earlier if the canonical recruiter ingress path changes again
 - **Introduced in**: 2026-05-26
 - **Last reviewed**: 2026-05-26
 - **Current decision**: The deterministic hard-filter machinery still exists in the workflow/planner history, but the current recruiter-facing canonical CV path is effectively `cv_submitted -> cv_received -> cv_parsed -> light_scored` without a restored mandatory hard-filter stage in between.
@@ -696,11 +696,11 @@ Summary (v2 cleanup):
 - **Revisit when**: When LLM parsing or multi-stage CV enrichment is required
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
-- **Current decision**: Real CV ingress supports bounded text/PDF upload, and `cv_submitted` is the intended recruiter-facing canonical path gated on an active ready `scoring_context`. The canonical flow persists `cv_received`, then `cv_parsed`, then job-aware layered light scoring against `cv + scoring_context`. However, the public HTTP ingress still exposes internal workflow event types such as `cv_uploaded` / `cv_parsed`, so canonical recruiter semantics are not yet fully isolated to `cv_submitted` alone.
-- **Rationale**: Keeps the candidate workflow event stable while making parsing, scoring, and context readiness explicit and auditable, but preserves compatibility paths while the API surface is still being tightened.
-- **Future impact**: Later stages can add richer artifact references or requisition-scoped context without leaking workflow control into prompts or reviving flat score keys. Until the public ingress is fully tightened, internal-event exposure can still blur recruiter-facing semantics and bypass intended ingress discipline.
+- **Current decision**: Real CV ingress supports bounded text/PDF upload, and `cv_submitted` is the canonical recruiter-facing public path gated on an active ready `scoring_context`. The canonical flow persists `cv_received`, then `cv_parsed`, then job-aware layered light scoring against `cv + scoring_context`. Internal workflow events remain available only for non-public harness/runtime paths; the deprecated combined `cv_parse_and_score` compatibility path has been removed.
+- **Rationale**: Keeps the candidate workflow event stable while making parsing, scoring, and context readiness explicit and auditable, without leaving public write surfaces that bypass the canonical recruiter ingress contract.
+- **Future impact**: Later stages can add richer artifact references or requisition-scoped context without leaking workflow control into prompts or reviving flat score keys. Internal harness paths still need discipline so tests/demo wiring do not become an accidental second public contract.
 - **Priority**: Medium
-- **Recommended future direction**: Preserve the split parse/score path; tighten public ingress around `cv_submitted` as the canonical recruiter path; if richer artifact storage or multi-step enrichment is needed, add explicit contracts around those steps instead of collapsing them back into one prompt-owned operation.
+- **Recommended future direction**: Preserve the split parse/score path and keep `cv_submitted` as the only recruiter-facing public ingress for CV evaluation; if richer artifact storage or multi-step enrichment is needed, add explicit contracts around those steps instead of collapsing them back into one prompt-owned operation.
 
 ### TD-SKILLS-002 Deterministic runtime clock governance (fake skills + slice execution)
 - **Status**: OPEN
@@ -739,7 +739,7 @@ Summary (v2 cleanup):
 
 ### TD-API-001 API runtime singleton (single process, shared runtime)
 - **Status**: OPEN
-- **Revisit when**: When Stage B requires per-session or multi-tenant runtime isolation
+- **Revisit when**: When roadmap work is scheduled for `Runtime scope / isolation hygiene` or `Multi-tenant isolation and production infrastructure`, or earlier if shared-runtime interference blocks single-tenant recruiter workflows
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
 - **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). All requests share the **same** runtime-owned event bus, snapshot store, and active `scoring_context` store. Stage B multi-candidate routing now allows **multiple candidate snapshots** inside that one shared runtime, but there is still **no** per-request, per-session, or per-tenant isolation boundary in v1.
@@ -840,7 +840,7 @@ Summary (v2 cleanup):
 
 ### TD-API-008 Action availability ignores transition guards
 - **Status**: OPEN
-- **Revisit when**: During the upcoming recruiter-surface hardening round, or before candidate actions become an authoritative recruiter-facing UI surface
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `Recruiter surface hardening`, or before candidate actions become an authoritative recruiter-facing UI surface
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
 - **Current decision**: ``get_available_actions_for_phase`` exposes an action if a registry rule applies (``from_state`` is the current phase or ``*``) and carries a resolvable ``manual_recruiter_*`` trigger. It does **not** evaluate **guard conditions** on those rules or snapshot context.
@@ -881,7 +881,7 @@ Summary (v2 cleanup):
 
 ### TD-API-011 HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
-- **Revisit when**: During the upcoming API hardening round, and before any external integrator/webhook ingress depends on retry-safe semantics
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, and before any external integrator/webhook ingress depends on retry-safe semantics
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
 - **Current decision**: **`POST /events`** has **no** enforced idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation). The broader event schema already reserves an ``idempotency_key`` concept, but the public HTTP ingress and application publish path do **not** yet honor that field with deterministic dedupe behavior or stable retry outcomes.
@@ -893,7 +893,7 @@ Summary (v2 cleanup):
 
 ### TD-API-012 API boundary coupling to bootstrap helpers (`_envelope`, fixed clock)
 - **Status**: OPEN
-- **Revisit when**: During the upcoming API hardening round, before multiple ingress producers or idempotency-aware envelope semantics are introduced
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, before multiple ingress producers or idempotency-aware envelope semantics are introduced
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
 - **Current decision**: The API/runtime boundary no longer imports ``runtime/bootstrap_vertical_slice.py`` directly, but application ingress still uses **bootstrap-shaped** helpers from ``modules/recruitment/ingress.py`` (fixed clock, deterministic sequence-based envelope ids, ``payload={"bootstrap": True, "sequence": ...}``, and bootstrap-style actor/source defaults) when constructing ingress envelopes.
@@ -965,7 +965,7 @@ Summary (v2 cleanup):
 
 ### TD-INSPECTION-003 Timeline is global, not candidate-scoped (multi-candidate safety)
 - **Status**: OPEN
-- **Revisit when**: During the upcoming candidate-scoped timeline safety round, or before recruiter-facing audit/history UX broadens beyond the default demo candidate
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `Candidate-scoped timeline safety`, or before recruiter-facing audit/history UX broadens beyond the default demo candidate
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
 - **Current decision**: Timeline rendering is **system-level**, not per-candidate:

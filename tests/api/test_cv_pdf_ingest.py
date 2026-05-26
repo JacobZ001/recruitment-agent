@@ -131,6 +131,48 @@ def test_pdf_cv_ingest_requires_ready_scoring_context(client: TestClient) -> Non
     assert response.json()["detail"]["code"] == "scoring_context_not_ready"
 
 
+def test_pdf_cv_ingest_rejects_collecting_context_with_weak_derivation_signals(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/scoring-context/organization",
+        json={
+            "company_name": "BlueOcean",
+            "environment_signals": ["fast-moving operations"],
+            "preference_signals": [],
+        },
+    )
+    client.post(
+        "/scoring-context/recruiter-actor",
+        json={
+            "actor_id": "route-recruiter",
+            "preference_signals": [],
+            "avoid_signals": [],
+        },
+    )
+    client.post(
+        "/scoring-context/job/recruiter-answers",
+        json={
+            "role_title": "Recruiting Operations Specialist",
+            "must_haves_answer": "stakeholder communication",
+            "preferred_answer": "",
+            "success_answer": "keep candidate flow organized",
+            "responsibilities_answer": "coordinate interviews",
+        },
+    )
+
+    cid = str(uuid4())
+    response = client.post(
+        f"/candidates/{cid}/cv/pdf",
+        json={
+            "file_name": "candidate_cv.pdf",
+            "pdf_base64": _build_pdf_base64("Recruiter operations coordinator"),
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "scoring_context_not_ready"
+
+
 def test_pdf_cv_ingest_provider_not_configured_returns_502(
     monkeypatch: pytest.MonkeyPatch,
     establish_ready_scoring_context,

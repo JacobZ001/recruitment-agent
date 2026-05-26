@@ -23,11 +23,21 @@ def test_sqlite_cv_extensions_survive_reload(tmp_path) -> None:
     rt = VerticalSliceApiRuntime(db_path=db)
     author_organization_context(
         rt,
-        OrganizationContext(company_name="BlueOcean", source_refs=["test://org"]),
+        OrganizationContext(
+            company_name="BlueOcean",
+            environment_signals=["structured recruiting operations"],
+            preference_signals=["clear communication"],
+            source_refs=["test://org"],
+        ),
     )
     author_recruiter_actor_context(
         rt,
-        RecruiterActorContext(actor_id="sqlite-test", source_refs=["test://recruiter"]),
+        RecruiterActorContext(
+            actor_id="sqlite-test",
+            preference_signals=["ownership"],
+            avoid_signals=["unclear updates"],
+            source_refs=["test://recruiter"],
+        ),
     )
     author_job_context_from_text(
         rt,

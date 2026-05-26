@@ -158,11 +158,11 @@ def test_provider_successful_json_parse(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_stub_provider_returns_expected_shape() -> None:
     result = StubLLMProvider().generate_structured(
-        system_prompt="ignored",
+        system_prompt="Required top-level keys: profile, explanation.",
         user_prompt="Senior Python developer with 9 years experience in SaaS.",
     )
     assert "profile" in result
-    assert "criteria" in result
+    assert "criteria" not in result
     assert result["profile"]["seniority"] == "senior"
 
 

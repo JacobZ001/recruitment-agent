@@ -89,14 +89,18 @@ This is the near-term action queue derived from capability gaps plus the debt re
    - Advances: `Operational Readiness`
    - Goal: add replay-safe ingress semantics and replace bootstrap-shaped envelope construction with a runtime-grade boundary.
 
-6. **Provider-hardening for bounded cognition** (`TD-API-006`)
+6. **Contract and timestamp hardening** (`TD-CONTRACTS-005`, `TD-CONTRACTS-011`, `TD-CONTRACTS-012`)
+   - Advances: `Deterministic Foundation`, `Operational Readiness`
+   - Goal: remove naive UTC contract defaults, tighten shared execution metadata/timing semantics, and reduce schema-level warning debt before broader integration-facing hardening.
+
+7. **Provider-hardening for bounded cognition** (`TD-API-006`)
    - Advances: `Controlled Cognition`, `Operational Readiness`
    - Goal: move from coarse cognition failure surfaces toward deterministic retryability and clearer provider/runtime semantics.
 
-7. **Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004`)
+8. **Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004`)
    - Advances: `Controlled Cognition`, `Human Governance`
    - Goal: carry typed layered evaluation semantics more clearly through post-light-scoring stages.
 
-8. **Single-tenant operational playbook** (`TD-PERSISTENCE-001`, `TD-API-001`)
+9. **Single-tenant operational playbook** (`TD-PERSISTENCE-001`, `TD-API-001`)
    - Advances: `Operational Readiness`
    - Goal: document reset, validation, and local deployment expectations for the current SQLite-backed runtime posture.

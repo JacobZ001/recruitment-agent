@@ -11,6 +11,8 @@ from integrations.api.app import create_app
 from runtime.bootstrap_vertical_slice import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from schemas.state_schema import PipelinePhase
 
+_CV_TEXT = "Senior recruiter ops specialist with 7 years of experience in Python, ATS, and process ownership."
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -27,37 +29,55 @@ def test_health(client: TestClient) -> None:
     assert "vertical_slice" in body["runtime"]
 
 
-def test_post_events_one_event_returns_publish_and_state_summary(client: TestClient) -> None:
+def test_post_events_one_event_returns_publish_and_state_summary(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    establish_ready_scoring_context(client.app.state.vertical_slice)
     r = client.post(
         "/events",
         json={
-            "event_type": "cv_uploaded",
+            "event_type": "cv_submitted",
             "candidate_id": cid,
-            "payload": {"source": "api_test"},
+            "payload": {"cv_text": _CV_TEXT},
         },
     )
     assert r.status_code == 200
     body = r.json()
     assert body["ingress_accepted"] is True
     assert body["publish_status"] == "accepted"
-    assert body["event_type"] == "cv_uploaded"
+    assert body["event_type"] == "cv_submitted"
     assert "event_id" in body
-    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
+    assert body["state_summary"]["pipeline_phase"] == PipelinePhase.QUESTIONNAIRE_PENDING.value
 
 
-def test_sequential_events_progress_pipeline(client: TestClient) -> None:
+def test_sequential_events_progress_pipeline(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    assert client.post("/events", json={"event_type": "cv_uploaded"}).status_code == 200
+    establish_ready_scoring_context(client.app.state.vertical_slice)
+    assert (
+        client.post(
+            "/events",
+            json={"event_type": "cv_submitted", "payload": {"cv_text": _CV_TEXT}},
+        ).status_code
+        == 200
+    )
 
     st = client.get(f"/state/{cid}")
     assert st.status_code == 200
-    assert st.json()["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
+    assert st.json()["pipeline_phase"] == PipelinePhase.QUESTIONNAIRE_PENDING.value
 
 
-def test_timeline_returns_inspection_text(client: TestClient) -> None:
+def test_timeline_returns_inspection_text(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    client.post("/events", json={"event_type": "cv_uploaded"})
+    establish_ready_scoring_context(client.app.state.vertical_slice)
+    client.post("/events", json={"event_type": "cv_submitted", "payload": {"cv_text": _CV_TEXT}})
     tr = client.get(f"/timeline/{cid}")
     assert tr.status_code == 200
     data = tr.json()
@@ -76,13 +96,18 @@ def test_unknown_candidate_returns_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_post_events_accepts_new_candidate_id(client: TestClient) -> None:
+def test_post_events_accepts_new_candidate_id(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(uuid4())
+    establish_ready_scoring_context(client.app.state.vertical_slice)
     r = client.post(
         "/events",
         json={
-            "event_type": "cv_uploaded",
+            "event_type": "cv_submitted",
             "candidate_id": cid,
+            "payload": {"cv_text": _CV_TEXT},
         },
     )
     assert r.status_code == 200
@@ -95,11 +120,25 @@ def test_candidate_created_rejected_from_public_api(client: TestClient) -> None:
     assert r.status_code == 422
 
 
-def test_admin_reset_in_memory_restores_new(client: TestClient) -> None:
+@pytest.mark.parametrize("event_type", ["cv_uploaded", "cv_parsed", "deep_scoring_completed"])
+def test_internal_workflow_events_rejected_from_public_api(
+    client: TestClient,
+    event_type: str,
+) -> None:
+    r = client.post("/events", json={"event_type": event_type})
+    assert r.status_code == 422
+
+
+def test_admin_reset_in_memory_restores_new(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    client.post("/events", json={"event_type": "cv_uploaded"})
+    establish_ready_scoring_context(client.app.state.vertical_slice)
+    client.post("/events", json={"event_type": "cv_submitted", "payload": {"cv_text": _CV_TEXT}})
     assert (
-        client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.CV_RECEIVED.value
+        client.get(f"/state/{cid}").json()["pipeline_phase"]
+        == PipelinePhase.QUESTIONNAIRE_PENDING.value
     )
 
     r = client.post("/admin/reset")
@@ -112,16 +151,20 @@ def test_admin_reset_in_memory_restores_new(client: TestClient) -> None:
     assert client.get(f"/state/{cid}").json()["pipeline_phase"] == PipelinePhase.NEW.value
 
 
-def test_admin_reset_sqlite_truncates_and_restores(tmp_path) -> None:
+def test_admin_reset_sqlite_truncates_and_restores(
+    tmp_path,
+    establish_ready_scoring_context,
+) -> None:
     import sqlite3
 
     db = tmp_path / "reset.db"
     cid = str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     with TestClient(create_app(db_path=str(db))) as client:
-        client.post("/events", json={"event_type": "cv_uploaded"})
+        establish_ready_scoring_context(client.app.state.vertical_slice)
+        client.post("/events", json={"event_type": "cv_submitted", "payload": {"cv_text": _CV_TEXT}})
         assert (
             client.get(f"/state/{cid}").json()["pipeline_phase"]
-            == PipelinePhase.CV_RECEIVED.value
+            == PipelinePhase.QUESTIONNAIRE_PENDING.value
         )
 
         r = client.post("/admin/reset")

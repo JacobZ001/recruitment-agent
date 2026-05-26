@@ -284,7 +284,12 @@ These rules apply to both Architect Agent and Builder Agent:
 - Ownership: Builder Agent.
 - Write mode: overwrite per round (keep only current round report).
 - Purpose: implementation status, file changes, tests, risks, deviations, and round-closeout routing metadata.
-- Builder owns the execution report content; Architect may append or refresh the closeout-routing fields during post-execution review.
+- Builder owns the execution report content.
+- Architect owns the closeout-routing metadata in `FEEDBACK.md`:
+  - `proposed routing outcome`
+  - `PM confirmed routing`
+  - `major-round snapshot needed: yes/no`
+- Builder may leave those closeout-routing fields absent or provisional in the initial execution overwrite; Architect must append or refresh them during post-execution review and PM confirmation.
 
 ### Artifact routing
 
@@ -316,12 +321,13 @@ Each round follows this sequence:
 7. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
 8. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then explicitly reconciles `docs/architecture/ROADMAP.md` to reflect execution reality before planning the next round.
 9. Architect Agent updates `docs/architecture/tech_debt.md` and `docs/architecture/ADR.md` when execution materially changes debt posture or produces a durable architecture decision not already recorded.
-10. Architect Agent performs lightweight round closeout by recommending the next-round routing decision to PM.
-11. PM confirms the routing decision:
+10. Architect Agent appends or refreshes the closeout-routing metadata in `FEEDBACK.md` while performing lightweight round closeout.
+11. Architect Agent recommends the next-round routing decision to PM.
+12. PM confirms the routing decision:
    - continue within the same major round,
    - run a corrective minor round within the same major round,
    - or advance to the next major round.
-12. Architect Agent proposes next round using the updated roadmap / debt / ADR context and the confirmed routing decision.
+13. Architect Agent proposes next round using the updated roadmap / debt / ADR context and the confirmed routing decision.
 
 ### Round naming convention
 
@@ -430,7 +436,7 @@ Each round follows this sequence:
 - Full file change summary (`A` / `M` / `D`).
 - Test commands and results.
 - Risks, deviations, and blockers.
-- Lightweight closeout routing fields:
+- Lightweight closeout routing fields (Architect-owned; appended or refreshed during post-execution review):
   - `proposed routing outcome`
   - `PM confirmed routing`
   - `major-round snapshot needed: yes/no`

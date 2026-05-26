@@ -26,7 +26,7 @@ class VerticalSliceIngressEventBody(BaseModel):
         default_factory=dict,
         description=(
             "Event-specific fields. For ``cv_submitted``, include ``cv_text`` (raw CV body). "
-            "Other events may carry skill or ranking overrides."
+            "Other public `/events` writes are bounded governance ingress only."
         ),
     )
 
@@ -116,6 +116,8 @@ class ScoringContextResponse(BaseModel):
     organization_context: Optional[Dict[str, Any]] = None
     recruiter_actor_context: Optional[Dict[str, Any]] = None
     job_context: Optional[Dict[str, Any]] = None
+    derived_l2_criteria: List[str] = Field(default_factory=list)
+    derived_l3_criteria: List[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
     ready_at: Optional[str] = None

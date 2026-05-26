@@ -93,10 +93,52 @@ def test_scoring_context_authoring_routes_and_refresh() -> None:
         assert ready.status_code == 200, ready.text
         assert ready.json()["status"] == "ready"
         assert ready.json()["job_context"]["title"] == "Recruiting Operations Specialist"
+        assert ready.json()["derived_l2_criteria"]
+        assert ready.json()["derived_l3_criteria"]
 
         get_ready = client.get("/scoring-context")
         assert get_ready.status_code == 200
         assert get_ready.json()["status"] == "ready"
+
+
+def test_scoring_context_refresh_rejects_insufficient_derivation_signals() -> None:
+    with TestClient(create_app(db_path="")) as client:
+        client.post(
+            "/scoring-context/organization",
+            json={
+                "company_name": "BlueOcean",
+                "environment_signals": ["fast-moving operations"],
+                "preference_signals": [],
+            },
+        )
+        client.post(
+            "/scoring-context/recruiter-actor",
+            json={
+                "actor_id": "route-recruiter",
+                "preference_signals": [],
+                "avoid_signals": [],
+            },
+        )
+        client.post(
+            "/scoring-context/job/recruiter-answers",
+            json={
+                "role_title": "Recruiting Operations Specialist",
+                "must_haves_answer": "stakeholder communication",
+                "preferred_answer": "",
+                "success_answer": "keep candidate flow organized",
+                "responsibilities_answer": "coordinate interviews",
+            },
+        )
+
+        ready = client.post("/scoring-context/refresh")
+        assert ready.status_code == 422
+        assert ready.json()["detail"]["code"] == "invalid_scoring_context"
+
+        current = client.get("/scoring-context")
+        assert current.status_code == 200
+        assert current.json()["status"] == "collecting"
+        assert current.json()["derived_l2_criteria"] == []
+        assert current.json()["derived_l3_criteria"] == []
 
 
 def test_job_context_pdf_route_success_and_failure() -> None:

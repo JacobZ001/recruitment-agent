@@ -124,48 +124,6 @@ def _payload_for_profile(cv_text: str) -> Dict[str, Any]:
     }
 
 
-def _payload_for_legacy_cv_eval(cv_text: str) -> Dict[str, Any]:
-    base = _payload_for_profile(cv_text)
-    profile = base["profile"]
-    lowered = cv_text.lower()
-    years = profile.get("years_experience")
-    skills = profile.get("skills") or []
-    richness = min(len(cv_text.strip()) / 400.0, 1.0)
-    years_score = 0.0 if years is None else min(float(years) / 10.0, 1.0)
-    skill_score = min(len(skills) / 8.0, 1.0)
-    summary_score = _clamp01((richness * 0.4) + (skill_score * 0.6))
-    _ = lowered
-    communication = _clamp01((richness * 0.7) + 0.15)
-    ownership = _clamp01((years_score * 0.7) + 0.15)
-    reliability = _clamp01((summary_score * 0.6) + (years_score * 0.2) + 0.1)
-    thinking = _clamp01((skill_score * 0.6) + (richness * 0.2) + 0.1)
-    return {
-        **base,
-        "criteria": {
-            "communication": _criterion_payload(
-                communication,
-                "Estimated from writing clarity and CV completeness.",
-            ),
-            "ownership": _criterion_payload(
-                ownership,
-                "Estimated from experience level and role progression cues.",
-            ),
-            "reliability": _criterion_payload(
-                reliability,
-                "Estimated from consistency and evidence density in the CV.",
-            ),
-            "thinking": _criterion_payload(
-                thinking,
-                "Estimated from technical breadth and structured problem-solving signals.",
-            ),
-        },
-        "explanation": (
-            "Stub provider deterministic evaluation from the submitted CV text. "
-            "Used for tests and local development only."
-        ),
-    }
-
-
 def _token_overlap_score(label: str, cv_text: str) -> float:
     tokens = [tok for tok in re.split(r"[^a-z0-9]+", label.lower()) if tok and len(tok) > 2]
     if not tokens:
@@ -262,9 +220,7 @@ class StubLLMProvider:
     def generate_structured(self, *, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if "l1_universal" in system_prompt and "l2_role_specific" in system_prompt:
             return _payload_for_layered_score(user_prompt)
-        if "Required top-level keys: profile, explanation." in system_prompt:
-            return _payload_for_profile(user_prompt)
-        return _payload_for_legacy_cv_eval(user_prompt)
+        return _payload_for_profile(user_prompt)
 
 
 class OpenAICompatibleProvider:

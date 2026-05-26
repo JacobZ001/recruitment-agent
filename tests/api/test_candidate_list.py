@@ -31,13 +31,7 @@ def test_list_candidates_returns_all_created(client: TestClient) -> None:
     cid_b = str(uuid4())
     rt = client.app.state.vertical_slice
     publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {})
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "cv_uploaded", "candidate_id": cid_a},
-        ).status_code
-        == 200
-    )
+    publish_recruitment_event(rt, UUID(cid_a), "cv_uploaded", {"source": "test"})
 
     r = client.get("/candidates")
     assert r.status_code == 200
@@ -57,7 +51,7 @@ def test_list_candidates_no_cross_contamination(client: TestClient) -> None:
     cid_b = str(uuid4())
     rt = client.app.state.vertical_slice
     publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {})
-    client.post("/events", json={"event_type": "cv_uploaded", "candidate_id": cid_a})
+    publish_recruitment_event(rt, UUID(cid_a), "cv_uploaded", {"source": "test"})
 
     rows = client.get("/candidates").json()
     phases = {row["candidate_id"]: row["stage"] for row in rows if row["candidate_id"] in (cid_a, cid_b)}

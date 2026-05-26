@@ -33,13 +33,7 @@ def test_two_candidates_progress_independently(client: TestClient) -> None:
 
     rt = client.app.state.vertical_slice
     publish_recruitment_event(rt, UUID(cid_b), "candidate_created", {"source": "test"})
-    assert (
-        client.post(
-            "/events",
-            json={"event_type": "cv_uploaded", "candidate_id": cid_a},
-        ).status_code
-        == 200
-    )
+    publish_recruitment_event(rt, UUID(cid_a), "cv_uploaded", {"source": "test"})
 
     st_a = client.get(f"/state/{cid_a}")
     st_b = client.get(f"/state/{cid_b}")

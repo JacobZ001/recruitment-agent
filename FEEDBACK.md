@@ -1,350 +1,200 @@
-# FEEDBACK (Round R-004)
+# FEEDBACK (Round R-004.1)
 
 ## Execution Status
 
 - status: done
 - blocker: none
 
-## Lightweight Round Closeout (Architect / PM)
-
-- proposed routing outcome: `corrective-minor`
-- PM confirmed routing: `corrective-minor`
-- major-round snapshot needed: `no`
-- closeout rationale: `R-004` delivered the major capability direction, but implementation quality required an in-family hardening round before advancing to the next major round.
-
 ## Plan Step Mapping
 
-- Step 1: done - Added explicit typed contracts for `organization_context`, `recruiter_actor_context`, `job_context`, and top-level `scoring_context`, plus a separate canonical scoring-context store wired into the runtime.
-- Step 2: done - Replaced flat light/deep scoring semantics with a canonical three-layer schema (`l1_universal`, `l2_role_specific`, `l3_recruiter_preference`) and deterministic aggregate score/confidence computation.
-- Step 3: done - Added bounded scoring-context authoring outside the candidate event bus for organization/recruiter context plus job-context ingestion via direct text, PDF, and recruiter-answer normalization. Added explicit `refresh` to move context from `collecting` / `stale` to `ready`.
-- Step 4: done - Split CV parsing from scoring: `cv_submitted` now persists `cv_received` with parsed profile first, emits `cv_parsed`, then emits `light_scoring_completed` for job-aware layered scoring against `cv + scoring_context`.
-- Step 5: done - Persisted `context_version` on light/deep evaluations, marked existing candidate evaluations stale when scoring context changes, and exposed scoring-context summary + layered score breakdown in recruiter-facing projections.
-- Step 6: done - Added focused deterministic tests for readiness gating, status/version transitions, text/PDF/recruiter-answer normalization, parse-before-score sequencing, stale re-score semantics, and updated existing API/module tests to the new contracts.
-- Step 7: done - Updated `ROADMAP.md`, `design_doc.md`, `ADR.md`, and `tech_debt.md` to reflect job-aware three-layer scoring as the immediate backend priority and documented the separate scoring-context model.
+- Step 1: done - Hardened `scoring_context.ready` so refresh now requires successful deterministic L2/L3 label materialization, not just object presence. Added persisted `derived_l2_criteria` / `derived_l3_criteria` on `ScoringContext`.
+- Step 2: done - Preserved `409 + scoring_context_not_ready` for `cv_submitted` and added stricter readiness tests covering contexts that remain `collecting` because derivation inputs are insufficient.
+- Step 3: done - Removed internal workflow events from the public `/events` allowlist. Public recruiter ingress is now bounded to `cv_submitted` plus governance events and `candidate_rejected`.
+- Step 4: done - Made deep-scoring ingress fail closed the same way as light scoring: `deep_scoring_completed` now requires an active ready `scoring_context` and always carries the validated context into the payload when accepted.
+- Step 5: done - Removed the deprecated combined parse+score compatibility path (`skills/llm/cv_llm_parse_and_score.py`), deleted its dedicated test, removed stub-provider fallback logic for it, and removed the inspection alias that treated it as canonical.
+- Step 6: done - Updated `docs/architecture/tech_debt.md` to reflect the now-tight public ingress, reaffirm the single-active-context limitation, and explicitly keep fake/deferred deep cognition open.
+- Step 7: verified - Major/minor naming practice and mandatory full-file `tech_debt.md` planning sweep were already present in `AGENTS.md` at execution start as part of the approved planning artifacts; no additional Builder-side doc mutation was required.
+- Step 8: done - Kept documentation semantics aligned with `R004` as the parent major capability round and `R004.1` as a corrective minor hardening round; no new capability scope was added.
 
-## File Changes (Full List)
+## Full File Change List
 
-- A `modules/recruitment/scoring_context_service.py` - Deterministic normalization, status/version lifecycle, L2/L3 derivation rules, aggregate score computation, and stale-marking helpers.
-- A `modules/recruitment/scoring_context_store.py` - Canonical active scoring-context persistence (in-memory + SQLite-backed).
-- A `skills/llm/cv_llm_parse_profile.py` - New profile-only bounded LLM skill for `cv_submitted`.
-- A `skills/llm/cv_llm_score_candidate.py` - New bounded LLM skill for layered light scoring against `cv + scoring_context`.
-- A `tests/api/test_scoring_context_routes.py` - API coverage for organization/recruiter/job authoring, job PDF ingestion, recruiter-answer normalization, and refresh-to-ready lifecycle.
-- A `tests/modules/test_scoring_context.py` - Module-level coverage for scoring-context transitions, parse-before-score sequencing, and stale re-score semantics.
-- M `docs/architecture/ADR.md` - Added ADR-011 for canonical `scoring_context` + layered job-aware scoring.
-- M `docs/architecture/ROADMAP.md` - Promoted job-aware three-layer evaluation to the top immediate capability and updated Stage 4 / Stage 6 wording.
-- M `docs/architecture/design_doc.md` - Updated implementation-reality sections for scoring-context gating, split parse/score, and layered evaluation.
-- M `docs/architecture/tech_debt.md` - Updated `cv_submitted` evolution notes and added single-active-scoring-context debt entry.
-- M `integrations/api/app.py` - Added scoring-context authoring/read/refresh routes and wired new use cases.
-- M `integrations/api/errors.py` - Added `invalid_scoring_context` (422) and `scoring_context_not_ready` (409) mappings.
-- M `integrations/api/schemas_http.py` - Added request/response models for scoring-context APIs and candidate-view scoring-context summary.
-- M `modules/recruitment/__init__.py` - Exported new scoring-context use cases and errors.
-- M `modules/recruitment/bootstrap.py` - Wired new parse and score LLM skills into the runtime.
-- M `modules/recruitment/exceptions.py` - Added `InvalidScoringContextError` and `ScoringContextNotReadyError`.
-- M `modules/recruitment/projection.py` - Added recruiter-facing scoring-context summary and layered score flattening for detailed candidate views.
-- M `modules/recruitment/runtime.py` - Wired the canonical scoring-context store into the API runtime and reset flow.
-- M `modules/recruitment/use_cases.py` - Added scoring-context authoring/refresh/get use cases, readiness gating, stale propagation, and context injection for `cv_submitted` / deep scoring ingress.
-- M `orchestrator/vertical_slice_planner.py` - Split parse vs score orchestration, added `cv_submitted -> cv_received -> cv_parsed -> light_scoring_completed`, and mapped layered evaluations into typed snapshot writes.
-- M `runtime/inspection/decision_evidence.py` - Recognized the new scoring skill for inspection summaries.
-- M `schemas/state_schema.py` - Added scoring-context schemas and upgraded `ScoreEvaluation` to layered + versioned structure.
-- M `skills/deterministic/fake_deep_scoring_skill.py` - Propagated context version through deterministic deep scoring when active scoring context is present.
-- M `skills/llm/cv_llm_parse_and_score.py` - Kept deprecated compatibility test path aligned with the new layered `ScoreEvaluation` schema.
-- M `skills/llm/llm_provider.py` - Extended stub-provider behavior to support profile-only parse, layered scoring, and legacy combined test coverage.
-- M `state_machine/transition_engine.py` - Updated transition registry for `cv_submitted -> cv_received` and `cv_parsed -> light_scored`.
-- M `tests/api/test_cv_ingest.py` - Added scoring-context readiness setup and explicit 409 contract coverage.
-- M `tests/api/test_cv_pdf_ingest.py` - Added readiness setup plus 409 coverage for PDF CV ingress without ready context.
-- M `tests/api/test_demo_recruiter_surface.py` - Updated candidate-view expectations for layered scores.
-- M `tests/conftest.py` - Added shared helper fixture to establish ready scoring context for CV-ingress tests.
-- M `tests/inspection/test_decision_evidence_navigation.py` - Updated snapshot evaluation fixtures to the layered/versioned schema.
-- M `tests/modules/test_cv_ingestion.py` - Updated expectations for gated split-flow CV ingestion and layered evaluation writes.
-- M `tests/modules/test_cv_pdf_ingestion.py` - Updated PDF ingestion expectations for the split-flow path.
-- M `tests/modules/test_list_candidates.py` - Updated overall-score fixtures to use layered evaluation builders.
-- M `tests/modules/test_recruitment_boundary.py` - Updated boundary test to establish ready scoring context before `cv_submitted`.
-- M `tests/persistence/test_sqlite_cv_extensions.py` - Added scoring-context setup to SQLite persistence coverage.
+- M `docs/architecture/tech_debt.md` - Updated debt entries for public CV ingress posture and fake deep scoring maturity.
+- M `integrations/api/schemas_http.py` - Tightened public `/events` description and exposed derived scoring-context criteria in the response model.
+- M `modules/recruitment/policies.py` - Removed internal workflow events from the public ingress allowlist.
+- M `modules/recruitment/scoring_context_service.py` - Added stricter readiness validation, deterministic criteria materialization, and removed weak fallback label generation.
+- M `modules/recruitment/use_cases.py` - Enforced symmetric ready-context gating for light/deep scoring and provisioned a deterministic ready context for internal demo execution.
+- M `runtime/inspection/decision_evidence.py` - Removed legacy combined-skill inspection handling.
+- M `schemas/state_schema.py` - Added persisted `derived_l2_criteria` / `derived_l3_criteria` to `ScoringContext`.
+- D `skills/llm/cv_llm_parse_and_score.py` - Deleted deprecated combined parse+score compatibility skill.
+- M `skills/llm/llm_provider.py` - Removed legacy combined-output stub fallback; stub now supports only the canonical parse-profile or layered-score shapes.
+- M `tests/api/test_candidate_actions.py` - Switched helper setup away from public internal events and aligned candidate-action tests with ready-context semantics.
+- M `tests/api/test_candidate_list.py` - Stopped relying on removed public internal ingress events.
+- M `tests/api/test_cv_ingest.py` - Added stricter `409` coverage for weak/collecting contexts.
+- M `tests/api/test_cv_pdf_ingest.py` - Added stricter `409` coverage for weak/collecting contexts on PDF ingress.
+- M `tests/api/test_scoring_context_routes.py` - Added refresh failure coverage for insufficient derivation inputs and asserted materialized derived criteria on ready contexts.
+- M `tests/api/test_vertical_slice_api.py` - Moved public ingress tests to canonical `cv_submitted` and added explicit rejection coverage for removed internal events.
+- M `tests/modules/test_multi_candidate_registry.py` - Removed dependence on public internal event exposure.
+- M `tests/modules/test_scoring_context.py` - Added ready materialization assertions and deep-scoring fail-closed coverage.
+- M `tests/persistence/test_sqlite_cv_extensions.py` - Brought SQLite setup into compliance with stricter ready requirements.
+- D `tests/skills/test_cv_parse_and_score_skill.py` - Deleted deprecated combined-skill test.
+- M `tests/skills/test_llm_provider.py` - Updated stub-provider expectations to the canonical profile-only path.
 
-## Exact Schema Shapes Chosen
+## Exact Ready Rule Before / After
 
-### `scoring_context`
+### Before `R-004.1`
 
-```json
-{
-  "context_version": 3,
-  "status": "ready",
-  "organization_context": {
-    "company_name": "BlueOcean",
-    "industry": "recruitment",
-    "team_name": "Talent Ops",
-    "environment_signals": ["fast-moving recruiter workflow"],
-    "preference_signals": ["clear communication", "structured follow-through"],
-    "summary": "...",
-    "source_refs": ["test://organization"]
-  },
-  "recruiter_actor_context": {
-    "actor_id": "test-recruiter",
-    "actor_role": "lead_recruiter",
-    "hiring_focus": ["operator-ready execution"],
-    "preference_signals": ["stakeholder communication", "ownership"],
-    "avoid_signals": ["unclear communication"],
-    "summary": "...",
-    "source_refs": ["test://recruiter"]
-  },
-  "job_context": {
-    "title": "Recruiting Operations Specialist",
-    "summary": "...",
-    "responsibilities": ["coordinate interviews", "surface blockers early"],
-    "hard_requirements": ["stakeholder communication", "process ownership"],
-    "preferred_requirements": ["ATS familiarity"],
-    "success_signals": ["keep candidate flow organized"],
-    "source_refs": ["normalized://recruiter_answers/job_context"]
-  },
-  "created_at": "...",
-  "updated_at": "...",
-  "ready_at": "...",
-  "stale_at": null,
-  "source_refs": ["..."]
-}
-```
+- `refresh_active_scoring_context(...)` treated readiness as:
+  1. `organization_context` exists.
+  2. `recruiter_actor_context` exists.
+  3. `job_context` exists and has `title` plus at least one bounded role signal.
+- `derive_l2_labels(...)` and `derive_l3_labels(...)` had generic fallback labels, so a context could become `ready` even if the recruiter/organization signals needed for real L2/L3 derivation were effectively missing.
+- `ready` did not persist proof that deterministic criteria derivation had already succeeded.
 
-### `context_version` / `status`
+### After `R-004.1`
 
-- `context_version`: monotonic integer, incremented on every organization/recruiter/job context mutation.
-- `status`: explicit enum `collecting | ready | stale`.
-- `collecting`: required components are missing or refresh has not yet validated the full context.
-- `ready`: set only by explicit `refresh_active_scoring_context(...)` / `POST /scoring-context/refresh` when all required components are present and bounded validation succeeds.
-- `stale`: produced when a previously `ready` scoring context is changed; existing candidate evaluations are marked stale until explicit refresh establishes a new ready version.
+`scoring_context.status` becomes `ready` only when all of the following are true during explicit refresh:
 
-### `job_context`
+1. `organization_context.company_name` is non-empty.
+2. `organization_context.environment_signals` is non-empty.
+3. `organization_context.preference_signals` is non-empty.
+4. `recruiter_actor_context.actor_id` is non-empty.
+5. `recruiter_actor_context` has at least one of:
+   - `preference_signals`
+   - `avoid_signals`
+6. `job_context.title` is non-empty.
+7. `job_context` has at least one bounded role signal from:
+   - `hard_requirements`
+   - `preferred_requirements`
+   - `success_signals`
+   - `responsibilities`
+8. Deterministic derivation succeeds and yields non-empty outputs for both:
+   - `derived_l2_criteria`
+   - `derived_l3_criteria`
 
-- Canonical fields: `title`, `summary`, `responsibilities[]`, `hard_requirements[]`, `preferred_requirements[]`, `success_signals[]`, `source_refs[]`.
-- Text/PDF normalization produces the same typed `job_context`.
-- Recruiter-answer normalization also produces the same typed `job_context`; no parallel raw-answer aggregate was introduced.
+Additional semantics:
 
-### Recruiter / Organization Context
+- `derived_l2_criteria` and `derived_l3_criteria` are now persisted on `ScoringContext`.
+- Failed refresh clears derived criteria and leaves the context non-ready (`collecting`).
+- Mutating a previously-ready context still marks it `stale` immediately; ingress remains blocked until a later refresh succeeds again.
+- Fallback generic derivation labels were removed, so `ready` can no longer be satisfied by placeholder criteria.
 
-- `organization_context`: `company_name`, `industry`, `team_name`, `environment_signals[]`, `preference_signals[]`, `summary`, `source_refs[]`.
-- `recruiter_actor_context`: `actor_id`, `actor_role`, `hiring_focus[]`, `preference_signals[]`, `avoid_signals[]`, `summary`, `source_refs[]`.
+## Exact `409` Not-Ready Coverage Added / Updated
 
-### Shared Layered Schema for `evaluation.light` and `evaluation.deep`
+- `tests/api/test_cv_ingest.py`
+  - retained baseline `cv_submitted` -> `409 + scoring_context_not_ready` coverage with no context at all
+  - added coverage for a context that has all three objects but still remains `collecting` because organization/recruiter derivation inputs are too weak
+- `tests/api/test_cv_pdf_ingest.py`
+  - retained baseline PDF CV -> `409 + scoring_context_not_ready` coverage with no context
+  - added the same weak-derivation / still-collecting coverage for PDF ingress
+- `tests/api/test_scoring_context_routes.py`
+  - added explicit `POST /scoring-context/refresh` failure coverage (`422 + invalid_scoring_context`) when derivation prerequisites are insufficient
+- `tests/modules/test_scoring_context.py`
+  - added module-level assertions that failed refresh leaves `derived_l2_criteria` / `derived_l3_criteria` empty and the context non-ready
 
-```json
-{
-  "normalized_score": 0.54339,
-  "confidence": 0.63,
-  "explanation": "...",
-  "source": "system_llm",
-  "context_version": 3,
-  "stale": false,
-  "l1_universal": {
-    "summary": "...",
-    "criteria": {
-      "communication": { "score": 0.73, "confidence": 0.78, "reason": "..." }
-    }
-  },
-  "l2_role_specific": {
-    "summary": "...",
-    "criteria": {
-      "stakeholder communication": { "score": 0.62, "confidence": 0.73, "reason": "..." }
-    }
-  },
-  "l3_recruiter_preference": {
-    "summary": "...",
-    "criteria": {
-      "ownership": { "score": 0.58, "confidence": 0.71, "reason": "..." }
-    }
-  },
-  "evidence_refs": ["..."]
-}
-```
+## Exact Public Ingress Event Types Removed / Retained
 
-## Exact Derivation Rules
+### Removed from public `/events`
 
-### L2 from `job_context` (+ `organization_context` where relevant)
+- `cv_uploaded`
+- `cv_parsed`
+- `hard_filter_passed`
+- `light_scoring_completed`
+- `questionnaire_sent`
+- `questionnaire_completed`
+- `deep_scoring_completed`
 
-- Primary source: `job_context.hard_requirements[:2]`.
-- Then: `job_context.preferred_requirements[:1]`.
-- Then, if present: one organization-shaped criterion `Operate effectively in {environment_signal}` from `organization_context.environment_signals[:1]`.
-- Then: `job_context.success_signals[:1]`.
-- Result is bounded to at most 3 L2 criteria.
+### Retained on public `/events`
 
-### L3 from `organization_context` + `recruiter_actor_context`
+- `cv_submitted`
+  - canonical recruiter-facing CV ingress
+- governance event types from `GOVERNANCE_EVENT_TYPES`
+  - recruiter/operator governance actions remain valid public write operations
+- `candidate_rejected`
+  - preserved because it is not part of the internal workflow-event loophole targeted by this round
 
-- Primary source: `recruiter_actor_context.preference_signals[:2]`.
-- Then: `organization_context.preference_signals[:1]`.
-- Then, if present: one inverted preference criterion `Avoid: {avoid_signal}` from `recruiter_actor_context.avoid_signals[:1]`.
-- Result is bounded to at most 3 L3 criteria.
+### Internal paths preserved
 
-## Exact Implemented Ready Rule
+- `publish_recruitment_event(...)` still supports internal workflow events for harness/runtime progression.
+- `run_primary_demo_sequence(...)` now ensures a deterministic ready demo `scoring_context` before internal demo progression, so demo coverage still works without re-opening the public ingress loophole.
 
-`scoring_context.status` becomes `ready` only when all of the following are true:
+## Exact Deep-Scoring Gating Before / After
 
-1. `organization_context` exists and passes typed validation.
-2. `recruiter_actor_context` exists and passes typed validation.
-3. `job_context` exists and has a non-empty `title` plus at least one bounded role signal from `hard_requirements`, `preferred_requirements`, `success_signals`, or `responsibilities`.
-4. The explicit refresh step (`refresh_active_scoring_context(...)` / `POST /scoring-context/refresh`) succeeds.
+### Before `R-004.1`
 
-If any required component is missing, status remains `collecting`.
-If a previously-ready context is mutated, status becomes `stale` until explicit refresh succeeds again.
+- `cv_submitted` required a ready active `scoring_context`.
+- `deep_scoring_completed` did **not** require one.
+- If an active ready context existed, it was injected opportunistically.
+- If no valid context existed, deep scoring could still be published, which left deep context-version semantics dependent on implicit fallback / missing-context behavior.
 
-## Exact API / Use-Case Contracts Chosen
+### After `R-004.1`
 
-### Organization Context Authoring
+- `publish_ingress_event(...)` now calls `_require_ready_scoring_context(...)` for both:
+  - `cv_submitted`
+  - `deep_scoring_completed`
+- Both event types now fail closed with `ScoringContextNotReadyError` when the active context is missing, `collecting`, or `stale`.
+- When accepted, both event types receive the validated serialized `scoring_context` in the merged payload.
+- Demo/internal sequence compatibility is preserved by provisioning a deterministic ready context before demo progression, rather than by keeping deep scoring permissive.
 
-- Route: `POST /scoring-context/organization`
-- Body: `OrganizationContextBody`
-- Use case: `author_organization_context(runtime, OrganizationContext(...))`
+## Exact Deleted Legacy Compatibility Paths
 
-### Recruiter Actor Context Authoring
+- Deleted file: `skills/llm/cv_llm_parse_and_score.py`
+- Deleted test: `tests/skills/test_cv_parse_and_score_skill.py`
+- Removed stub-provider fallback logic in `skills/llm/llm_provider.py` that generated the old combined `profile + criteria + explanation` shape as the default compatibility path
+- Removed inspection special-casing in `runtime/inspection/decision_evidence.py` that still treated `recruitment.vertical_slice.cv_parse_and_score` as a live canonical scoring skill
 
-- Route: `POST /scoring-context/recruiter-actor`
-- Body: `RecruiterActorContextBody`
-- Use case: `author_recruiter_actor_context(runtime, RecruiterActorContext(...))`
+## Technical Debt Review / Updates
 
-### Job-Context Text Input
+Full-file `docs/architecture/tech_debt.md` review was already completed in planning (`Last full registry sweep: 2026-05-26`). Builder executed only the debt actions frozen into `PLAN.md`.
 
-- Route: `POST /scoring-context/job/text`
-- Body:
+Reviewed / updated items:
 
-```json
-{
-  "raw_text": "Role: ...\nMust: ...\nPreferred: ...\nSuccess: ...",
-  "source_ref": "optional://source"
-}
-```
+- `TD-PERSISTENCE-009` - reaffirmed OPEN
+  - single active `scoring_context` store remains the explicit known limitation
+  - no requisition-scoped or multi-context runtime expansion was introduced in this round
+- `TD-CONTRACTS-010` - updated and remains OPEN
+  - clarified that deep scoring is still intentionally deterministic/fake
+  - clarified that it now fails closed on ready-context availability
+- `TD-SKILLS-001` - updated and remains OPEN
+  - public recruiter ingress is now explicitly tightened to `cv_submitted`
+  - internal-only harness/runtime workflow events remain acceptable non-public mechanics
+  - deprecated combined parse+score compatibility path is now removed
 
-- Use case: `author_job_context_from_text(runtime, raw_text, source_ref=...)`
+No new debt items were replanned or added outside the Architect-approved `PLAN.md` scope.
 
-### Job-Context PDF Input
+## Process / Governance Docs
 
-- Route: `POST /scoring-context/job/pdf`
-- Body:
-
-```json
-{
-  "file_name": "job_context.pdf",
-  "pdf_base64": "JVBERi0xLjQK..."
-}
-```
-
-- Use case: `author_job_context_from_pdf(runtime, pdf_base64, file_name=...)`
-
-### Recruiter-Answer Normalization
-
-- Route: `POST /scoring-context/job/recruiter-answers`
-- Body:
-
-```json
-{
-  "role_title": "Recruiting Operations Specialist",
-  "must_haves_answer": "stakeholder communication\nprocess ownership",
-  "preferred_answer": "ATS familiarity",
-  "success_answer": "keep candidate flow organized",
-  "responsibilities_answer": "coordinate interviews\nsurface blockers early"
-}
-```
-
-- Use case: `author_job_context_from_recruiter_answers(...)`
-
-### Refresh to `ready`
-
-- Route: `POST /scoring-context/refresh`
-- Use case: `refresh_active_scoring_context(runtime)`
-
-### Read Active Scoring Context
-
-- Route: `GET /scoring-context`
-- Returns the canonical active `ScoringContextResponse`.
-
-## Exact HTTP Error Contract for `scoring_context_not_ready`
-
-```json
-{
-  "detail": {
-    "code": "scoring_context_not_ready",
-    "message": "scoring_context_not_ready: active scoring_context status is collecting"
-  }
-}
-```
-
-- Status code: `409 Conflict`
-
-## Context Authoring Boundary
-
-- Context authoring remained outside the candidate event bus: **yes**
-- Candidate workflow still begins at `cv_submitted`: **yes**
-
-## Local SQLite Reset / Schema Cutover
-
-- Existing local SQLite rows should be treated as disposable for this round.
-- R-004 changed canonical snapshot evaluation shape and added a separate persisted scoring-context store, so local reset / recreation is the expected cutover workflow for old developer DBs.
+- `AGENTS.md` already contained the approved governance updates at execution start:
+  - major vs minor round naming convention
+  - mandatory full-file `docs/architecture/tech_debt.md` review step during planning
+  - debt-ID based planning discipline
+- Builder verified those rules remained consistent with `PLAN.md`.
+- No additional Builder-side edit to `AGENTS.md` was required in order to satisfy the approved process scope.
 
 ## Tests and Validation
 
-- command: `python -m pytest tests/skills/test_llm_provider.py -q`
+- command: `python -m pytest tests/modules/test_scoring_context.py tests/api/test_scoring_context_routes.py tests/api/test_cv_ingest.py tests/api/test_cv_pdf_ingest.py tests/api/test_vertical_slice_api.py tests/api/test_candidate_list.py tests/modules/test_multi_candidate_registry.py tests/skills/test_llm_provider.py`
   - result: pass
-  - notes: 9 passed
-- command: `python -m pytest tests/api/test_demo_recruiter_surface.py -q`
+  - notes: `51 passed, 1 skipped`
+- command: `python -m pytest tests/api/test_candidate_actions.py tests/persistence/test_sqlite_cv_extensions.py -q`
   - result: pass
-  - notes: 10 passed
-- command: `python -m pytest tests/modules/test_cv_ingestion.py tests/modules/test_cv_pdf_ingestion.py tests/api/test_cv_ingest.py tests/api/test_cv_pdf_ingest.py tests/persistence/test_sqlite_cv_extensions.py -q`
-  - result: pass
-  - notes: 13 passed, 1 skipped
-- command: `python -m pytest tests/skills/test_cv_parse_and_score_skill.py tests/inspection/test_decision_evidence_navigation.py tests/modules/test_list_candidates.py tests/replay/test_vertical_slice_replay.py -q`
-  - result: pass
-  - notes: 15 passed
-- command: `python -m pytest tests/modules/test_scoring_context.py tests/api/test_scoring_context_routes.py -q`
-  - result: pass
-  - notes: 5 passed
+  - notes: `7 passed`
 - command: `python -m pytest -q`
   - result: pass
-  - notes: 157 passed, 2 skipped, 11 warnings
+  - notes: `164 passed, 2 skipped, 11 warnings`
 - command: `ReadLints` on changed files
   - result: pass
   - notes: no linter errors found
 
-## Manual Verification Notes
+## Deviations, Risks, and Follow-Up
 
-- Manual stub-provider path executed end-to-end through API:
-  1. `POST /scoring-context/organization`
-  2. `POST /scoring-context/recruiter-actor`
-  3. `POST /scoring-context/job/recruiter-answers`
-  4. `POST /scoring-context/refresh` -> `status=ready`, `context_version=3`
-  5. `POST /events` with `event_type=cv_submitted`
-  6. `GET /candidate/{id}` confirmed:
-    - non-empty parsed `profile.summary`
-    - layered `evaluation.light`
-    - `scores.overall_score = {"value": 0.54339, "type": "light"}`
-    - `scores.context_version = 3`
-  7. `POST /events` with `questionnaire_sent`, `questionnaire_completed`, `deep_scoring_completed`
-  8. Final checks:
-    - `GET /candidate/{id}` -> `stage=shortlisted`
-    - `evaluation.deep.context_version = 3`
-    - `GET /state/{id}` -> `pipeline_phase=shortlisted`
-    - `GET /candidates` row reflected matching overall score/type and recruiter actions
-
-## Docs / Debt Updates
-
-- `docs/architecture/ROADMAP.md`
-  - promoted **Job-aware three-layer evaluation** to the top immediate capability
-  - moved recruiter-surface work after the backend score-model slice
-  - updated Stage 4 / Stage 6 posture to describe bounded job-aware evaluation cognition instead of CV-ingress parsing only
-- `docs/architecture/design_doc.md`
-  - updated engineering-reality sections for canonical `scoring_context`, parse-before-score sequencing, and layered evaluation semantics
-- `docs/architecture/ADR.md`
-  - added **ADR-011 — Job-aware layered scoring uses a separate canonical `scoring_context`**
-- `docs/architecture/tech_debt.md`
-  - updated the `cv_submitted` evolution entry to the split parse/score path
-  - added **Single active `scoring_context` store (not requisition-scoped yet)**
-
-## Risks, Deviations, and Remaining R005 Focus
-
-- Deviations from `PLAN.md`:
-  - none in architecture scope; context authoring stayed outside the candidate event bus and the canonical scoring path is now typed + layered.
-- Remaining R005 risks:
-  - The runtime still supports only one active scoring context, not requisition-scoped parallel contexts.
-  - Deep scoring now uses the same layered schema and version linkage, but the deep skill itself remains deterministic/fake rather than job-aware cognition.
-  - `scoring_failed` remains coarse for provider/config/runtime failures.
-  - Deprecated compatibility code/tests for the old combined `cv_parse_and_score` skill still exist for harness stability, even though the canonical runtime path is now split parse + score.
-- Suggested next focus:
-  - Bind candidates to requisition-scoped scoring contexts instead of one global active context.
-  - Upgrade deep scoring from deterministic placeholder behavior to context-aware bounded cognition on the same layered contract.
-  - Refine `scoring_failed` into deterministic subcodes and explicit retryability semantics.
+- Deviation from `PLAN.md`:
+  - none in scope or architecture posture
+- Explicit confirmations:
+  - debt handling remained Architect-planned and PM-approved; Builder did not perform execution-time debt replanning
+  - no new capability scope was introduced beyond `R-004`
+- Remaining open risks:
+  - single active `scoring_context` remains a global runtime singleton
+  - deep scoring remains deterministic/fake rather than real bounded cognition
+  - `candidate_rejected` remains publicly writable and was intentionally left outside this round's internal-workflow-event removal list
+  - provider/runtime scoring failures still collapse to coarse `scoring_failed` behavior
 

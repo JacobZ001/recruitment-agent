@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,20 +33,25 @@ def client() -> TestClient:
         yield c
 
 
-def _advance_primary_sequence(client: TestClient, candidate_id: str) -> None:
+def _advance_primary_sequence(
+    client: TestClient,
+    candidate_id: str,
+    establish_ready_scoring_context,
+) -> None:
+    rt = client.app.state.vertical_slice
+    establish_ready_scoring_context(rt)
     for event_type in PRIMARY_VERTICAL_SLICE_EVENT_TYPES:
         if event_type == "candidate_created":
             continue
-        r = client.post(
-            "/events",
-            json={"event_type": event_type, "candidate_id": candidate_id},
-        )
-        assert r.status_code == 200, r.text
+        publish_recruitment_event(rt, UUID(candidate_id), event_type, {})
 
 
-def test_list_includes_available_actions_with_event_type_keys(client: TestClient) -> None:
+def test_list_includes_available_actions_with_event_type_keys(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(uuid4())
-    _advance_primary_sequence(client, cid)
+    _advance_primary_sequence(client, cid, establish_ready_scoring_context)
     row = next(x for x in client.get("/candidates").json() if x["candidate_id"] == cid)
     assert row["stage"] == PipelinePhase.SHORTLISTED.value
     keys = {a["key"] for a in row["available_actions"]}
@@ -54,9 +59,12 @@ def test_list_includes_available_actions_with_event_type_keys(client: TestClient
     assert all(a["key"] == a["event_type"] for a in row["available_actions"])
 
 
-def test_action_reject_moves_to_inactive(client: TestClient) -> None:
+def test_action_reject_moves_to_inactive(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(uuid4())
-    _advance_primary_sequence(client, cid)
+    _advance_primary_sequence(client, cid, establish_ready_scoring_context)
     r = client.post(
         f"/candidates/{cid}/action",
         json={"event_type": "recruiter_reject_candidate", "payload": dict(_GOVERNANCE_PAYLOAD)},
@@ -70,9 +78,12 @@ def test_action_reject_moves_to_inactive(client: TestClient) -> None:
     assert list_row["stage"] == PipelinePhase.INACTIVE.value
 
 
-def test_action_invalid_event_type_for_phase_returns_422(client: TestClient) -> None:
+def test_action_invalid_event_type_for_phase_returns_422(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
     cid = str(uuid4())
-    _advance_primary_sequence(client, cid)
+    _advance_primary_sequence(client, cid, establish_ready_scoring_context)
     r = client.post(
         f"/candidates/{cid}/action",
         json={"event_type": "recruiter_complete_interview", "payload": dict(_GOVERNANCE_PAYLOAD)},

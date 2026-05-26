@@ -334,6 +334,8 @@ class ScoringContext(_SchemaBase):
     organization_context: Optional[OrganizationContext] = Field(default=None)
     recruiter_actor_context: Optional[RecruiterActorContext] = Field(default=None)
     job_context: Optional[JobContext] = Field(default=None)
+    derived_l2_criteria: List[str] = Field(default_factory=list)
+    derived_l3_criteria: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     ready_at: Optional[datetime] = Field(default=None)

@@ -30,15 +30,8 @@ PRIMARY_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = (
     "deep_scoring_completed",
 )
 
-# Public HTTP allowlist excludes ``candidate_created``; write-path use cases may still
-# publish it directly for demo/runtime tests.
-PUBLIC_VERTICAL_SLICE_EVENT_TYPES: Tuple[str, ...] = tuple(
-    et for et in PRIMARY_VERTICAL_SLICE_EVENT_TYPES if et != "candidate_created"
-)
-
 PUBLIC_API_INGRESS_EVENT_TYPES: Tuple[str, ...] = (
-    PUBLIC_VERTICAL_SLICE_EVENT_TYPES
-    + ("cv_submitted",)
+    ("cv_submitted",)
     + GOVERNANCE_EVENT_TYPES
     + ("candidate_rejected",)
 )

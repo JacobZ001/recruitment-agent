@@ -85,6 +85,49 @@ def test_cv_submitted_requires_ready_scoring_context(client: TestClient) -> None
     assert r.json()["detail"]["code"] == "scoring_context_not_ready"
 
 
+def test_cv_submitted_rejects_collecting_context_with_weak_derivation_signals(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/scoring-context/organization",
+        json={
+            "company_name": "BlueOcean",
+            "environment_signals": ["fast-moving ops"],
+            "preference_signals": [],
+        },
+    )
+    client.post(
+        "/scoring-context/recruiter-actor",
+        json={
+            "actor_id": "recruiter-a",
+            "preference_signals": [],
+            "avoid_signals": [],
+        },
+    )
+    client.post(
+        "/scoring-context/job/recruiter-answers",
+        json={
+            "role_title": "Operations Recruiter",
+            "must_haves_answer": "stakeholder communication",
+            "preferred_answer": "",
+            "success_answer": "keep candidate flow organized",
+            "responsibilities_answer": "coordinate interviews",
+        },
+    )
+
+    cid = str(uuid4())
+    r = client.post(
+        "/events",
+        json={
+            "event_type": "cv_submitted",
+            "candidate_id": cid,
+            "payload": {"cv_text": _CV_HIGH},
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "scoring_context_not_ready"
+
+
 def test_cv_submitted_scoring_failure_returns_502(
     monkeypatch: pytest.MonkeyPatch,
     establish_ready_scoring_context,

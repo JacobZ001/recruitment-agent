@@ -61,22 +61,67 @@ def _job_context_has_required_signals(job: JobContext) -> bool:
     )
 
 
-def scoring_context_is_ready(context: ScoringContext) -> bool:
-    return (
-        context.organization_context is not None
-        and context.recruiter_actor_context is not None
-        and context.job_context is not None
-        and _job_context_has_required_signals(context.job_context)
+def _organization_context_has_required_signals(org: OrganizationContext) -> bool:
+    return bool(org.company_name.strip()) and bool(org.environment_signals) and bool(org.preference_signals)
+
+
+def _recruiter_actor_context_has_required_signals(recruiter: RecruiterActorContext) -> bool:
+    return bool(recruiter.actor_id.strip()) and bool(
+        recruiter.preference_signals or recruiter.avoid_signals
     )
+
+
+def _materialize_derived_criteria(
+    context: ScoringContext,
+) -> tuple[List[str], List[str]]:
+    org = context.organization_context
+    recruiter = context.recruiter_actor_context
+    job = context.job_context
+    if org is None or not _organization_context_has_required_signals(org):
+        raise ValueError(
+            "organization_context must include non-empty company_name plus bounded "
+            "environment_signals and preference_signals before ready"
+        )
+    if recruiter is None or not _recruiter_actor_context_has_required_signals(recruiter):
+        raise ValueError(
+            "recruiter_actor_context must include actor_id plus at least one recruiter "
+            "preference or avoid signal before ready"
+        )
+    if job is None or not _job_context_has_required_signals(job):
+        raise ValueError(
+            "job_context must include title plus bounded role signals before ready"
+        )
+    l2 = derive_l2_labels(job, org)
+    l3 = derive_l3_labels(org, recruiter)
+    if not l2:
+        raise ValueError("deterministic L2 derivation must yield non-empty criteria before ready")
+    if not l3:
+        raise ValueError("deterministic L3 derivation must yield non-empty criteria before ready")
+    return l2, l3
+
+
+def scoring_context_is_ready(context: ScoringContext) -> bool:
+    if context.status != ScoringContextStatus.READY:
+        return False
+    try:
+        l2, l3 = _materialize_derived_criteria(context)
+    except ValueError:
+        return False
+    return list(context.derived_l2_criteria) == list(l2) and list(context.derived_l3_criteria) == list(l3)
 
 
 def refresh_scoring_context(existing: Optional[ScoringContext]) -> ScoringContext:
     base = existing or ScoringContext()
-    if not scoring_context_is_ready(base):
+    try:
+        l2, l3 = _materialize_derived_criteria(base)
+    except ValueError:
         return _copy_context(
             base,
             status=ScoringContextStatus.COLLECTING,
             updated_at=_now_utc(),
+            ready_at=None,
+            derived_l2_criteria=[],
+            derived_l3_criteria=[],
         )
     now = _now_utc()
     return _copy_context(
@@ -85,6 +130,8 @@ def refresh_scoring_context(existing: Optional[ScoringContext]) -> ScoringContex
         updated_at=now,
         ready_at=now,
         stale_at=None,
+        derived_l2_criteria=l2,
+        derived_l3_criteria=l3,
     )
 
 
@@ -121,6 +168,9 @@ def update_scoring_context(
         status=next_status,
         updated_at=now,
         stale_at=stale_at,
+        ready_at=None if next_status != ScoringContextStatus.READY else context.ready_at,
+        derived_l2_criteria=[],
+        derived_l3_criteria=[],
         source_refs=next_source_refs,
     )
 
@@ -213,29 +263,23 @@ def normalize_job_context_from_answers(
 
 
 def derive_l2_labels(job_context: JobContext, organization_context: OrganizationContext) -> List[str]:
-    labels = _bounded_items(
+    return _bounded_items(
         list(job_context.hard_requirements[:2])
         + list(job_context.preferred_requirements[:1])
         + [f"Operate effectively in {signal}" for signal in organization_context.environment_signals[:1]]
         + list(job_context.success_signals[:1])
-    )
-    if not labels:
-        labels = [f"Fit for role: {job_context.title}"]
-    return labels[:3]
+    )[:3]
 
 
 def derive_l3_labels(
     organization_context: OrganizationContext,
     recruiter_actor_context: RecruiterActorContext,
 ) -> List[str]:
-    labels = _bounded_items(
+    return _bounded_items(
         list(recruiter_actor_context.preference_signals[:2])
         + list(organization_context.preference_signals[:1])
         + [f"Avoid: {item}" for item in recruiter_actor_context.avoid_signals[:1]]
-    )
-    if not labels:
-        labels = ["General recruiter/operator preference alignment"]
-    return labels[:3]
+    )[:3]
 
 
 def build_score_evaluation(

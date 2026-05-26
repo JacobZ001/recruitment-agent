@@ -34,6 +34,7 @@ from .scoring_context_service import (
     normalize_job_context_from_answers,
     normalize_job_context_from_text,
     refresh_scoring_context,
+    scoring_context_is_ready,
     update_scoring_context,
 )
 from schemas.state_schema import (
@@ -142,7 +143,7 @@ def _require_ready_scoring_context(runtime: IngressRuntime) -> ScoringContext:
     context = get_active_scoring_context(runtime)
     if context is None:
         raise ScoringContextNotReadyError("scoring_context_not_ready: no active scoring_context")
-    if context.status != ScoringContextStatus.READY:
+    if not scoring_context_is_ready(context):
         raise ScoringContextNotReadyError(
             f"scoring_context_not_ready: active scoring_context status is {context.status.value}"
         )
@@ -252,9 +253,48 @@ def refresh_active_scoring_context(runtime: IngressRuntime) -> ScoringContext:
     if refreshed.status != ScoringContextStatus.READY:
         raise InvalidScoringContextError(
             "scoring_context cannot become ready until organization_context, "
-            "recruiter_actor_context, and job_context are all present and valid"
+            "recruiter_actor_context, and job_context contain sufficient signals and "
+            "deterministic L2/L3 criteria derivation succeeds"
         )
     return _persist_scoring_context(runtime, refreshed)
+
+
+def _ensure_demo_scoring_context_ready(runtime: IngressRuntime) -> None:
+    current = get_active_scoring_context(runtime)
+    if current is not None and scoring_context_is_ready(current):
+        return
+    author_organization_context(
+        runtime,
+        OrganizationContext(
+            company_name="BlueOcean Demo",
+            industry="recruitment",
+            team_name="Demo Talent Ops",
+            environment_signals=["high-visibility recruiter operations"],
+            preference_signals=["clear communication"],
+            summary="Deterministic demo scoring context.",
+            source_refs=["demo://organization"],
+        ),
+    )
+    author_recruiter_actor_context(
+        runtime,
+        RecruiterActorContext(
+            actor_id="demo-recruiter",
+            actor_role="demo_operator",
+            preference_signals=["ownership"],
+            avoid_signals=["unclear updates"],
+            summary="Deterministic demo recruiter context.",
+            source_refs=["demo://recruiter"],
+        ),
+    )
+    author_job_context_from_recruiter_answers(
+        runtime,
+        role_title="Demo Recruiting Operations Specialist",
+        must_haves_answer="stakeholder communication\nprocess ownership",
+        preferred_answer="ATS familiarity",
+        success_answer="keep candidate flow organized",
+        responsibilities_answer="coordinate interviews\nsurface blockers early",
+    )
+    refresh_active_scoring_context(runtime)
 
 
 def _ensure_candidate_state(runtime: IngressRuntime, candidate_id: UUID) -> UUID:
@@ -309,12 +349,8 @@ def publish_ingress_event(
         raise InvalidIngressEventError(f"event_type not allowed: {event_type!r}")
 
     scoring_context: Optional[ScoringContext] = None
-    if event_type == "cv_submitted":
+    if event_type in ("cv_submitted", "deep_scoring_completed"):
         scoring_context = _require_ready_scoring_context(runtime)
-    elif event_type == "deep_scoring_completed":
-        current_context = get_active_scoring_context(runtime)
-        if current_context is not None and current_context.status == ScoringContextStatus.READY:
-            scoring_context = current_context
 
     _ensure_candidate_state(runtime, candidate_id)
     seq = runtime.next_publish_sequence()
@@ -449,6 +485,7 @@ def run_primary_demo_sequence(
 ) -> OrchestrationState:
     """Run the scripted primary vertical-slice sequence (requires pipeline phase NEW)."""
     _ensure_candidate_state(runtime, candidate_id)
+    _ensure_demo_scoring_context_ready(runtime)
     return runtime.run_primary_demo_sequence()
 
 

@@ -81,17 +81,10 @@ def _decision_summary_from_snapshot(
             parts["evidence.refs"] = refs
         return parts
 
-    if name in (
-        SKILL_DEEP_SCORING,
-        "recruitment.vertical_slice.cv_parse_and_score",
-        "recruitment.vertical_slice.cv_score_light",
-    ):
+    if name in (SKILL_DEEP_SCORING, "recruitment.vertical_slice.cv_score_light"):
         summary = (
             format_light_scoring_from_snapshot(state_snapshot)
-            if name in (
-                "recruitment.vertical_slice.cv_parse_and_score",
-                "recruitment.vertical_slice.cv_score_light",
-            )
+            if name == "recruitment.vertical_slice.cv_score_light"
             else format_deep_scoring_from_snapshot(state_snapshot)
         )
         if summary is None:
