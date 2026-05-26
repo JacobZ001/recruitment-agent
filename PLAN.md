@@ -8,6 +8,13 @@
   - **Major rounds** (`R003`, `R004`, ...) add scope/capabilities.
   - **Minor rounds** (`R004.1`, `R004.2`, ...) refine/fix within an existing major round without adding new capabilities.
 
+## Routing Context
+
+- Proposed routing outcome from prior closeout: `corrective-minor`
+- PM confirmed routing: `corrective-minor`
+- Major-round snapshot needed: `no`
+- Routing rationale: this round exists to harden and correct the still-open `R-004` major-round objective before any `advance-major` decision.
+
 ## Planning-Phase Debt Triage (Architect-Owned)
 
 - `docs/architecture/tech_debt.md` review is completed by Architect during planning (before Builder execution starts).

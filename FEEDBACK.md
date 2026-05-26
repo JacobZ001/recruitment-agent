@@ -5,6 +5,13 @@
 - status: done
 - blocker: none
 
+## Lightweight Round Closeout (Architect / PM)
+
+- proposed routing outcome: `corrective-minor`
+- PM confirmed routing: `corrective-minor`
+- major-round snapshot needed: `no`
+- closeout rationale: `R-004` delivered the major capability direction, but implementation quality required an in-family hardening round before advancing to the next major round.
+
 ## Plan Step Mapping
 
 - Step 1: done - Added explicit typed contracts for `organization_context`, `recruiter_actor_context`, `job_context`, and top-level `scoring_context`, plus a separate canonical scoring-context store wired into the runtime.

@@ -210,29 +210,20 @@ Do NOT start with autonomous agent behavior.
 
 ---
 
-# AI Coding Constraints
+# Shared Engineering Constraints
 
-AI assistants must:
+These rules apply to both Architect Agent and Builder Agent:
 
 - preserve architecture boundaries
 - avoid unnecessary abstraction
 - avoid hidden coupling
-- avoid modifying canonical schemas without approval
-
-Prefer:
-
-- small bounded tasks
-- explicit typing
-- deterministic behavior
-- modular implementation
-- approved cutovers that remove obsolete compatibility paths instead of preserving silent dual semantics
-
-Avoid:
-
-- large uncontrolled refactors
-- autonomous architecture rewrites
-- implicit assumptions
-- compatibility-shim creep after a PM-approved cutover unless the current `PLAN.md` explicitly requires a migration window
+- prefer small bounded changes
+- prefer explicit typing
+- prefer deterministic behavior
+- prefer modular implementation
+- avoid large uncontrolled refactors
+- avoid autonomous architecture rewrites
+- avoid implicit assumptions
 
 ---
 
@@ -250,8 +241,11 @@ Avoid:
 
 - Produces high-level architecture guidance and round plans.
 - Converts approved round scope into executable `PLAN.md`.
-- Reviews `FEEDBACK.md` and codebase changes, then proposes the next round.
+- Reviews `FEEDBACK.md` and codebase changes, reconciles roadmap / debt / ADR updates when needed, then proposes the next round.
 - Does not bypass PM approval for scope-changing work.
+- Must not smuggle speculative scope, unapproved contract changes, or autonomous architecture rewrites into `PLAN.md`.
+- Must treat `docs/architecture/ROADMAP.md`, `docs/architecture/tech_debt.md`, and `FEEDBACK.md` as the canonical planning inputs for round design.
+- Should prefer approved cutovers that remove obsolete compatibility paths instead of preserving silent dual semantics.
 
 ### Builder Agent (session name: `Builder Agent`)
 
@@ -267,6 +261,8 @@ Avoid:
     - state transitions
     - API contracts
 - unless explicitly listed in PLAN.md
+- Must avoid compatibility-shim creep after a PM-approved cutover unless the current `PLAN.md` explicitly requires a migration window.
+- May update roadmap/debt artifacts only when the current `PLAN.md` explicitly includes those updates in round scope; otherwise report suggested updates in `FEEDBACK.md`.
 
 ## Session Naming Convention
 
@@ -287,7 +283,17 @@ Avoid:
 - Location: repository root.
 - Ownership: Builder Agent.
 - Write mode: overwrite per round (keep only current round report).
-- Purpose: implementation status, file changes, tests, risks, and deviations.
+- Purpose: implementation status, file changes, tests, risks, deviations, and round-closeout routing metadata.
+- Builder owns the execution report content; Architect may append or refresh the closeout-routing fields during post-execution review.
+
+### Artifact routing
+
+- `docs/architecture/ROADMAP.md`: project direction, current operating posture, capability progress, and near-term upcoming actions.
+- `docs/architecture/tech_debt.md`: deferred work, architecture risk, scaling limits, and explicit debt decisions.
+- `docs/architecture/ADR.md`: durable architecture decisions and cutover choices that should remain true beyond a single round.
+- `PLAN.md`: frozen round scope, constraints, ordered execution steps, and acceptance criteria.
+- `FEEDBACK.md`: execution facts, test results, deviations, blockers, and suggested next-round signals.
+- Do not leave durable decisions or deferred-risk ownership only inside `PLAN.md` / `FEEDBACK.md`; promote them into `ADR.md`, `ROADMAP.md`, or `tech_debt.md` as appropriate.
 
 ## Development Round Protocol
 
@@ -299,16 +305,43 @@ Each round follows this sequence:
    - Architect updates the file-level `Last full registry sweep` date when a full sweep is performed.
    - Architect updates per-entry `Last reviewed` when an entry is explicitly triaged in planning (review date, not just edit date).
    - If sweep finds status drift, Architect may correct debt status/priority (`OPEN` / `IN_PROGRESS` / `RESOLVED` / `SUPERSEDED`) before freezing the round plan.
-3. PM reviews and confirms scope, risks, acceptance criteria, and debt handling decisions.
-4. Architect Agent overwrites `PLAN.md` with executable round instructions.
-5. Builder Agent executes `PLAN.md` in a separate implementation session.
-6. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
-7. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then proposes next round.
+3. Architect Agent reviews `docs/architecture/ROADMAP.md` during planning.
+   - `Current Operating Posture` is reviewed every round, but updated only when repo posture materially changes; keep it to a maximum of three sentences.
+   - `Capability Roadmap Layer` is updated when capability reality or stage status changes.
+   - `Upcoming (Action Queue)` is refreshed from capability gaps plus debt priorities.
+   - Architect proposes the best-fit upcoming action(s) for the round rather than mechanically loading the next listed item.
+4. PM reviews and confirms scope, risks, acceptance criteria, debt handling decisions, and proposed roadmap-aligned action selection.
+5. Architect Agent overwrites `PLAN.md` with executable round instructions.
+6. Builder Agent executes `PLAN.md` in a separate implementation session.
+7. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
+8. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then explicitly reconciles `docs/architecture/ROADMAP.md` to reflect execution reality before planning the next round.
+9. Architect Agent updates `docs/architecture/tech_debt.md` and `docs/architecture/ADR.md` when execution materially changes debt posture or produces a durable architecture decision not already recorded.
+10. Architect Agent performs lightweight round closeout by recommending the next-round routing decision to PM.
+11. PM confirms the routing decision:
+   - continue within the same major round,
+   - run a corrective minor round within the same major round,
+   - or advance to the next major round.
+12. Architect Agent proposes next round using the updated roadmap / debt / ADR context and the confirmed routing decision.
 
 ### Round naming convention
 
 - **Major rounds** (`R003`, `R004`, ...): add scope/capabilities.
 - **Minor rounds** (`R004.1`, `R004.2`, ...): stabilization/hardening within a parent major round; no new capability scope.
+
+### Lightweight round closeout and routing
+
+- Round closeout is a routing checkpoint, not a heavyweight release gate.
+- After reviewing `FEEDBACK.md`, Architect recommends one of these routing outcomes to PM:
+  - `continue-major`: the current major-round objective is still in progress; the next round stays within the same major round.
+  - `corrective-minor`: the current baseline is usable, but the next round should first be a corrective / hardening minor round inside the same major round.
+  - `advance-major`: the current major-round objective is sufficiently achieved, and the next round should open the next major round.
+- PM confirms the routing outcome; this confirmation means "valid baseline for next iteration", not "all concerns are permanently closed".
+- Residual issues that do not block forward progress should flow into the next round scope and/or `docs/architecture/tech_debt.md`, not force a heavyweight reopen process.
+- If the current state is not a valid baseline for continued iteration, use the `Blocked escalation protocol` or route to `corrective-minor`; do not silently treat it as major-round completion.
+- Major/minor naming must follow the confirmed routing decision:
+  - `continue-major` -> next round remains within the same major round.
+  - `corrective-minor` -> next round uses the next minor suffix under the same major round.
+  - `advance-major` -> next round starts the next major round number.
 
 ### Debt registry discipline
 
@@ -320,14 +353,66 @@ Each round follows this sequence:
   - per-entry explicit review (`Last reviewed`)
 - Removing a debt from active concern requires an explicit status change to `RESOLVED` or `SUPERSEDED`; do not silently let stale OPEN entries drift.
 
+### Roadmap discipline
+
+- `docs/architecture/ROADMAP.md` is the canonical project roadmap.
+- `Project Vision Layer` is static background and should change only when business direction or architectural thesis changes.
+- `Current Operating Posture` is reviewed every planning round, but edited only when runtime posture or primary delivery focus materially changes; keep it under three sentences.
+- `Capability Roadmap Layer` tracks major capability areas and status, not round-by-round implementation detail.
+- `Upcoming (Action Queue)` is the near-term queue derived from capability gaps plus debt priorities; it is not a second independent roadmap.
+- Planned round scope should normally be selected from `Upcoming`, unless PM explicitly reprioritizes or a corrective round is required.
+- After each execution round, Architect must reconcile `ROADMAP.md` against `FEEDBACK.md` before proposing the next round, even when the result is "no roadmap change required".
+
+### Blocked escalation protocol
+
+- If Builder encounters plan ambiguity, a prerequisite gap, a material architecture conflict, or any required change that is outside the currently approved `PLAN.md`, Builder must stop further out-of-scope implementation.
+- Builder must overwrite `FEEDBACK.md` with `status: blocked` when handing control back due to a blocked escalation, including:
+  - the blocked execution step,
+  - the concrete blocker,
+  - what was completed before the stop,
+  - the smallest known unblock path.
+- Architect then decides whether the blocker can be resolved by clarification within the already approved scope or requires a revised `PLAN.md`.
+- If Architect changes scope, acceptance criteria, debt handling, contracts, or cutover decisions, PM must re-approve before Builder resumes.
+- If the resolution is only a clarification that stays within the already approved scope, Architect may refresh `PLAN.md` and return execution to Builder without a new PM approval.
+- A blocked escalation is a control-flow pause, not permission for Builder to improvise around governance boundaries.
+
+### Major-round git snapshot discipline
+
+- Governance requires a formal git snapshot only when a major round is being closed and the next round is advancing to the next major round.
+- Intermediate engineering commits are optional local/team checkpoints; they are allowed, but they do not replace the formal major-round governance snapshot.
+- Create a round-governance commit when all of the following are true:
+  - the current round is the closing round of a major round (for example, `R-005.3` closes `R-005`),
+  - Architect recommends `advance-major`,
+  - PM confirms that the next round should open the next major round,
+  - and the repo state is coherent enough to snapshot code plus governance artifacts together.
+- Minor rounds inside an open major round do not require their own governance commit unless PM explicitly asks for an intermediate snapshot.
+- The major-round snapshot commit should include the relevant code changes plus synchronized governance artifacts (`PLAN.md`, `FEEDBACK.md`, `ROADMAP.md`, `tech_debt.md`, `ADR.md`) when they were part of the round outcome.
+- Commit messages should follow conventional commit style:
+  - title format: `<type>(<scope>): <summary>`
+  - choose `feat`, `fix`, `refactor`, `docs`, `test`, or another conventional type that best matches the dominant outcome of the completed major round
+  - keep the title concise and outcome-oriented
+  - use the commit body for the major round context, such as the major round ID, capability outcome, roadmap/debt updates, and notable cutovers
+- Example title: `feat(agents): close R-005 governance refinements`
+- Example body topics:
+  - `Major round: R-005`
+  - capability or architecture milestone reached
+  - debt / roadmap / ADR updates synchronized in the snapshot
+
 ## Plan and Feedback Standards
 
 ### `PLAN.md` must include
 
 - Round ID and one-sentence goal.
 - Round type (`major` or `minor`) and parent major round when applicable.
+- Round routing context from the prior closeout:
+  - `proposed routing outcome`
+  - `PM confirmed routing`
+  - `major-round snapshot needed: yes/no`
 - Scope in / scope out.
 - Explicit constraints and architecture boundaries.
+- Planning-phase roadmap alignment summary from `docs/architecture/ROADMAP.md`:
+  - capability areas this round is intended to advance,
+  - upcoming action(s) selected for this round (or explicit rationale when deviating).
 - Planning-phase debt triage summary from `docs/architecture/tech_debt.md`:
   - debt IDs selected for this round,
   - debt IDs explicitly deferred this round (with rationale),
@@ -343,16 +428,25 @@ Each round follows this sequence:
 - Full file change summary (`A` / `M` / `D`).
 - Test commands and results.
 - Risks, deviations, and blockers.
+- Lightweight closeout routing fields:
+  - `proposed routing outcome`
+  - `PM confirmed routing`
+  - `major-round snapshot needed: yes/no`
+- Roadmap updates made this round (capability status changes, posture changes, or upcoming queue changes) if any.
 - Debt IDs touched, resolved, deferred, or newly identified during execution/review.
 - Suggested next-round focus (short).
+- If status is `blocked`, the exact blocked step, required unblock decision, and whether PM re-approval is needed.
 
 ## Governance and Guardrails
 
 - `PLAN.md` is the only execution instruction source for Builder Agent.
 - Builder Agent should avoid opportunistic scope expansion.
 - Builder Agent does **not** perform independent debt planning during execution.
+- Builder Agent does **not** perform independent roadmap planning during execution.
 - Debt handling scope is Architect-planned, PM-approved, and frozen in `PLAN.md` before Builder execution starts.
 - Schema or state-machine contract changes require explicit PM approval in the current round scope.
+- Architect Agent must not freeze contract-changing round scope into `PLAN.md` without that explicit PM approval.
 - If implementation reality conflicts with `PLAN.md`, Builder reports in `FEEDBACK.md` and pauses further out-of-scope changes.
+- Blocked execution follows the explicit `Blocked escalation protocol`; Builder must not self-authorize workaround scope.
 - Approved cutovers are real removals: Builder and Architect should not preserve or reintroduce legacy compatibility readers/writers unless the current `PLAN.md` explicitly authorizes that compatibility window.
 
