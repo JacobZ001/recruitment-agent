@@ -294,19 +294,44 @@ Avoid:
 Each round follows this sequence:
 
 1. Architect Agent proposes a light high-level structured plan for PM review.
-2. PM reviews and confirms scope, risks, and acceptance criteria.
-3. Architect Agent overwrites `PLAN.md` with executable round instructions.
-4. Builder Agent executes `PLAN.md` in a separate implementation session.
-5. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
-6. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then proposes next round.
+2. Architect Agent performs a full `docs/architecture/tech_debt.md` registry sweep in planning phase and proposes debt handling for this round (`close` / `partial` / `defer` with rationale).
+   - Triage uses the canonical debt registry format in `docs/architecture/tech_debt.md`, including stable `Debt ID` references (`TD-<SCOPE>-<NNN>`).
+   - Architect updates the file-level `Last full registry sweep` date when a full sweep is performed.
+   - Architect updates per-entry `Last reviewed` when an entry is explicitly triaged in planning (review date, not just edit date).
+   - If sweep finds status drift, Architect may correct debt status/priority (`OPEN` / `IN_PROGRESS` / `RESOLVED` / `SUPERSEDED`) before freezing the round plan.
+3. PM reviews and confirms scope, risks, acceptance criteria, and debt handling decisions.
+4. Architect Agent overwrites `PLAN.md` with executable round instructions.
+5. Builder Agent executes `PLAN.md` in a separate implementation session.
+6. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
+7. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then proposes next round.
+
+### Round naming convention
+
+- **Major rounds** (`R003`, `R004`, ...): add scope/capabilities.
+- **Minor rounds** (`R004.1`, `R004.2`, ...): stabilization/hardening within a parent major round; no new capability scope.
+
+### Debt registry discipline
+
+- `docs/architecture/tech_debt.md` is the canonical debt registry.
+- Debt entries use stable `Debt ID` references in the form `TD-<SCOPE>-<NNN>`; IDs are never renumbered or reused.
+- `PLAN.md` and `FEEDBACK.md` should reference debt items by `Debt ID`, not only by title text.
+- Each planning round's debt sweep should distinguish:
+  - file-level full registry sweep (`Last full registry sweep`)
+  - per-entry explicit review (`Last reviewed`)
+- Removing a debt from active concern requires an explicit status change to `RESOLVED` or `SUPERSEDED`; do not silently let stale OPEN entries drift.
 
 ## Plan and Feedback Standards
 
 ### `PLAN.md` must include
 
 - Round ID and one-sentence goal.
+- Round type (`major` or `minor`) and parent major round when applicable.
 - Scope in / scope out.
 - Explicit constraints and architecture boundaries.
+- Planning-phase debt triage summary from `docs/architecture/tech_debt.md`:
+  - debt IDs selected for this round,
+  - debt IDs explicitly deferred this round (with rationale),
+  - any debt status corrections made during sweep (e.g. `RESOLVED` / `SUPERSEDED` / priority change).
 - Ordered execution steps.
 - Acceptance criteria (testable checklist).
 - Required Builder feedback format reminder.
@@ -318,12 +343,15 @@ Each round follows this sequence:
 - Full file change summary (`A` / `M` / `D`).
 - Test commands and results.
 - Risks, deviations, and blockers.
+- Debt IDs touched, resolved, deferred, or newly identified during execution/review.
 - Suggested next-round focus (short).
 
 ## Governance and Guardrails
 
 - `PLAN.md` is the only execution instruction source for Builder Agent.
 - Builder Agent should avoid opportunistic scope expansion.
+- Builder Agent does **not** perform independent debt planning during execution.
+- Debt handling scope is Architect-planned, PM-approved, and frozen in `PLAN.md` before Builder execution starts.
 - Schema or state-machine contract changes require explicit PM approval in the current round scope.
 - If implementation reality conflicts with `PLAN.md`, Builder reports in `FEEDBACK.md` and pauses further out-of-scope changes.
 - Approved cutovers are real removals: Builder and Architect should not preserve or reintroduce legacy compatibility readers/writers unless the current `PLAN.md` explicitly authorizes that compatibility window.
