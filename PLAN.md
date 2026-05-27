@@ -1,163 +1,158 @@
-# PLAN (Round R-005)
+# PLAN (Round R-006)
 
 ## Round Type
 
 - Type: **Major round** (new capability round)
 - Naming practice (governance rule):
-  - **Major rounds** (`R003`, `R004`, `R005`, ...) add scope/capabilities.
-  - **Minor rounds** (`R004.1`, `R004.2`, ...) refine/fix within an existing major round without adding new capability scope.
+  - **Major rounds** (`R003`, `R004`, `R005`, `R006`, ...) add scope/capabilities.
+  - **Minor rounds** (`R005.1`, `R005.2`, ...) refine/fix within an existing major round without adding new capability scope.
 
 ## Routing Context
 
 - Proposed routing outcome from prior closeout: `advance-major`
 - PM confirmed routing: `advance-major`
 - Major-round snapshot needed: `yes`
-- Routing rationale: `R-004` closed after `R-004.1` corrective hardening. `R-005` opens a new major capability round for prose-first `scoring_context` authoring while preserving typed canonical context and persisted derived criteria.
+- Routing rationale: `R-005` closed as a completed major round after the prose-first `scoring_context` cutover and its major-round snapshot. `R-006` opens a new major capability round focused on recruiter-facing surface hardening, with PM explicitly prioritizing recruiter operator surfaces over a strict top-to-bottom pass through the remaining roadmap queue.
 
 ## Planning-Phase Roadmap Alignment (Architect-Owned)
 
 - `docs/architecture/ROADMAP.md` review is completed in planning.
 - Selected `Upcoming (Action Queue)` item for this round:
-  - **Job-aware three-layer evaluation hardening** (`TD-SKILLS-001`, `TD-PERSISTENCE-008`, `TD-PERSISTENCE-009`)
+  - **Recruiter surface hardening** (`TD-API-008`, `TD-API-009`, `TD-API-010`, `TD-API-013`)
 - Capability areas advanced by this round:
   - `Recruiter Workflow Operation`
-  - `Controlled Cognition`
+  - `Human Governance`
 - Alignment rationale:
-  - this round continues hardening the `scoring_context` lifecycle,
-  - shifts user-facing authoring to prose-first input,
-  - preserves typed canonical context/signals,
-  - and makes persisted derived criteria the canonical downstream scoring input.
+  - this round hardens recruiter-facing list/detail/action surfaces after `R-005` improved internal `scoring_context` discipline,
+  - unifies recruiter action semantics across the public API surface,
+  - and makes recruiter-visible workflow affordances reflect deterministic policy truth rather than static hints or loosely typed action posts.
+- Queue note:
+  - `ROADMAP.md` item 2 (`Deterministic hard-filter restoration`) remains valid, but PM explicitly selected recruiter-surface hardening as the next major round.
 
 ## Planning-Phase Debt Triage (Architect-Owned)
 
 - `docs/architecture/tech_debt.md` review is completed by Architect during planning (before Builder execution starts).
 - PM-approved debt handling for this round is frozen into this `PLAN.md`; Builder executes only those approved debt actions.
 - Debt IDs selected for this round:
-  - `TD-SKILLS-001` - extend canonical scorer-facing authoring around `cv + scoring_context` without reopening public ingress loopholes
-  - `TD-PERSISTENCE-008` - keep evaluation precedence semantics explicit while criteria generation/consumption becomes more canonical
-  - `TD-PERSISTENCE-009` - preserve and explicitly track the single active `scoring_context` store while the authoring shape evolves
+  - `TD-API-008` - make recruiter action availability capable of reflecting transition-guard truth rather than only phase-level registry matching
+  - `TD-API-009` - add deterministic per-action payload validation at the recruiter action boundary
+  - `TD-API-010` - add deterministic action ordering/grouping metadata without introducing a duplicate phase-action map
+  - `TD-API-013` - remove static `next_actions` drift from candidate detail surfaces
 - Debt IDs explicitly deferred this round:
-  - `TD-ORCHESTRATOR-011` - deterministic hard-filter restoration remains a separate round
-  - `TD-API-011`, `TD-API-012` - API hardening remains a separate round
-  - `TD-CONTRACTS-009` - broader centralized scoring policy governance remains deferred beyond this bounded slice
-  - `TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004` - deep scoring continuity / questionnaire branching remain out of scope beyond compatibility-preserving alignment
+  - `TD-ORCHESTRATOR-011` - deterministic hard-filter restoration remains a separate roadmap round
+  - `TD-API-011`, `TD-API-012` - broad API hardening remains a separate round
+  - `TD-INSPECTION-002`, `TD-INSPECTION-003` - candidate-scoped timeline/history work remains a separate round
+  - `TD-API-007` - recruiter action label ownership / copy strategy remains deferred unless minimally needed for parity in this bounded slice
 - Debt status corrections made during sweep:
   - none planned in advance; update only if implementation reality explicitly resolves or supersedes an entry touched by this round
 
 ## Goal
 
-Introduce a bounded prose-first `scoring_context` authoring vertical slice: user input becomes freeform, a bounded LLM skill normalizes that input into internal typed canonical context/signals plus persisted `derived_l2_criteria` / `derived_l3_criteria`, and downstream scoring consumes those persisted criteria rather than silently re-deriving them.
+Introduce a bounded recruiter-surface hardening vertical slice: `GET /candidates`, `GET /candidate/{candidate_id}`, and `POST /candidates/{candidate_id}/action` should all consume the same deterministic recruiter-action semantics, candidate detail should stop relying on static action hints as its authoritative source, and recruiter action payloads should validate through programmatic per-event rules before publish.
 
 ## Scope In
 
-- Add freeform authoring support for `organization_context`, `recruiter_actor_context`, and `job_context`.
-- Allow prompts/forms to guide users toward signal-rich prose, but do **not** require explicit signal-form entry as the primary authoring UX.
-- Preserve typed canonical persistence in `ScoringContext` rather than collapsing the store to prose-only or criteria-only state.
-- Keep signal-like canonical fields as internal normalized semantics, generated from prose by a bounded LLM normalization/derivation skill.
-- Persist authored prose/source text alongside normalized typed context where it materially improves auditability and future re-derivation.
-- Keep `refresh` as the explicit materialization gate that establishes `ready` and persists canonical `derived_l2_criteria` / `derived_l3_criteria`.
-- Make downstream scoring consume persisted derived criteria as the canonical L2/L3 inputs instead of re-deriving labels at score time.
-- Add focused tests for prose normalization, refresh/readiness behavior, staleness/version semantics, persistence, and canonical criteria consumption.
+- Unify recruiter-facing action derivation for:
+  - `GET /candidates`
+  - `GET /candidate/{candidate_id}`
+  - `POST /candidates/{candidate_id}/action`
+- Introduce a canonical deterministic recruiter-action descriptor/projection layer driven from transition-registry truth rather than a second phase-to-action table.
+- Replace static detail-view `next_actions` drift with data derived from the same canonical action source used by recruiter list/detail/action flows.
+- Add deterministic recruiter action metadata needed for ordering/grouping in recruiter-facing API surfaces.
+- Add deterministic per-action payload validation keyed by recruiter `event_type`, while preserving thin HTTP routes.
+- Add focused tests proving recruiter list/detail/action parity, stable validation behavior, and preserved transition outcomes for the current action set.
+- Keep the demo/recruiter presentation aligned if a recruiter-facing surface would otherwise drift from the hardened API semantics.
 
 ## Scope Out
 
-- No `Deterministic hard-filter restoration` work.
-- No recruiter-surface UX / action-surface redesign.
-- No API idempotency / ingress hardening beyond what the new authoring endpoints minimally require.
-- No requisition-scoped or multi-active `scoring_context` redesign.
-- No real deep-scoring cognition redesign; keep the current bounded fake/deferred posture.
-- No deletion of internal signal fields from canonical schemas in this round.
+- No new recruiter actions, pipeline phases, transition rules, or orchestration-state redesign.
+- No broad API hardening (`TD-API-011`, `TD-API-012`).
+- No timeline/history hardening (`TD-INSPECTION-002`, `TD-INSPECTION-003`).
+- No auth/RBAC, multi-tenant, or runtime-isolation work.
+- No deterministic hard-filter restoration (`TD-ORCHESTRATOR-011`).
+- No deep-scoring / questionnaire continuity redesign.
 
 ## Constraints
 
 - Deterministic ownership remains in program logic:
-  - LLM may extract/normalize/derive bounded context outputs,
-  - but LLM must **not** own `ready/stale` transitions, routing, retries, or orchestration control.
-- `ScoringContext` must remain the explicit deterministic contract used for gating, versioning, and persistence.
-- `refresh` remains the only action that can materialize canonical derived criteria and move context to `ready`.
-- Edits to authored prose or normalized canonical fields must continue to increment `context_version` and make prior evaluations stale under the current model.
-- Do not introduce a second competing source of truth for criteria:
-  - `refresh` materializes,
-  - downstream scoring consumes.
-- Preserve public recruiter ingress boundaries established in `R-004.1`.
+  - recruiter action availability, validation, and ordering must remain programmatic,
+  - prompts / LLMs must **not** own recruiter action semantics, routing, or guard evaluation.
+- Transition-registry truth remains canonical for recruiter action availability; do **not** introduce a second authoritative phase→action mapping table.
+- Keep API routes thin:
+  - recruiter-action derivation and payload validation belong in deterministic recruitment modules,
+  - not inside FastAPI route handlers.
+- Preserve compatibility where reasonable:
+  - prefer deriving the existing `next_actions: List[str]` detail surface from canonical recruiter-action data before widening public response shape.
+- Guard-aware hardening should be real, but bounded:
+  - if the default recruiter-facing rules remain unguarded in this round, prove guard-aware behavior with targeted registry/fixture tests rather than by forcing new business policy into the default registry.
+- Existing valid shortlist / interview / offer / reject / reconsider flows must preserve current deterministic transition behavior.
 
 ## Execution Steps
 
-1. **Define the prose-first authoring contract**
-   - Introduce bounded freeform authoring inputs for organization, recruiter, and job context.
-   - Decide which authored prose is persisted directly in canonical context vs retained through explicit `source_refs` / authored-text fields.
-   - Keep user-facing authoring prose-first even when prompts/forms guide the user toward signal-rich content.
+1. **Introduce a canonical recruiter-action projection layer**
+   - Create one deterministic recruiter-action source that derives actions from transition-registry truth.
+   - Ensure it can carry recruiter-safe metadata such as:
+     - `label`
+     - optional grouping/category metadata
+     - optional deterministic sort/order metadata
+   - Keep registry truth canonical; do **not** reintroduce a duplicate phase-action map.
 
-2. **Add a bounded LLM normalization / criteria-derivation path**
-   - Implement or wire a bounded LLM skill that converts authored prose into:
-     - internal typed canonical context/signals
-     - candidate `derived_l2_criteria`
-     - candidate `derived_l3_criteria`
-   - Keep outputs bounded, inspectable, and versionable.
-   - Do **not** let this skill mutate workflow state directly.
+2. **Align recruiter list and detail surfaces to the same source**
+   - Make `GET /candidates` and `GET /candidate/{candidate_id}` consume the same underlying recruiter-action semantics.
+   - Remove the authoritative role of static `_next_actions_for_phase(...)`-style detail hints.
+   - Keep detail-view compatibility as much as possible by deriving current `next_actions` strings from canonical action items unless a response-shape widening is clearly justified.
 
-3. **Preserve typed canonical context/signals as the control-plane contract**
-   - Store normalized organization/recruiter/job context in `ScoringContext`.
-   - Keep internal signal-like fields available as canonical semantics even though the user is no longer asked to author those fields directly.
-   - Do **not** remove internal signal fields in this round.
+3. **Add deterministic recruiter action payload validation**
+   - Introduce a deterministic action-payload schema / validator registry keyed by recruiter `event_type`.
+   - Validate recruiter action payloads at the API/use-case boundary before publish.
+   - Keep unstructured payloads only for actions that truly remain payload-light in this bounded slice.
 
-4. **Keep `refresh` as the explicit materialization gate**
-   - `collecting` / `stale` remain editable but non-ingress-ready.
-   - `ready` must mean:
-     - prose has been normalized into typed canonical context/signals,
-     - canonical `derived_l2_criteria` / `derived_l3_criteria` were successfully materialized and persisted,
-     - the stored ready-state payload is sufficient for later score-time consumption without hidden re-derivation.
+4. **Make recruiter action POST consume the same canonical action semantics**
+   - Keep `POST /candidates/{candidate_id}/action` aligned with the same canonical recruiter-action source used by list/detail surfaces.
+   - Ensure advertised availability and POST-time validation stay consistent.
+   - Add guard-aware plumbing so recruiter surfaces can stay truthful when guarded rules exist.
 
-5. **Make downstream scoring consume canonical persisted criteria**
-   - Update the scoring path so L2/L3 inputs come from persisted `derived_l2_criteria` / `derived_l3_criteria`.
-   - Remove the hidden second source of truth where score-time logic locally re-derives criteria from context.
-   - Preserve deterministic gating and context-version semantics already established in `R-004` / `R-004.1`.
+5. **Preserve recruiter-surface truth across nearby surfaces**
+   - Align any recruiter-facing demo/API surface that would otherwise drift from the canonical recruiter-action source after this round.
+   - Keep this bounded to recruiter-surface truthfulness, not broader demo/runtime redesign.
 
-6. **Align API responses and persistence**
-   - Expose the new authoring/normalized state only enough to keep it inspectable and testable.
-   - Persist the new `ScoringContext` shape consistently in both in-memory and SQLite-backed stores.
-   - Keep current single-active-context scope explicit and unchanged.
-
-7. **Test the bounded vertical slice**
+6. **Test the bounded recruiter surface hardening slice**
    - Add/adjust tests for:
-     - prose authoring input acceptance,
-     - bounded LLM normalization output shape,
-     - `refresh` success/failure,
-     - `ready` / `collecting` / `stale` semantics,
-     - SQLite persistence of new fields,
-     - downstream scoring consuming canonical persisted criteria rather than local re-derivation.
+     - recruiter list/detail/action parity,
+     - deterministic action ordering/grouping metadata,
+     - per-action payload validation and stable error behavior,
+     - guard-aware availability behavior (including fixture/registry-based coverage if default rules stay unguarded),
+     - preserved valid shortlist/interview/offer/reject/reconsider flows.
 
 ## Acceptance Criteria
 
-- [ ] A user can author `organization_context`, `recruiter_actor_context`, and `job_context` through freeform inputs rather than signal-form-first input.
-- [ ] Prompts/forms may guide signal-rich prose, but the canonical user-authored surface is prose-first.
-- [ ] A bounded LLM skill normalizes prose into internal typed canonical context/signals.
-- [ ] Internal signal/context fields remain available as normalized canonical semantics; this round does not delete them.
-- [ ] `refresh` remains the only materialization gate for `derived_l2_criteria` / `derived_l3_criteria` and `ready` status.
-- [ ] `derived_l2_criteria` / `derived_l3_criteria` are persisted in `ScoringContext` and become the canonical source for downstream scoring.
-- [ ] Downstream scoring no longer silently re-derives L2/L3 labels at score time.
-- [ ] `ScoringContext` versioning, stale-marking, and ingress gating remain deterministic and explicit.
-- [ ] Persistence works in both in-memory and SQLite-backed runtime modes for the updated `ScoringContext` shape.
-- [ ] No unrelated roadmap items are pulled into `R-005` scope:
+- [ ] `GET /candidates` and `GET /candidate/{candidate_id}` are driven by the same deterministic recruiter-action source.
+- [ ] Candidate detail no longer relies on static phase-based `next_actions` hints as the authoritative action surface.
+- [ ] `POST /candidates/{candidate_id}/action` validates payload shape per recruiter `event_type` through deterministic program logic and returns stable validation errors for bad payloads.
+- [ ] Recruiter action ordering is deterministic and policy-shaped rather than raw alphabetical `event_type` sorting.
+- [ ] If a guarded recruiter action rule exists, recruiter surfaces and action POST behavior remain consistent with the same rule outcome.
+- [ ] Existing valid shortlist / interview / offer / reject / reconsider flows preserve their current deterministic transition behavior.
+- [ ] No unrelated roadmap items are pulled into `R-006` scope:
   - no hard-filter restoration,
   - no broad API hardening,
-  - no requisition-scoped context redesign,
-  - no deep-scoring cognition redesign.
+  - no timeline/history hardening,
+  - no auth/multi-tenant/runtime-isolation redesign.
 
 ## Required Builder Feedback
 
 Builder Agent must overwrite `FEEDBACK.md` and include:
 
 - round status (`done` / `partial` / `blocked`) and blockers
-- step-by-step mapping against the 7 execution steps above
+- step-by-step mapping against the 6 execution steps above
 - full file change list (`A` / `M` / `D`)
-- exact authoring inputs added/changed for prose-first organization/recruiter/job context
-- exact canonical typed fields/signals retained internally and how they are populated from prose
-- exact bounded LLM skill inputs/outputs introduced for normalization / criteria derivation
-- exact `refresh` semantics before/after for prose normalization, criteria materialization, and `ready` gating
-- exact downstream scoring behavior before/after regarding persisted criteria vs local re-derivation
-- exact persistence changes made for `ScoringContext` in in-memory and SQLite stores
-- exact tests added/updated for normalization, `ready/stale`, persistence, and score consumption behavior
+- exact recruiter-action source-of-truth behavior before/after for:
+  - `GET /candidates`
+  - `GET /candidate/{candidate_id}`
+  - `POST /candidates/{candidate_id}/action`
+- exact action metadata added/changed for recruiter surfaces (labels, grouping, ordering, compatibility notes)
+- exact payload validation behavior added/changed per recruiter `event_type`
+- exact detail-view `next_actions` semantics before/after
+- exact guard-aware behavior added, including whether the default registry remained unguarded and how guarded semantics were tested
+- exact tests added/updated for recruiter list/detail/action parity and stable validation behavior
 - technical debt updates made (items reviewed, changed, deferred, or resolved)
-- confirmation that no hidden second source of truth for criteria remains after the round
-- confirmation that no out-of-scope capability work was added to `R-005`
+- confirmation that no new workflow states/phases or unrelated ingress/runtime hardening work were added to `R-006`

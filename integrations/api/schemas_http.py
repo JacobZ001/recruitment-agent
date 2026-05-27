@@ -176,6 +176,7 @@ class CandidateViewResponse(BaseModel):
     flags: Dict[str, Any] = Field(default_factory=dict)
     scores: Dict[str, Any] = Field(default_factory=dict)
     ranking: Dict[str, Any] = Field(default_factory=dict)
+    available_actions: List["RecruiterActionItem"] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
 
 
@@ -191,6 +192,8 @@ class RecruiterActionItem(BaseModel):
     key: str
     label: str
     event_type: str
+    group: str
+    order: int
 
 
 class CandidateListItem(BaseModel):

@@ -1,4 +1,4 @@
-# FEEDBACK (Round R-005)
+# FEEDBACK (Round R-006)
 
 ## Execution Status
 
@@ -7,357 +7,201 @@
 
 ## Plan Step Mapping
 
-- Step 1: done - Added prose-first authoring contract for organization, recruiter, and job context. `ScoringContext` now persists authored prose alongside normalized typed context and derived criteria.
-- Step 2: done - Added bounded LLM materialization skill `recruitment.scoring_context.materialize_from_prose` that converts prose into typed canonical context plus candidate `derived_l2_criteria` / `derived_l3_criteria`.
-- Step 3: done - Preserved typed canonical `OrganizationContext`, `RecruiterActorContext`, and `JobContext` as the control-plane contract; internal typed authoring helpers now synthesize authoring prose so they still flow through the same refresh materialization path.
-- Step 4: done - Kept `refresh` as the only materialization gate: it now normalizes stored prose into typed context, persists canonical derived criteria, and establishes `ready`.
-- Step 5: done - Updated downstream light-scoring to consume persisted `ScoringContext.derived_l2_criteria` / `derived_l3_criteria` instead of locally re-deriving labels from context.
-- Step 6: done - Updated API response shape and persistence behavior so authored prose, normalized typed context, and derived criteria are all inspectable and reload correctly in both in-memory and SQLite modes.
-- Step 7: done - Added focused tests for prose authoring acceptance, bounded normalization output, refresh semantics, persistence, and score-time consumption of canonical persisted criteria.
+- Step 1: done - Hardened `modules/recruitment/policies.py` into the canonical recruiter-action projection layer. Recruiter actions are still derived from transition-registry truth, but now carry deterministic `group` and `order` metadata and can evaluate guards through `TransitionEngine`.
+- Step 2: done - Aligned `GET /candidates` and `GET /candidate/{candidate_id}` to the same recruiter-action source. Candidate detail now exposes structured `available_actions`, and compatibility `next_actions` is derived from those canonical actions instead of a static phase-hint map.
+- Step 3: done - Added deterministic recruiter action payload validation keyed by recruiter `event_type` before publish. The current bounded action set validates through a per-event registry and returns stable `invalid_candidate_action_payload` errors for malformed payloads.
+- Step 4: done - Updated `perform_candidate_action(...)` / `POST /candidates/{candidate_id}/action` to use the same canonical recruiter-action semantics as list/detail, including guard-aware availability and pre-publish payload validation.
+- Step 5: done - Kept the recruiter-facing demo surface aligned with hardened API semantics by rendering canonical `available_actions` and letting `next_actions` reflect the same source.
+- Step 6: done - Added focused regression coverage for recruiter list/detail/action parity, deterministic action metadata ordering/grouping, stable bad-payload failures, and guard-aware availability consistency.
 
 ## Full File Change List
 
-- M `docs/architecture/tech_debt.md` - Updated `TD-SKILLS-001`, `TD-PERSISTENCE-008`, and `TD-PERSISTENCE-009` to reflect prose-first authoring and persisted canonical criteria consumption.
-- M `integrations/api/app.py` - Switched public organization/recruiter authoring routes to prose-first use cases.
-- M `integrations/api/schemas_http.py` - Changed organization/recruiter authoring request bodies to `raw_text` + `source_ref` and exposed authored prose fields in `ScoringContextResponse`.
-- M `modules/recruitment/__init__.py` - Exported new prose-first authoring use cases.
-- M `modules/recruitment/scoring_context_service.py` - Added authored-prose helpers, prose normalization helpers, synthesized prose renderers, materialized-payload validation, and freeform job parsing improvements.
-- M `modules/recruitment/use_cases.py` - Added prose authoring use cases, refresh-time LLM materialization path, optional injected materializer for tests, and typed-authoring synthesis into authored prose.
-- M `schemas/state_schema.py` - Added `organization_authoring_text`, `recruiter_actor_authoring_text`, and `job_authoring_text` to `ScoringContext`.
-- M `skills/llm/cv_llm_score_candidate.py` - Switched score-time L2/L3 inputs to persisted derived criteria only.
-- A `skills/llm/scoring_context_materialize_from_prose.py` - New bounded LLM skill for prose normalization and criteria materialization.
-- M `skills/llm/llm_provider.py` - Added stub-provider support for scoring-context prose materialization.
-- M `tests/api/test_cv_ingest.py` - Updated weak-context setup to prose-first public authoring payloads.
-- M `tests/api/test_cv_pdf_ingest.py` - Updated weak-context setup to prose-first public authoring payloads.
-- M `tests/api/test_scoring_context_routes.py` - Reworked route coverage for prose-first authoring and refresh-time normalization/materialization.
-- M `tests/conftest.py` - Updated ready-context fixture to use prose-first authoring and explicit stub materializer injection.
-- M `tests/modules/test_scoring_context.py` - Added prose authoring materialization coverage and authored-text assertions.
-- M `tests/persistence/test_sqlite_cv_extensions.py` - Added persistence assertions for authored prose and derived criteria.
-- M `tests/skills/test_llm_provider.py` - Added stub coverage for scoring-context materialization payload shape.
-- A `tests/skills/test_cv_llm_score_candidate.py` - Added direct proof that score-time uses persisted derived criteria.
-- A `tests/skills/test_scoring_context_materialize_skill.py` - Added normalization/materialization skill output-shape coverage.
+- M `docs/architecture/tech_debt.md` - Resolved `TD-API-008`, `TD-API-009`, `TD-API-010`, and `TD-API-013` to reflect the completed recruiter-surface hardening slice.
+- M `integrations/api/demo_page.py` - Rendered canonical recruiter `available_actions` metadata in the demo recruiter surface.
+- M `integrations/api/errors.py` - Added stable HTTP mapping for `invalid_candidate_action_payload`.
+- M `integrations/api/schemas_http.py` - Added `group` / `order` to `RecruiterActionItem` and added `available_actions` to candidate detail responses.
+- M `modules/recruitment/__init__.py` - Exported the new recruiter action payload validation exception.
+- M `modules/recruitment/exceptions.py` - Added `InvalidRecruiterActionPayloadError`.
+- M `modules/recruitment/policies.py` - Centralized recruiter-action derivation, metadata ordering/grouping, guard-aware validation, and per-event payload validator registry.
+- M `modules/recruitment/projection.py` - Made list/detail recruiter surfaces consume the same canonical action source and removed static `next_actions` authority.
+- M `modules/recruitment/use_cases.py` - Made recruiter action POST use canonical action validation plus deterministic payload validation before publish.
+- M `tests/api/test_candidate_actions.py` - Added recruiter list/detail parity and stable bad-payload coverage.
+- M `tests/api/test_demo_recruiter_surface.py` - Updated recruiter detail expectations for canonical `available_actions` / derived `next_actions`.
+- M `tests/modules/test_recruiter_actions_from_registry.py` - Added ordering/grouping assertions and guard-aware recruiter action coverage.
 
-## Exact Authoring Inputs Added / Changed
+## Exact Recruiter-Action Source Of Truth Before / After
 
-### Public API authoring inputs
+### `GET /candidates`
 
-- `POST /scoring-context/organization`
-  - before: structured typed organization fields
-  - after:
-    ```json
-    {
-      "raw_text": "BlueOcean is a recruitment company ...",
-      "source_ref": "optional://source"
-    }
-    ```
-- `POST /scoring-context/recruiter-actor`
-  - before: structured typed recruiter fields
-  - after:
-    ```json
-    {
-      "raw_text": "Recruiter Maya is a lead recruiter ...",
-      "source_ref": "optional://source"
-    }
-    ```
-- `POST /scoring-context/job/text`
-  - still accepts `raw_text` + `source_ref`, but semantics changed:
-    - before: deterministic normalization into typed `job_context` happened immediately
-    - after: prose is staged as authored text and normalized during `refresh`
-- `POST /scoring-context/job/recruiter-answers`
-  - retained as a compatibility/helper route
-  - now converts structured answers into prose-first authored text before refresh-time materialization
+- before:
+  - `available_actions` came from `get_available_actions_for_phase(phase)`
+  - availability was registry-derived, but sorted alphabetically by `event_type`
+  - no `group` / `order` metadata
+  - no guard-aware filtering
+- after:
+  - `available_actions` still come from transition-registry truth only
+  - action projection now validates each candidate action path through `TransitionEngine`
+  - response items include:
+    - `key`
+    - `label`
+    - `event_type`
+    - `group`
+    - `order`
+  - ordering is deterministic and policy-shaped, not raw alphabetical sorting
+  - guarded actions disappear when the same canonical validation path rejects them
 
-### Persisted authored prose fields on `ScoringContext`
+### `GET /candidate/{candidate_id}`
 
-- `organization_authoring_text`
-- `recruiter_actor_authoring_text`
-- `job_authoring_text`
+- before:
+  - detail view had no structured recruiter action list
+  - `next_actions` came from a static `_next_actions_for_phase(...)` hint table
+  - detail action hints could drift from candidate list action availability
+- after:
+  - detail view now includes canonical `available_actions` using the same projection path as `GET /candidates`
+  - compatibility `next_actions: List[str]` is derived from the canonical action list (`label` only), not from a separate static phase map
+  - detail and list now expose the same recruiter-action truth for the same candidate phase/snapshot context
 
-These are now part of the canonical persisted active context and exposed by `GET /scoring-context`.
+### `POST /candidates/{candidate_id}/action`
 
-## Exact Canonical Typed Fields / Signals Retained
+- before:
+  - validated recruiter action availability by phase only
+  - payload remained effectively untyped at the recruiter action boundary
+  - malformed payloads were deferred into downstream planning/parsing behavior
+- after:
+  - validates the requested recruiter action through the same canonical action source used by list/detail
+  - uses snapshot extensions when evaluating guarded action availability
+  - validates the merged governance payload via a deterministic per-event payload validator registry before publish
+  - returns stable `422` with `detail.code = "invalid_candidate_action_payload"` when the recruiter payload shape is invalid
 
-The following normalized typed fields remain the internal canonical control-plane semantics:
+## Exact Action Metadata Added / Changed
 
-- `OrganizationContext`
-  - `company_name`
-  - `industry`
-  - `team_name`
-  - `environment_signals`
-  - `preference_signals`
-  - `summary`
-  - `source_refs`
-- `RecruiterActorContext`
-  - `actor_id`
-  - `actor_role`
-  - `hiring_focus`
-  - `preference_signals`
-  - `avoid_signals`
-  - `summary`
-  - `source_refs`
-- `JobContext`
-  - `title`
-  - `summary`
-  - `responsibilities`
-  - `hard_requirements`
-  - `preferred_requirements`
-  - `success_signals`
-  - `source_refs`
+Canonical recruiter action metadata now includes:
 
-How they are populated now:
+- `label` - recruiter-facing label, still descriptor-backed with fallback to `label_from_event_type(...)`
+- `group` - deterministic category used for recruiter presentation:
+  - `decision`
+  - `interview`
+  - `offer`
+  - `recovery`
+- `order` - deterministic sort order used before label / event-type tie-breakers
 
-- public prose-first routes stage authored prose only
-- `refresh` calls the new materialization skill
-- the skill returns normalized typed context objects
-- deterministic program validation then decides whether those outputs are sufficient for `ready`
+Current bounded recruiter action ordering behavior:
 
-Internal typed authoring use cases remain available and now synthesize prose from typed inputs so they still enter the same refresh-time materialization path.
+- `recruiter_reconsider_candidate` -> `order=10`, `group="recovery"`
+- shortlist / approve style actions -> `order=20`, `group="decision"`
+- `recruiter_schedule_interview` -> `order=30`, `group="interview"`
+- `recruiter_complete_interview` -> `order=40`, `group="interview"`
+- `recruiter_send_offer` -> `order=50`, `group="offer"`
+- `recruiter_mark_hired` -> `order=60`, `group="offer"`
+- `recruiter_reject_candidate` -> `order=90`, `group="decision"`
+- uncatalogued recruiter actions still fall back deterministically for label/group/order without becoming a second availability map
 
-## Exact Bounded LLM Skill Inputs / Outputs
+Compatibility note:
 
-### New skill
+- `next_actions` remains present on candidate detail, but it is now only a compatibility projection derived from canonical `available_actions`.
 
-- file: `skills/llm/scoring_context_materialize_from_prose.py`
-- skill name: `recruitment.scoring_context.materialize_from_prose`
+## Exact Payload Validation Behavior Added / Changed Per Recruiter `event_type`
 
-### Skill input payload
+Current recruiter action payload validator registry covers:
 
-```json
-{
-  "vertical_slice.planner_path": "scoring_context_refresh",
-  "organization_authoring_text": "...",
-  "recruiter_actor_authoring_text": "...",
-  "job_authoring_text": "..."
-}
-```
+- `recruiter_shortlist_candidate`
+- `recruiter_reject_candidate`
+- `recruiter_schedule_interview`
+- `recruiter_complete_interview`
+- `recruiter_send_offer`
+- `recruiter_reconsider_candidate`
+- `recruiter_approve_candidate`
+- `recruiter_mark_hired`
 
-### Skill output payload
+For the current bounded recruiter action set:
 
-```json
-{
-  "organization_context": { "...typed organization fields..." },
-  "recruiter_actor_context": { "...typed recruiter fields..." },
-  "job_context": { "...typed job fields..." },
-  "derived_l2_criteria": ["..."],
-  "derived_l3_criteria": ["..."],
-  "explanation": "..."
-}
-```
+- all listed recruiter actions validate against the shared bounded governance payload contract before publish
+- API defaults are still merged first (`actor_id`, `actor_type`, `reason`, `evidence_refs`)
+- extra/unknown payload fields now fail fast at the recruiter action boundary
+- malformed payloads now produce stable `422` responses instead of relying on planner-time parse fallout
 
-### Stub behavior
+What did *not* change in this round:
 
-- `StubLLMProvider` now recognizes the materialization prompt and deterministically:
-  - normalizes organization prose
-  - normalizes recruiter prose
-  - normalizes job prose
-  - derives candidate L2/L3 criteria
+- no new recruiter action business fields were introduced
+- no new recruiter actions were added
+- no new workflow states/phases or transition rules were added
 
-## Exact `refresh` Semantics Before / After
+## Exact Detail-View `next_actions` Semantics Before / After
 
-### Before `R-005`
+- before:
+  - `next_actions` was a static phase→string-hint table in `modules/recruitment/projection.py`
+  - `new` phase returned `[]` even though recruiter rejection was already a valid registry-derived action on the list surface
+  - detail semantics were explicitly non-authoritative and could drift from actual action availability
+- after:
+  - `next_actions` is derived directly from canonical `available_actions`
+  - `new` phase now truthfully reflects the currently available recruiter action labels
+  - detail keeps backward-compatible string output while structured recruiter clients can use `available_actions`
 
-- public authoring primarily stored typed context objects directly
-- `refresh_active_scoring_context(...)` deterministically validated the already-stored typed context
-- `refresh` itself generated `derived_l2_criteria` / `derived_l3_criteria` from typed context using local deterministic derivation helpers
-- there was no persisted authored prose on `ScoringContext`
+## Exact Guard-Aware Behavior Added
 
-### After `R-005`
-
-- authoring routes store prose on `ScoringContext` first
-- `refresh_active_scoring_context(...)` now:
-  1. gathers stored authored prose (or synthesized prose for internal typed authoring helpers)
-  2. calls `ScoringContextMaterializeFromProseSkill`
-  3. validates the returned typed context and derived criteria deterministically
-  4. persists:
-    - normalized `organization_context`
-    - normalized `recruiter_actor_context`
-    - normalized `job_context`
-    - canonical `derived_l2_criteria`
-    - canonical `derived_l3_criteria`
-  5. marks the context `ready`
-
-`ready` now means all of the following are simultaneously true:
-
-- authored prose exists for organization, recruiter, and job authoring
-- prose has been materialized into typed canonical context
-- materialized L2/L3 criteria were persisted on `ScoringContext`
-- the stored ready payload is sufficient for later scoring without hidden re-derivation
-
-Failed refresh:
-
-- still leaves the context non-ready
-- still keeps `derived_l2_criteria` / `derived_l3_criteria` empty on failed materialization
-- still preserves deterministic `context_version` / stale behavior from prior rounds
-
-## Exact Downstream Scoring Behavior Before / After
-
-### Before `R-005`
-
-`CvLlmScoreCandidateSkill` built required L2/L3 layers by locally calling:
-
-- `derive_l2_labels(job_context, organization_context)`
-- `derive_l3_labels(organization_context, recruiter_actor_context)`
-
-That meant score-time still had a hidden second source of truth for criteria.
-
-### After `R-005`
-
-`CvLlmScoreCandidateSkill` now reads:
-
-- `scoring_context.derived_l2_criteria`
-- `scoring_context.derived_l3_criteria`
-
-and fails validation if those persisted criteria are missing.
-
-Implication:
-
-- `refresh` materializes criteria
-- scoring consumes persisted criteria
-- score-time no longer silently rebuilds L2/L3 labels from context
-
-## Exact Persistence Changes
-
-- `ScoringContext` JSON persistence now includes:
-  - `organization_authoring_text`
-  - `recruiter_actor_authoring_text`
-  - `job_authoring_text`
-  - normalized typed context objects
-  - persisted `derived_l2_criteria`
-  - persisted `derived_l3_criteria`
-- `InMemoryScoringContextStore`
-  - no structural code changes required beyond schema-copy behavior
-  - now retains authored prose and derived criteria as part of the stored model
-- `SQLiteScoringContextStore`
-  - no table migration was needed because the store already persists the full context as JSON
-  - reload tests now confirm authored prose and derived criteria survive round-trip
-
-Single active-context scope remains unchanged.
+- default reference registry behavior:
+  - remains effectively unguarded for the current default recruiter-facing rules
+  - no new business policy or new guards were forced into the default registry just to satisfy this round
+- added infrastructure behavior:
+  - recruiter action projection can now evaluate `guard_ids` through `TransitionEngine`
+  - recruiter list/detail exposure and recruiter action POST validation use the same guard-aware path
+  - snapshot extensions are passed into action validation so guarded rules can inspect deterministic context
+- test proof added:
+  - custom registry fixture adds a guard to `pipeline.shortlisted_to_interview_pending`
+  - projected availability hides `recruiter_schedule_interview` when the guard rejects
+  - `validate_recruiter_event_for_phase(...)` rejects the same action with a `currently unavailable` error under the same guard outcome
 
 ## Exact Tests Added / Updated
 
-### Added
+- `tests/modules/test_recruiter_actions_from_registry.py`
+  - asserts action metadata now includes deterministic `group` / `order`
+  - proves guarded availability projection and POST-time validation stay aligned
+- `tests/api/test_candidate_actions.py`
+  - proves candidate list and detail use the same canonical recruiter-action semantics
+  - proves invalid recruiter payloads return stable `invalid_candidate_action_payload`
+- `tests/api/test_demo_recruiter_surface.py`
+  - updates candidate detail expectations for canonical `available_actions`
+  - proves `next_actions` is derived from canonical action labels instead of a static hint table
 
-- `tests/skills/test_scoring_context_materialize_skill.py`
-  - validates bounded materialization skill output shape from prose
-- `tests/skills/test_cv_llm_score_candidate.py`
-  - proves score-time uses persisted derived criteria, not local re-derivation
+Validation run:
 
-### Updated
+- `python -m pytest tests/modules/test_recruiter_actions_from_registry.py tests/api/test_candidate_actions.py tests/api/test_candidate_list.py tests/api/test_demo_recruiter_surface.py -q`
+  - result: `35 passed`
+- `python -m pytest -q`
+  - result: `171 passed, 2 skipped, 13 warnings`
+  - warnings remain the existing Pydantic `datetime.utcnow()` deprecation warnings
 
-- `tests/api/test_scoring_context_routes.py`
-  - prose-first route acceptance
-  - refresh-time normalization/materialization
-  - inspectable authoring text
-  - weak-context refresh failure
-- `tests/conftest.py`
-  - ready-context fixture now uses prose-first authoring and explicit stub materializer injection
-- `tests/modules/test_scoring_context.py`
-  - prose authoring materialization path
-  - authored-text assertions
-- `tests/persistence/test_sqlite_cv_extensions.py`
-  - authored prose / derived criteria persistence on reload
-- `tests/skills/test_llm_provider.py`
-  - stub-provider materialization payload support
-- `tests/api/test_cv_ingest.py`
-  - weak-context public setup aligned to prose-first contract
-- `tests/api/test_cv_pdf_ingest.py`
-  - weak-context public setup aligned to prose-first contract
+## Technical Debt Updates Made
 
-## Technical Debt Updates
+- reviewed and updated:
+  - `TD-API-008` -> resolved by canonical guard-aware recruiter action projection
+  - `TD-API-009` -> resolved by deterministic recruiter action payload validator registry
+  - `TD-API-010` -> resolved by canonical `group` / `order` recruiter action metadata
+  - `TD-API-013` -> resolved by deriving detail `next_actions` from canonical recruiter action items
+- deferred unchanged:
+  - `TD-ORCHESTRATOR-011`
+  - `TD-API-011`
+  - `TD-API-012`
+  - `TD-INSPECTION-002`
+  - `TD-INSPECTION-003`
+  - `TD-API-007`
 
-Full-file `docs/architecture/tech_debt.md` review was already completed in planning (`Last full registry sweep: 2026-05-26`). Builder executed only the debt actions frozen into `PLAN.md`.
+## Scope Confirmation
 
-Updated entries:
-
-- `TD-SKILLS-001`
-  - clarified that scoring-context authoring is now prose-first
-  - clarified that `refresh` materializes canonical persisted criteria
-  - clarified that score-time no longer re-derives those criteria
-- `TD-PERSISTENCE-008`
-  - clarified that evaluation precedence now sits on top of canonical persisted scoring inputs rather than stage-local label derivation
-- `TD-PERSISTENCE-009`
-  - clarified that the single active context now stores richer draft state:
-    - authored prose
-    - normalized typed context
-    - persisted derived criteria
-
-Deferred / unchanged:
-
-- no requisition-scoped context redesign
-- no deep-scoring cognition redesign
-- no broader API hardening or idempotency work
-
-## Explicit No-Second-Source-of-Truth Confirmation
-
-- Canonical materialization point: `refresh_active_scoring_context(...)`
-- Canonical persisted criteria fields:
-  - `ScoringContext.derived_l2_criteria`
-  - `ScoringContext.derived_l3_criteria`
-- Canonical score-time consumer:
-  - `CvLlmScoreCandidateSkill`
-
-After this round, score-time no longer calls local derivation helpers to build its own L2/L3 criteria set.
-
-The remaining deterministic derivation helpers are now part of:
-
-- stub-provider materialization support
-- bounded normalization/test support
-
-not the live score-time consumption path.
-
-## Tests and Validation
-
-- command: `python -m pytest tests/skills/test_scoring_context_materialize_skill.py tests/skills/test_cv_llm_score_candidate.py tests/skills/test_llm_provider.py tests/modules/test_scoring_context.py tests/api/test_scoring_context_routes.py tests/persistence/test_sqlite_cv_extensions.py -q`
-  - result: pass
-  - notes: `23 passed`
-- command: `python -m pytest tests/api/test_cv_ingest.py tests/api/test_cv_pdf_ingest.py -q`
-  - result: pass
-  - notes: `10 passed, 1 skipped`
-- command: `python -m pytest -q`
-  - result: pass
-  - notes: `168 passed, 2 skipped, 13 warnings`
-- command: `ReadLints` on changed files
-  - result: pass
-  - notes: no linter errors found
-
-## Deviations, Risks, and Explicit Confirmations
-
-- deviation from `PLAN.md`:
-  - none in capability scope
-- explicit confirmations:
-  - no hidden second source of truth for L2/L3 criteria remains on the score-time path
-  - debt handling remained Architect-planned and PM-approved; Builder did not perform execution-time debt replanning
-  - no out-of-scope capability work was added to `R-005`
-- remaining risks:
-  - single active `scoring_context` is still a runtime singleton, not requisition-scoped
-  - refresh-time materialization now depends on bounded LLM/provider availability
-  - deep scoring remains deterministic/fake rather than real bounded cognition
-  - provider/config/runtime failures in scoring/materialization still collapse to coarse `scoring_failed` behavior
-
-## Architect Post-Execution Review
-
-### Roadmap Reconciliation
-
-- no `docs/architecture/ROADMAP.md` change was required during closeout
-- `R-005` delivered the planned prose-first `scoring_context` authoring slice and can advance without reopening the selected roadmap item in-place
-
-### Debt Review Addendum
-
-- newly identified / confirmed during Architect review:
-  - `TD-CONTRACTS-015`
-    - public prose-first authoring accepts `source_ref`, but refresh-time materialization does not yet preserve those recruiter-authored refs on the resulting nested typed contexts
-    - current provenance is only partially retained via aggregated `ScoringContext.source_refs` plus normalized component refs
-- deferred by closeout decision:
-  - `TD-CONTRACTS-015` hardening is deferred to a later round and is not treated as a blocker for closing `R-005`
-
-## Lightweight Round Closeout (Architect / PM)
-
-- proposed routing outcome: `advance-major`
-- PM confirmed routing: `advance-major`
-- major-round snapshot needed: `yes`
-- closeout rationale: `R-005` achieved the planned major capability cutover to prose-first `scoring_context` authoring, refresh-owned materialization, and canonical persisted L2/L3 criteria consumption. The remaining `source_refs` provenance gap is real but bounded, has been recorded under `TD-CONTRACTS-015`, and does not justify holding the round open or forcing a corrective minor round.
+- no new workflow states/phases were added
+- no new recruiter actions were added
+- no transition registry redesign was introduced
+- no broad API hardening work (`TD-API-011`, `TD-API-012`) was pulled into this round
+- no timeline/history hardening work (`TD-INSPECTION-002`, `TD-INSPECTION-003`) was pulled into this round
+- no hard-filter restoration work (`TD-ORCHESTRATOR-011`) was pulled into this round
+- no auth, multi-tenant, or runtime-isolation redesign was added to `R-006`
 
 ## Suggested Next-Round Focus
 
-- open the next major round from the roadmap queue; keep `source_refs` provenance hardening deferred unless auditability or evidence-tooling requirements make it urgent
+- Open **R-007** as the next major round on **Recruiter frontend MVP** (Upcoming queue item 2): candidate list, detail, and recruiter actions wired to hardened APIs; defer timeline/idempotency/hard-filter scope unless PM reprioritizes.
 
+## Roadmap Updates Made (Architect Reconciliation)
+
+- `Current Operating Posture`: notes canonical recruiter API hardening and frontend MVP as near-term focus.
+- `Human Governance`: guard-aware recruiter action availability and typed recruiter action payloads moved from `Gap` to `Partial`.
+- `Upcoming`: removed completed **Recruiter surface hardening** item; renumbered remaining queue.

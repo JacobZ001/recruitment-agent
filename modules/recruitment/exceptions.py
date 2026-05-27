@@ -35,5 +35,9 @@ class InvalidCandidateActionError(RecruitmentUseCaseError):
     """Action key is not allowed for the candidate's current pipeline phase."""
 
 
+class InvalidRecruiterActionPayloadError(RecruitmentUseCaseError):
+    """Recruiter action payload failed deterministic validation before publish."""
+
+
 class ScoringFailedError(RecruitmentUseCaseError):
     """A required scoring/evaluation step failed during ingress processing."""

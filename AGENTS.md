@@ -383,6 +383,7 @@ Each round follows this sequence:
 - `Current Operating Posture` is reviewed every planning round, but edited only when runtime posture or primary delivery focus materially changes; keep it under three sentences.
 - `Capability Roadmap Layer` tracks major capability areas and status, not round-by-round implementation detail.
 - `Upcoming (Action Queue)` is the near-term queue derived from capability gaps plus debt priorities; it is not a second independent roadmap.
+- `Upcoming` items must advance named capability areas; `Debt ID` references are optional and used when the item is debt-driven, not required for capability-only queue entries.
 - Planned round scope should normally be selected from `Upcoming`, unless PM explicitly reprioritizes or a corrective round is required.
 - After each execution round, Architect must reconcile `ROADMAP.md` against `FEEDBACK.md` before proposing the next round, even when the result is "no roadmap change required".
 

@@ -13,6 +13,7 @@ from modules.recruitment.exceptions import (
     InvalidCvPdfError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
+    InvalidRecruiterActionPayloadError,
     InvalidScoringContextError,
     RecruitmentUseCaseError,
     ScoringContextNotReadyError,
@@ -79,6 +80,14 @@ def recruitment_error_to_http(
             status_code=422,
             detail={
                 "code": "invalid_candidate_action",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, InvalidRecruiterActionPayloadError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_candidate_action_payload",
                 "message": str(exc),
             },
         )

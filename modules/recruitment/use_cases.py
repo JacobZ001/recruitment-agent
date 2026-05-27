@@ -29,6 +29,7 @@ from .exceptions import (
     DemoRunPreconditionError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
+    InvalidRecruiterActionPayloadError,
     InvalidScoringContextError,
     ScoringContextNotReadyError,
     ScoringFailedError,
@@ -702,19 +703,24 @@ def perform_candidate_action(
     Publish a recruiter governance ``event_type`` (existing bus path).
 
     Validates the candidate exists and that ``event_type`` is registry-allowed for the phase.
-
-    TODO: Different recruiter actions will need structured payloads (e.g. interview slot,
-    offer terms). ``payload`` is untyped ``Dict[str, Any]`` merged over API defaults today.
     """
     got = runtime.bundle.store.get_for_candidate(candidate_id)
     if not got.ok or got.snapshot is None:
         raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
 
     phase = got.snapshot.pipeline.phase.value
-    policies.validate_recruiter_event_for_phase(event_type, phase)
+    policies.validate_recruiter_event_for_phase(
+        event_type,
+        phase,
+        transition_extensions=dict(got.snapshot.extensions or {}),
+    )
     gov_payload = dict(DEFAULT_RECRUITER_ACTION_GOVERNANCE_PAYLOAD)
     if payload:
         gov_payload.update(payload)
+    try:
+        gov_payload = policies.validate_recruiter_action_payload(event_type, gov_payload)
+    except InvalidRecruiterActionPayloadError:
+        raise
 
     result = record_recruiter_decision(
         runtime,

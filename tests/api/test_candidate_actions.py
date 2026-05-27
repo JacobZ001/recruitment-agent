@@ -53,10 +53,15 @@ def test_list_includes_available_actions_with_event_type_keys(
     cid = str(uuid4())
     _advance_primary_sequence(client, cid, establish_ready_scoring_context)
     row = next(x for x in client.get("/candidates").json() if x["candidate_id"] == cid)
+    detail = client.get(f"/candidate/{cid}").json()
     assert row["stage"] == PipelinePhase.SHORTLISTED.value
     keys = {a["key"] for a in row["available_actions"]}
     assert "recruiter_schedule_interview" in keys
     assert all(a["key"] == a["event_type"] for a in row["available_actions"])
+    assert [a["event_type"] for a in row["available_actions"]] == [
+        a["event_type"] for a in detail["available_actions"]
+    ]
+    assert detail["next_actions"] == [a["label"] for a in detail["available_actions"]]
 
 
 def test_action_reject_moves_to_inactive(
@@ -90,6 +95,23 @@ def test_action_invalid_event_type_for_phase_returns_422(
     )
     assert r.status_code == 422
     assert r.json()["detail"]["code"] == "invalid_candidate_action"
+
+
+def test_action_invalid_payload_returns_stable_422(
+    client: TestClient,
+    establish_ready_scoring_context,
+) -> None:
+    cid = str(uuid4())
+    _advance_primary_sequence(client, cid, establish_ready_scoring_context)
+    r = client.post(
+        f"/candidates/{cid}/action",
+        json={
+            "event_type": "recruiter_schedule_interview",
+            "payload": {**dict(_GOVERNANCE_PAYLOAD), "unexpected": "nope"},
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "invalid_candidate_action_payload"
 
 
 def test_action_unknown_candidate_returns_404(client: TestClient) -> None:

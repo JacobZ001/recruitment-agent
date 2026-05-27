@@ -65,6 +65,19 @@ def _format_candidate_view_html(view: Dict[str, Any]) -> str:
     parts.append(f"<li><strong>note</strong>: {esc(ranking.get('note'))}</li>")
     parts.append("</ul>")
 
+    available_actions = view.get("available_actions") or []
+    if available_actions:
+        parts.append("<h3>Available recruiter actions</h3><ul>")
+        for action in available_actions:
+            parts.append(
+                "<li><strong>{label}</strong> ({event_type}) — <em>{group}</em></li>".format(
+                    label=esc(action.get("label")),
+                    event_type=esc(action.get("event_type")),
+                    group=esc(action.get("group")),
+                )
+            )
+        parts.append("</ul>")
+
     actions = view.get("next_actions") or []
     if actions:
         parts.append("<h3>Suggested next actions</h3><ol>")

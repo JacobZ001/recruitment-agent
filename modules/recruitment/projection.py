@@ -153,35 +153,15 @@ def _ranking_section(_ext: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _next_actions_for_phase(phase: str) -> List[str]:
-    # TODO: derive from transition engine (tech debt); static hints only for demo slice.
-    if phase == PipelinePhase.INACTIVE.value:
-        return [
-            "Review inactive reason in snapshot extensions; a recruiter may publish "
-            "recruiter_reconsider_candidate when policy allows recovery."
-        ]
-    if phase == PipelinePhase.HIRED.value:
-        return []
-    hints: Dict[str, List[str]] = {
-        PipelinePhase.SHORTLISTED.value: [
-            "Schedule interview: recruiter_schedule_interview",
-            "After the interview: recruiter_complete_interview",
-            "Then: recruiter_send_offer, and candidate_accept_offer or candidate_decline_offer",
-        ],
-        PipelinePhase.INTERVIEW_PENDING.value: [
-            "When the interview is done: recruiter_complete_interview",
-        ],
-        PipelinePhase.INTERVIEW_COMPLETED.value: [
-            "Send an offer: recruiter_send_offer",
-        ],
-        PipelinePhase.OFFER_SENT.value: [
-            "Record outcome: candidate_accept_offer or candidate_decline_offer",
-        ],
-        PipelinePhase.DEEP_SCORED.value: [
-            "Shortlist from deep scoring: recruiter_shortlist_candidate (when in the correct phase)",
-        ],
-    }
-    return list(hints.get(phase, ()))
+def _available_actions_for_snapshot(snapshot: OrchestrationState) -> List[Dict[str, Any]]:
+    return get_available_actions_for_phase(
+        snapshot.pipeline.phase.value,
+        transition_extensions=dict(snapshot.extensions or {}),
+    )
+
+
+def _next_actions_from_available_actions(actions: List[Dict[str, Any]]) -> List[str]:
+    return [str(item["label"]) for item in actions]
 
 
 def _candidate_id_from_snapshot(snapshot: OrchestrationState) -> Optional[UUID]:
@@ -204,6 +184,7 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
     cid = _candidate_id_from_snapshot(snapshot)
     if cid is None:
         raise ValueError("snapshot has no candidate StateLink")
+    available_actions = _available_actions_for_snapshot(snapshot)
     return {
         "candidate_id": str(cid),
         "stage": stage,
@@ -211,7 +192,7 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
         "overall_score": overall,
         "rank": None,
         "total_candidates": None,
-        "available_actions": get_available_actions_for_phase(stage),
+        "available_actions": available_actions,
     }
 
 
@@ -245,6 +226,7 @@ def build_candidate_view(
     status = _status_block(stage)
     evaluation = _evaluation_from_snapshot(snapshot)
     profile = snapshot.ingress_profile
+    available_actions = _available_actions_for_snapshot(snapshot)
     return {
         "stage": stage,
         "status": status,
@@ -256,7 +238,8 @@ def build_candidate_view(
         "flags": _model_dump_json(snapshot.ingress_flags),
         "scores": _scores_section(evaluation),
         "ranking": _ranking_section(snapshot.extensions or {}),
-        "next_actions": _next_actions_for_phase(stage),
+        "available_actions": available_actions,
+        "next_actions": _next_actions_from_available_actions(available_actions),
     }
 
 

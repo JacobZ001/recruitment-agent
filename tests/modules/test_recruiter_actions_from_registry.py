@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from schemas.state_schema import PipelinePhase
-from state_machine.transition_engine import TransitionRegistry, default_pipeline_registry
+from state_machine.transition_engine import (
+    GuardEvaluation,
+    TransitionRegistry,
+    default_pipeline_registry,
+)
 
 from modules.recruitment.policies import (
     ACTION_DESCRIPTORS,
@@ -78,6 +82,8 @@ def test_shortlisted_actions_from_transition_rules() -> None:
     assert "recruiter_schedule_interview" in event_types
     assert "recruiter_reject_candidate" in event_types
     assert actions[0]["label"] == label_for_recruiter_action(actions[0]["event_type"])
+    assert actions[0]["order"] <= actions[-1]["order"]
+    assert all(a["group"] for a in actions)
 
 
 def test_removing_transition_rule_removes_action() -> None:
@@ -128,4 +134,67 @@ def test_invalid_event_type_for_phase_raises() -> None:
         validate_recruiter_event_for_phase(
             "recruiter_schedule_interview",
             PipelinePhase.NEW.value,
+        )
+
+
+class _AllowByExtensionGuard:
+    def evaluate(self, ctx):
+        allowed = bool((ctx.extensions or {}).get("allow_schedule"))
+        if allowed:
+            return GuardEvaluation(ok=True)
+        return GuardEvaluation(
+            ok=False,
+            code="schedule_blocked",
+            message="schedule action blocked by deterministic guard",
+        )
+
+
+def _registry_with_guard(rule_id: str, guard_id: str) -> TransitionRegistry:
+    reg = default_pipeline_registry()
+    updated = []
+    for rule in reg.rules:
+        if rule.rule_id != rule_id:
+            updated.append(rule)
+            continue
+        if hasattr(rule, "model_copy"):
+            updated.append(rule.model_copy(update={"guard_ids": (guard_id,)}))
+        else:  # pragma: no cover
+            updated.append(rule.copy(update={"guard_ids": (guard_id,)}))
+    return TransitionRegistry(rules=tuple(updated), terminal_states=reg.terminal_states)
+
+
+def test_guarded_action_availability_is_consistent() -> None:
+    registry = _registry_with_guard(
+        "pipeline.shortlisted_to_interview_pending",
+        "guard.schedule_allowed",
+    )
+    guarded_actions = get_available_actions_for_phase(
+        PipelinePhase.SHORTLISTED.value,
+        registry=registry,
+        guards={"guard.schedule_allowed": _AllowByExtensionGuard()},
+        transition_extensions={"allow_schedule": False},
+    )
+    assert "recruiter_schedule_interview" not in {a["event_type"] for a in guarded_actions}
+
+    allowed_actions = get_available_actions_for_phase(
+        PipelinePhase.SHORTLISTED.value,
+        registry=registry,
+        guards={"guard.schedule_allowed": _AllowByExtensionGuard()},
+        transition_extensions={"allow_schedule": True},
+    )
+    assert "recruiter_schedule_interview" in {a["event_type"] for a in allowed_actions}
+
+
+def test_guarded_action_validation_matches_projected_availability() -> None:
+    registry = _registry_with_guard(
+        "pipeline.shortlisted_to_interview_pending",
+        "guard.schedule_allowed",
+    )
+    with pytest.raises(InvalidCandidateActionError, match="currently unavailable"):
+        validate_recruiter_event_for_phase(
+            "recruiter_schedule_interview",
+            PipelinePhase.SHORTLISTED.value,
+            registry=registry,
+            guards={"guard.schedule_allowed": _AllowByExtensionGuard()},
+            transition_extensions={"allow_schedule": False},
         )

@@ -12,7 +12,7 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 
 ## Current Operating Posture
 
-The current repo is a deterministic, single-process proving runtime with SQLite-backed state, multi-candidate routing, bounded recruiter-facing APIs, and narrow LLM cognition at ingress. The current delivery focus is single-tenant recruiter usability hardening: stable local state, visible workflow progression, tighter scoring-context discipline, and clearer operator surfaces. It is not yet a multi-tenant product runtime, a durable event product, or a production-grade infrastructure topology.
+The current repo is a deterministic, single-process proving runtime with SQLite-backed state, multi-candidate routing, bounded recruiter-facing APIs, and narrow LLM cognition at ingress. Recruiter list/detail/action surfaces now share canonical guard-aware action semantics and typed payload validation; the near-term delivery focus is a recruiter frontend MVP on those APIs. It is not yet a multi-tenant product runtime, a durable event product, or a production-grade infrastructure topology.
 
 ## Capability Roadmap Layer
 
@@ -30,6 +30,7 @@ Stage status: `Partial`
 
 - Multi-candidate persistent recruiter workflow - `Partial`
 - Recruiter-facing state and candidate views - `Partial`
+- Product-grade recruiter frontend / workflow workspace - `Gap`
 - Candidate-scoped workflow timeline/history - `Gap`
 - Deterministic hard-filtered canonical ingress path - `Gap`
 
@@ -38,15 +39,15 @@ Stage status: `Partial`
 
 - Typed recruiter lifecycle ingress - `Partial`
 - Audit-visible governance lines and bounded override semantics - `Partial`
-- Guard-aware recruiter action availability - `Gap`
-- Typed recruiter action payloads - `Gap`
+- Guard-aware recruiter action availability - `Partial`
+- Typed recruiter action payloads - `Partial`
 
 ### 4. Controlled Cognition
 Stage status: `Partial`
 
 - CV profile parsing - `Partial`
 - Job-aware layered light scoring - `Partial`
-- Ready-state criteria generation governance - `Gap`
+- Ready-state criteria generation governance - `Partial`
 - Deep scoring maturity and questionnaire continuity - `Gap`
 - Deterministic provider failure taxonomy - `Gap`
 
@@ -67,40 +68,36 @@ Stage status: `Vision`
 
 ## Upcoming (Action Queue)
 
-This is the near-term action queue derived from capability gaps plus the debt registry. It is not a second roadmap: each action should advance one or more capability areas and remain grounded in explicit debt IDs.
+This is the near-term action queue derived from capability gaps plus debt priorities; it is not a second roadmap: each action should advance one or more capability areas, and may reference debt IDs when debt-driven but does not require a debt entry for every item.
 
-1. **Job-aware three-layer evaluation hardening** (`TD-SKILLS-001`, `TD-PERSISTENCE-008`, `TD-PERSISTENCE-009`)
-   - Advances: `Recruiter Workflow Operation`, `Controlled Cognition`
-   - Goal: harden the `scoring_context` lifecycle, layered evaluation contracts, and re-score/version semantics.
-
-2. **Deterministic hard-filter restoration** (`TD-ORCHESTRATOR-011`)
+1. **Deterministic hard-filter restoration** (`TD-ORCHESTRATOR-011`)
    - Advances: `Recruiter Workflow Operation`
    - Goal: restore a canonical low-cost deterministic hard-filter stage before light scoring.
 
-3. **Recruiter surface hardening** (`TD-API-008`, `TD-API-009`, `TD-API-010`, `TD-API-013`)
+2. **Recruiter frontend MVP** (`TD-API-005`, `TD-API-007`, `TD-PERSISTENCE-008`)
    - Advances: `Recruiter Workflow Operation`, `Human Governance`
-   - Goal: improve candidate views/actions so recruiter-facing surfaces reflect actual deterministic workflow rules.
+   - Goal: ship a real recruiter-facing frontend on top of the hardened candidate list/detail/action APIs, with bounded list ergonomics, frontend-safe action copy semantics, and clear score/action presentation for end-to-end product validation.
 
-4. **Candidate-scoped timeline safety** (`TD-INSPECTION-002`, `TD-INSPECTION-003`)
+3. **Candidate-scoped timeline safety** (`TD-INSPECTION-002`, `TD-INSPECTION-003`)
    - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
    - Goal: replace process-global timeline behavior with candidate-aware history, or explicitly narrow timeline product scope.
 
-5. **API hardening** (`TD-API-011`, `TD-API-012`)
+4. **API hardening** (`TD-API-011`, `TD-API-012`)
    - Advances: `Operational Readiness`
    - Goal: add replay-safe ingress semantics and replace bootstrap-shaped envelope construction with a runtime-grade boundary.
 
-6. **Contract and timestamp hardening** (`TD-CONTRACTS-005`, `TD-CONTRACTS-011`, `TD-CONTRACTS-012`)
+5. **Contract and timestamp hardening** (`TD-CONTRACTS-005`, `TD-CONTRACTS-011`, `TD-CONTRACTS-012`)
    - Advances: `Deterministic Foundation`, `Operational Readiness`
    - Goal: remove naive UTC contract defaults, tighten shared execution metadata/timing semantics, and reduce schema-level warning debt before broader integration-facing hardening.
 
-7. **Provider-hardening for bounded cognition** (`TD-API-006`)
+6. **Provider-hardening for bounded cognition** (`TD-API-006`)
    - Advances: `Controlled Cognition`, `Operational Readiness`
    - Goal: move from coarse cognition failure surfaces toward deterministic retryability and clearer provider/runtime semantics.
 
-8. **Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004`)
+7. **Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010`, `TD-ORCHESTRATOR-004`)
    - Advances: `Controlled Cognition`, `Human Governance`
    - Goal: carry typed layered evaluation semantics more clearly through post-light-scoring stages.
 
-9. **Single-tenant operational playbook** (`TD-PERSISTENCE-001`, `TD-API-001`)
+8. **Single-tenant operational playbook** (`TD-PERSISTENCE-001`, `TD-API-001`)
    - Advances: `Operational Readiness`
    - Goal: document reset, validation, and local deployment expectations for the current SQLite-backed runtime posture.

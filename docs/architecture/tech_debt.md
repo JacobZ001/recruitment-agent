@@ -840,44 +840,41 @@ Summary (v2 cleanup):
 
 
 ### TD-API-008 Action availability ignores transition guards
-- **Status**: OPEN
-- **Revisit when**: When `Upcoming (Action Queue)` schedules `Recruiter surface hardening`, or before candidate actions become an authoritative recruiter-facing UI surface
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if recruiter surfaces need to expose richer guard diagnostics than the current available/unavailable contract
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
-- **Current decision**: ``get_available_actions_for_phase`` exposes an action if a registry rule applies (``from_state`` is the current phase or ``*``) and carries a resolvable ``manual_recruiter_*`` trigger. It does **not** evaluate **guard conditions** on those rules or snapshot context.
-- **Rationale**: Keeps list derivation read-only and cheap; guards may be stubs or context-dependent in the reference slice.
+- **Current decision**: Recruiter action availability now evaluates the canonical transition registry plus optional guard conditions through ``TransitionEngine`` validation. ``GET /candidates``, ``GET /candidate/{candidate_id}``, and ``POST /candidates/{candidate_id}/action`` all use the same action projection path and the same snapshot-derived extensions when checking availability.
+- **Rationale**: `R-006` made recruiter action availability authoritative enough for recruiter-facing surfaces without introducing a duplicate phase→action policy table.
 - **Future impact** / **risks**:
-  - **UI may show actions** that orchestration would reject when guards fail.
-  - Operators may attempt actions that appear available but produce no plan or a validation failure downstream.
+  - The default registry in the reference slice still has no production guard catalog; guard-aware behavior is now supported and regression-tested, but richer runtime guard coverage remains a separate policy concern.
 - **Priority**: High
-- **Recommended future direction**: Evaluate guards (or call :class:`~state_machine.transition_engine.TransitionEngine` validation with current snapshot) before exposing an action; or return a **conditionally available** flag when guards are not satisfied.
+- **Recommended future direction**: Keep action projection routed through transition-engine validation. If product surfaces need to explain *why* an action is blocked, add structured guard-diagnostic metadata without relaxing the single source of truth.
 
 
 ### TD-API-009 Untyped recruiter action payloads
-- **Status**: OPEN
-- **Revisit when**: When recruiter actions require structured fields (interview slot, offer terms, audit templates)
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only when a recruiter action needs richer typed fields beyond the current governance payload contract
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
-- **Current decision**: ``perform_candidate_action`` and ``POST /candidates/{candidate_id}/action`` accept an optional ``payload`` as ``Dict[str, Any]``, merged over fixed API governance defaults. There is **no** per-``event_type`` payload schema or validation before publish.
-- **Rationale**: Stage B wires existing governance events through one action API before investing in action-specific forms.
+- **Current decision**: ``POST /candidates/{candidate_id}/action`` now validates payloads through a deterministic recruiter-action payload registry keyed by recruiter ``event_type`` before publish. The current action set still shares the bounded governance payload contract, but unknown or malformed fields now fail fast with a stable ``invalid_candidate_action_payload`` error.
+- **Rationale**: `R-006` hardened the recruiter action boundary without widening scope into new action-specific business fields.
 - **Future impact** / **risks**:
-  - **No validation per action** — missing or inconsistent fields across clients.
-  - **Fragile integration** when new registry triggers add actions with implicit payload expectations.
-  - **Audit ambiguity** when downstream systems expect structured evidence per action type.
+  - The registry currently maps the bounded recruiter action set to the shared governance payload model; future richer actions should add narrower typed models rather than bypass the registry.
 - **Priority**: Medium
-- **Recommended future direction**: When the first recruiter action needs structured fields, introduce a deterministic **action-payload schema registry** (``event_type`` -> Pydantic model / typed validator) and validate at the API/use-case boundary before publish. Keep the current generic ``payload`` only for actions that truly remain unstructured, and return stable validation errors when a typed action omits required fields or sends incompatible shapes.
+- **Recommended future direction**: Extend the existing registry one action at a time when interview scheduling, offer authoring, or audit templates require additional typed fields.
 
 
 ### TD-API-010 Recruiter action list ordering and grouping (UI)
-- **Status**: OPEN
-- **Revisit when**: When recruiter list UI needs sections (lifecycle, risk, priority)
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if recruiter product surfaces need more presentation metadata than group/order
 - **Introduced in**: 2026-05-22
 - **Last reviewed**: 2026-05-26
-- **Current decision**: ``available_actions`` is a **flat list** sorted by ``event_type`` string only—no grouping, priority, or role-based ordering.
-- **Rationale**: Stage B MVP exposes registry truth without product semantics.
-- **Future impact**: Recruiter clients must invent their own ordering; inconsistent UX across surfaces.
+- **Current decision**: Recruiter action projections now include deterministic ``group`` and ``order`` metadata and are sorted by policy-shaped order rather than raw alphabetical ``event_type``. The metadata is carried on recruiter-facing API surfaces without introducing a second authoritative phase-action map.
+- **Rationale**: `R-006` needed stable ordering/grouping for recruiter clients while preserving transition-registry truth as the availability source.
+- **Future impact**: Minimal for the original debt. If future UI needs richer sections, icons, or role-aware copy, add them as metadata on the same action catalog rather than rebuilding availability logic elsewhere.
 - **Priority**: Low
-- **Recommended future direction**: Add optional **group** / **sort_order** metadata derived from registry ``rule_id`` or product policy—without reintroducing duplicate action-key tables.
+- **Recommended future direction**: Keep catalog metadata bounded to presentation concerns and continue deriving actual availability from registry validation.
 
 
 ### TD-API-011 HTTP ingress idempotency and replay-safe retries
@@ -905,15 +902,15 @@ Summary (v2 cleanup):
 
 
 ### TD-API-013 Candidate view ``next_actions`` (static)
-- **Status**: OPEN
-- **Revisit when**: Transition engine exposes a stable, machine-readable list of allowed ingresses or next valid triggers per phase
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if the public candidate detail surface later removes ``next_actions`` entirely in favor of richer action objects
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-26
-- **Current decision**: ``build_candidate_view`` uses a **static** phase→hint string list for recruiter UX in the vertical-slice demo only (marked with an in-code TODO).
-- **Rationale**: Avoid encoding transition policy twice next to the engine; product-facing hints stay explicitly non-authoritative until derived from the engine.
-- **Future impact**: ``next_actions`` may drift from actual allowed transitions if the graph changes without updating the static map.
+- **Current decision**: ``build_candidate_view`` now derives both ``available_actions`` and compatibility ``next_actions`` from the same canonical recruiter action projection used by the candidate list and recruiter action POST boundary. ``next_actions`` remains a string list for compatibility, but it is no longer a static phase-hint map.
+- **Rationale**: `R-006` removed the last recruiter-detail action drift without forcing an immediate breaking response-shape cutover.
+- **Future impact**: The original static-drift risk is removed. Remaining product decisions are about how long to keep the compatibility string list alongside structured action items.
 - **Priority**: Low
-- **Recommended future direction**: Derive next actions from the transition engine (or a single published capability artifact) and regression-test against the graph.
+- **Recommended future direction**: Keep ``next_actions`` as a compatibility projection only; prefer structured ``available_actions`` for any new recruiter client behavior.
 
 
 ### TD-API-014 Candidate view explanation vs snapshot boundary

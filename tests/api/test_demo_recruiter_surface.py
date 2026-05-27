@@ -80,7 +80,8 @@ def test_get_candidate_by_id_returns_projection(client: TestClient) -> None:
     assert data["ranking"]["total_candidates"] is None
     assert "branch" not in data["ranking"]
     assert "stage" not in data["ranking"]
-    assert data["next_actions"] == []
+    assert [a["event_type"] for a in data["available_actions"]] == ["recruiter_reject_candidate"]
+    assert data["next_actions"] == [a["label"] for a in data["available_actions"]]
 
 
 def test_ranking_section_omits_snapshot_scoring_stage_keys(client: TestClient) -> None:
@@ -122,7 +123,8 @@ def test_get_candidate_after_demo_run_scores_and_ranking_match_extensions(client
     assert "single-candidate" in (data["ranking"].get("note") or "")
     assert "stage" not in data["ranking"]
     assert "branch" not in data["ranking"]
-    assert data["next_actions"]
+    assert data["available_actions"]
+    assert data["next_actions"] == [a["label"] for a in data["available_actions"]]
 
 
 def test_get_candidate_view_offer_sent_stage_is_authoritative(client: TestClient) -> None:
