@@ -13,7 +13,9 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from integrations.api.demo_page import build_demo_recruiter_html
 from integrations.api.errors import raise_recruitment_http
@@ -74,6 +76,31 @@ def get_runtime(request: Request) -> VerticalSliceApiRuntime:
 DEFAULT_VERTICAL_SLICE_DB_PATH = "data/app.db"
 DEFAULT_ENV_FILE_NAME = ".env"
 ENV_FILE_ENV_VAR = "VERTICAL_SLICE_ENV_FILE"
+CORS_ORIGINS_ENV_VAR = "VERTICAL_SLICE_CORS_ORIGINS"
+
+
+def _frontend_dist_dir() -> Optional[Path]:
+    """Return ``frontend/dist`` when a production build exists."""
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if dist.is_dir() and (dist / "index.html").is_file():
+        return dist
+    return None
+
+
+def _configure_cors(app: FastAPI) -> None:
+    raw = os.environ.get(CORS_ORIGINS_ENV_VAR, "").strip()
+    if not raw:
+        return
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins:
+        return
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 def _strip_env_value(raw: str) -> str:
@@ -155,6 +182,16 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    _configure_cors(app)
+
+    dist_dir = _frontend_dist_dir()
+    if dist_dir is not None:
+
+        @app.get("/", include_in_schema=False)
+        def redirect_root_to_app() -> RedirectResponse:
+            return RedirectResponse(url="/app/", status_code=307)
+
+        app.mount("/app", StaticFiles(directory=str(dist_dir), html=True), name="recruiter_spa")
 
     @app.get("/health", response_model=HealthResponse)
     def health(request: Request) -> HealthResponse:

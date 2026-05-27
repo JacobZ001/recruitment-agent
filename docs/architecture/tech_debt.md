@@ -2,7 +2,7 @@
 
 Purpose: track deferred architecture improvements, scaling risks, and engineering rationale so we don't lose critical future considerations. This project prioritizes **deterministic orchestration** and **verifiable behavior** over “smart prompts”.
 
-- **Last full registry sweep**: 2026-05-26
+- **Last full registry sweep**: 2026-05-27
 
 ## Debt lifecycle
 
@@ -572,10 +572,10 @@ Summary (v2 cleanup):
 
 ### TD-PERSISTENCE-008 Evaluation precedence semantics
 - **Status**: OPEN
-- **Revisit when**: When UI/API must show single authoritative score
+- **Revisit when**: When UI/API must show single authoritative score with stronger audit/version semantics
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: ``evaluation.light`` and ``evaluation.deep`` coexist, and recruiter-facing read models still use a simple deep-over-light precedence for overall score display while exposing both surfaces separately. Starting in `R-005`, the L2/L3 inputs consumed by scoring come from persisted `ScoringContext.derived_l2_criteria` / `derived_l3_criteria` rather than score-time re-derivation, so stage-precedence semantics remain explicit even as criteria materialization becomes more canonical.
+- **Last reviewed**: 2026-05-27
+- **Current decision**: ``evaluation.light`` and ``evaluation.deep`` coexist, and recruiter-facing read models still use a simple deep-over-light precedence for overall score display while exposing both surfaces separately. The R-007 recruiter SPA displays ``overall_score.value`` plus ``overall_score.type`` (light/deep) and includes a one-line precedence explanation aligned with the API projection; it does not recompute precedence client-side.
 - **Rationale**: Light and deep remain different evaluation stages, but canonical persisted criteria keep the evaluation inputs inspectable and version-linked instead of letting each stage silently rebuild its own label set.
 - **Future impact**: UI or policy may still disagree on “the” candidate score unless precedence stays documented and versioned, especially once more than one scoring stage or criteria-materialization policy needs to be compared over time.
 - **Priority**: Low
@@ -801,10 +801,10 @@ Summary (v2 cleanup):
 
 ### TD-API-005 Candidate list has no pagination or filtering
 - **Status**: OPEN
-- **Revisit when**: Before recruiter UI lists more than a small bounded set of candidates per tenant
+- **Revisit when**: Before recruiter UI lists more than a small bounded set of candidates per tenant without server-side query support
 - **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: `list_candidates` still loads **all** snapshots into memory and returns them with **no** `limit`/`offset`, cursor, or filters (`stage`, `status`, search). The list is now sorted deterministically by recruiter-facing score when present (with `candidate_id` as a tiebreaker), and the response includes `rank` plus `total_candidates`, but the query remains an unbounded full scan.
+- **Last reviewed**: 2026-05-27
+- **Current decision**: `list_candidates` still loads **all** snapshots into memory and returns them with **no** `limit`/`offset`, cursor, or server-side filters (`stage`, `status`, search). The R-007 recruiter SPA applies **client-side** stage/status filters and a display cap (`LIST_DISPLAY_LIMIT = 50`) only; the API contract is unchanged.
 - **Rationale**: Acceptable for single-tenant Stage B demos and integration tests; defers query design until domain list semantics exist.
 - **Future impact** / **risks**:
   - **Performance degradation** as distinct orchestration states grow (full scan + N snapshot loads per request).
@@ -828,13 +828,13 @@ Summary (v2 cleanup):
 - **Status**: OPEN
 - **Revisit when**: When recruiter UI needs copy changes, i18n, or role-specific phrasing without touching governance vocabulary
 - **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: ``available_actions[].label`` is resolved via ``ACTION_DESCRIPTORS`` in ``modules/recruitment/policies.py`` (keyed by ``event_type``) with **fallback** to ``label_from_event_type`` (string transform) when no descriptor exists. Availability remains **registry-only**; descriptors are UI metadata, not a second action map.
+- **Last reviewed**: 2026-05-27
+- **Current decision**: ``available_actions[].label`` is resolved via ``ACTION_DESCRIPTORS`` in ``modules/recruitment/policies.py`` (keyed by ``event_type``) with **fallback** to ``label_from_event_type`` (string transform) when no descriptor exists. The R-007 recruiter SPA renders action buttons using API ``label`` values only and does **not** maintain a parallel frontend label map.
 - **Rationale**: Decouples display copy from domain ``event_type`` names for catalogued actions while keeping a deterministic fallback for registry-only events (e.g. ``recruiter_shortlist_candidate``) before descriptors are added.
 - **Future impact** / **risks**:
   - **Copy changes** for uncatalogued events still require accepting transform output or adding a descriptor entry.
   - **No multi-language or role-specific phrasing** in the API layer today.
-  - **Drift** if frontend and ``ACTION_DESCRIPTORS`` diverge when clients render their own labels.
+  - **Drift** if future clients reintroduce local label tables instead of consuming API metadata.
 - **Priority**: Low
 - **Recommended future direction**: Expand ``ACTION_DESCRIPTORS`` (or a dedicated labels module) for all recruiter ``event_type`` values exposed by the registry; alternatively move label responsibility entirely to the **frontend** and return ``event_type`` only from the API.
 

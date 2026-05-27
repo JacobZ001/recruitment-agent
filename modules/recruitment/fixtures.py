@@ -9,6 +9,12 @@ this merge to preserve historical harness equality.
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from uuid import UUID, uuid5
+
+from modules.recruitment.ingress import BOOT_NS
+
+# Stable id for PDF-seeded testing candidate (see scripts/seed_testing_candidate_from_pdf.py).
+TESTING_DESKTOP_CANDIDATE_ID: UUID = uuid5(BOOT_NS, "vertical_slice.testing_candidate_desktop_cv")
 
 # Human-readable profile for GET /demo/candidate and HTML (not orchestration policy).
 DEMO_CANDIDATE_DISPLAY: Dict[str, Any] = {
