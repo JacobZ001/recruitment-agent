@@ -286,8 +286,7 @@ These rules apply to both Architect Agent and Builder Agent:
 - Write mode: overwrite per round (keep only current round report).
 - Purpose: implementation status, file changes, tests, risks, deviations, and suggested next-round signals.
 - Builder owns the execution report content.
-- `FEEDBACK.md` is not the canonical archive for PM routing decisions.
-- PM-confirmed routing should directly govern major-round snapshot execution and the routing context written into the next `PLAN.md`.
+- PM-confirmed routing should directly govern major-round snapshot execution and next-round numbering.
 - Architect may append closeout notes to `FEEDBACK.md` only when PM explicitly wants round-local archival context, but this is optional rather than protocol-required.
 
 ### Artifact routing
@@ -295,7 +294,7 @@ These rules apply to both Architect Agent and Builder Agent:
 - `docs/architecture/ROADMAP.md`: project direction, current operating posture, capability progress, and near-term upcoming actions.
 - `docs/architecture/tech_debt.md`: deferred work, architecture risk, scaling limits, and explicit debt decisions.
 - `docs/architecture/ADR.md`: durable architecture decisions and cutover choices that should remain true beyond a single round.
-- `PLAN.md`: frozen round scope, routing context from the prior closeout, constraints, ordered execution steps, and acceptance criteria.
+- `PLAN.md`: frozen round scope, constraints, ordered execution steps, and acceptance criteria.
 - `FEEDBACK.md`: execution facts, test results, deviations, blockers, and suggested next-round signals.
 - Do not leave durable decisions or deferred-risk ownership only inside `PLAN.md` / `FEEDBACK.md`; promote them into `ADR.md`, `ROADMAP.md`, or `tech_debt.md` as appropriate.
 
@@ -358,9 +357,7 @@ Each round follows this sequence:
 - PM confirms the routing outcome; this confirmation means "valid baseline for next iteration", not "all concerns are permanently closed".
 - PM-confirmed routing directly governs:
   - next-round numbering,
-  - whether Major-round git snapshot discipline is triggered,
-  - and the routing context carried into the next `PLAN.md`.
-- `FEEDBACK.md` does not require mandatory closeout-routing backfill after PM confirmation unless PM explicitly asks for round-local archival notes.
+  - whether Major-round git snapshot discipline is triggered.
 - Residual issues that do not block forward progress should flow into the next round scope and/or `docs/architecture/tech_debt.md`, not force a heavyweight reopen process.
 - If the current state is not a valid baseline for continued iteration, use the `Blocked escalation protocol` or route to `corrective-minor`; do not silently treat it as major-round completion.
 - Major/minor naming must follow the confirmed routing decision:
@@ -411,7 +408,6 @@ Each round follows this sequence:
   - Architect recommends `advance-major`,
   - PM confirms that the next round should open the next major round,
   - and the repo state is coherent enough to snapshot code plus governance artifacts together.
-- PM routing confirmation does not need to be backfilled into `FEEDBACK.md` to make the snapshot valid.
 - Minor rounds inside an open major round do not require their own governance commit unless PM explicitly asks for an intermediate snapshot.
 - The major-round snapshot commit should include the relevant code changes plus synchronized governance artifacts (`PLAN.md`, `FEEDBACK.md`, `ROADMAP.md`, `tech_debt.md`, `ADR.md`) when they were part of the round outcome.
 - Commit messages should follow conventional commit style:
@@ -433,10 +429,6 @@ Each round follows this sequence:
 
 - Round ID and one-sentence goal.
 - Round type (`major` or `minor`) and parent major round when applicable.
-- Round routing context from the prior closeout:
-  - `proposed routing outcome`
-  - `PM confirmed routing`
-  - `major-round snapshot needed: yes/no`
 - Scope in / scope out.
 - Explicit constraints and architecture boundaries.
 - Planning-phase roadmap alignment summary from `docs/architecture/ROADMAP.md`:
