@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiRequestError, extractApiError, getCandidate, postCandidateAction } from '@/api/client'
-import type { CandidateViewResponse, RecruiterActionItem, ScoreCriterion } from '@/api/types'
+import type { CandidateProfile, CandidateViewResponse, RecruiterActionItem, ScoreCriterion } from '@/api/types'
 import { actionsByGroup } from '@/lib/actions'
 
 function isDestructiveAction(a: RecruiterActionItem): boolean {
@@ -55,17 +55,32 @@ function ScoreBlock({ scores }: { scores: CandidateViewResponse['scores'] }) {
   )
 }
 
-function ProfileSnippet({ profile }: { profile: Record<string, unknown> | null | undefined }) {
+function ProfileSnippet({ profile }: { profile: CandidateProfile | undefined }) {
   if (!profile) return null
-  const name = profile.candidate_name ?? profile.name
-  const role = profile.target_role ?? profile.title
+  const headline = profile.roles?.[0] ?? ''
+  const meta = [
+    profile.seniority ? String(profile.seniority) : null,
+    profile.years_experience != null ? `${profile.years_experience}y` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const summary = profile.summary
-  if (!name && !role && !summary) return null
+  const skills = profile.skills ?? []
+  if (!headline && !meta && !summary && skills.length === 0) return null
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-900">Profile</h2>
-      {name ? <p className="mt-2 font-medium text-slate-800">{String(name)}</p> : null}
-      {role ? <p className="text-sm text-slate-600">{String(role)}</p> : null}
+      {headline ? <p className="mt-2 font-medium text-slate-800">{headline}</p> : null}
+      {meta ? <p className="text-sm text-slate-600">{meta}</p> : null}
+      {skills.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {skills.slice(0, 12).map((s) => (
+            <span key={s} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+              {s}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {summary ? <p className="mt-2 text-sm text-slate-600">{String(summary)}</p> : null}
     </section>
   )

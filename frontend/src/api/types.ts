@@ -19,6 +19,9 @@ export type CandidateListItem = {
   candidate_id: string
   stage: string
   status: CandidateViewStatus
+  headline: string
+  summary: string
+  top_skills: string[]
   overall_score?: CandidateListItemOverallScore | null
   rank?: number | null
   total_candidates?: number | null
@@ -41,12 +44,22 @@ export type ScoreCriterion = {
   reason?: string | null
 }
 
+export type CandidateProfile = {
+  years_experience?: number | null
+  seniority?: 'junior' | 'mid' | 'senior' | string | null
+  roles: string[]
+  skills: string[]
+  industries: string[]
+  summary: string
+  extensions: Record<string, unknown>
+} | null
+
 export type CandidateViewResponse = {
   candidate_id: string
   stage: string
   status: CandidateViewStatus
   summary: string
-  profile?: Record<string, unknown> | null
+  profile?: CandidateProfile
   decision: Record<string, unknown>
   evaluation?: Record<string, unknown> | null
   scoring_context?: ScoringContextSummary

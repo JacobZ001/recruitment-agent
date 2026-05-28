@@ -162,6 +162,23 @@ class CandidateViewStatus(BaseModel):
     kind: str
 
 
+class CandidateProfile(BaseModel):
+    """
+    Recruiter-facing profile snippet extracted during ingress.
+
+    Typed boundary for the candidate view surface; includes a forward-compatible
+    extensions bag for future enrichment without reopening this contract.
+    """
+
+    years_experience: Optional[int] = Field(default=None, ge=0, le=80)
+    seniority: Optional[str] = Field(default=None, description='One of: "junior" | "mid" | "senior"')
+    roles: List[str] = Field(default_factory=list)
+    skills: List[str] = Field(default_factory=list)
+    industries: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    extensions: Dict[str, Any] = Field(default_factory=dict)
+
+
 class CandidateViewResponse(BaseModel):
     """Recruiter-facing projection from orchestration snapshot (composed read model)."""
 
@@ -169,7 +186,7 @@ class CandidateViewResponse(BaseModel):
     stage: str
     status: CandidateViewStatus
     summary: str
-    profile: Optional[Dict[str, Any]] = None
+    profile: Optional[CandidateProfile] = None
     decision: Dict[str, Any] = Field(default_factory=dict)
     evaluation: Optional[Dict[str, Any]] = None
     scoring_context: Optional[Dict[str, Any]] = None
@@ -202,6 +219,12 @@ class CandidateListItem(BaseModel):
     candidate_id: str
     stage: str
     status: CandidateViewStatus
+    headline: str = Field(
+        default="",
+        description="Human-friendly label derived from ingress profile (no demo assumptions).",
+    )
+    summary: str = Field(default="", description="Candidate summary snippet for list display.")
+    top_skills: List[str] = Field(default_factory=list, description="Top skills for list display.")
     overall_score: Optional[CandidateListItemOverallScore] = None
     rank: Optional[int] = None
     total_candidates: Optional[int] = None

@@ -43,7 +43,10 @@ def test_list_candidates_returns_all_created(client: TestClient) -> None:
     assert by_id[cid_a]["status"]["kind"] == "active"
     assert by_id[cid_a]["overall_score"] == {"value": None, "type": None}
     assert "criteria" not in by_id[cid_a]
-    assert "summary" not in by_id[cid_a]
+    # R-008 contract hardening: list includes readability fields derived from ingress profile.
+    assert "headline" in by_id[cid_a]
+    assert "summary" in by_id[cid_a]
+    assert "top_skills" in by_id[cid_a]
 
 
 def test_list_candidates_no_cross_contamination(client: TestClient) -> None:

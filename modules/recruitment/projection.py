@@ -92,6 +92,28 @@ def _summary_from_snapshot(snapshot: OrchestrationState) -> str:
     return CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
 
 
+def _headline_from_profile(profile: Optional[Any]) -> str:
+    """
+    Human-friendly list label derived from the ingress profile only.
+
+    No demo/fixture naming assumptions: when roles are present we prefer the first role,
+    otherwise fall back to seniority/years, and finally empty string.
+    """
+    if profile is None:
+        return ""
+    roles = list(getattr(profile, "roles", None) or [])
+    if roles:
+        return str(roles[0])
+    seniority = getattr(profile, "seniority", None)
+    years = getattr(profile, "years_experience", None)
+    parts: List[str] = []
+    if seniority:
+        parts.append(str(seniority))
+    if years is not None:
+        parts.append(f"{years}y")
+    return " · ".join(parts).strip()
+
+
 def _criteria_from_layout(evaluation: Optional[EvaluationState]) -> List[Dict[str, Any]]:
     light = evaluation.light if evaluation is not None else None
     if light is None:
@@ -184,11 +206,17 @@ def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
     cid = _candidate_id_from_snapshot(snapshot)
     if cid is None:
         raise ValueError("snapshot has no candidate StateLink")
+    profile = snapshot.ingress_profile
+    summary = "" if profile is None else str(getattr(profile, "summary", "") or "")
+    skills = [] if profile is None else list(getattr(profile, "skills", None) or [])
     available_actions = _available_actions_for_snapshot(snapshot)
     return {
         "candidate_id": str(cid),
         "stage": stage,
         "status": _status_block(stage),
+        "headline": _headline_from_profile(profile),
+        "summary": summary,
+        "top_skills": skills[:6],
         "overall_score": overall,
         "rank": None,
         "total_candidates": None,
@@ -227,11 +255,22 @@ def build_candidate_view(
     evaluation = _evaluation_from_snapshot(snapshot)
     profile = snapshot.ingress_profile
     available_actions = _available_actions_for_snapshot(snapshot)
+    profile_payload: Optional[Dict[str, Any]] = None
+    if profile is not None:
+        profile_payload = {
+            "years_experience": profile.years_experience,
+            "seniority": profile.seniority,
+            "roles": list(profile.roles),
+            "skills": list(profile.skills),
+            "industries": list(profile.industries),
+            "summary": profile.summary,
+            "extensions": {},
+        }
     return {
         "stage": stage,
         "status": status,
         "summary": _summary_from_snapshot(snapshot),
-        "profile": None if profile is None else _model_dump_json(profile),
+        "profile": profile_payload,
         "decision": _model_dump_json(snapshot.decision),
         "evaluation": None if evaluation is None else _model_dump_json(evaluation),
         "scoring_context": _scoring_context_summary(active_scoring_context),
