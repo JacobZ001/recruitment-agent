@@ -341,7 +341,7 @@ Each round follows this sequence:
   - continue within the same major round,
   - run a corrective minor round within the same major round,
   - or advance to the next major round.
-12. Architect Agent uses the PM-confirmed routing decision to determine whether Major-round git snapshot discipline applies, and executes the snapshot if applicable.
+12. Architect Agent executes a round-level git snapshot commit for every completed round (major or minor), then proposes the next round using the PM-confirmed routing decision.
 13. Architect Agent proposes next round in Plan mode using the updated roadmap / debt / ADR context and the confirmed routing decision.
 
 ### Round naming convention
@@ -359,7 +359,7 @@ Each round follows this sequence:
 - PM confirms the routing outcome; this confirmation means "valid baseline for next iteration", not "all concerns are permanently closed".
 - PM-confirmed routing directly governs:
   - next-round numbering,
-  - whether Major-round git snapshot discipline is triggered.
+  - the next planning direction; it does not waive the per-round snapshot commit requirement.
 - Residual issues that do not block forward progress should flow into the next round scope and/or `docs/architecture/tech_debt.md`, not force a heavyweight reopen process.
 - If the current state is not a valid baseline for continued iteration, use the `Blocked escalation protocol` or route to `corrective-minor`; do not silently treat it as major-round completion.
 - Major/minor naming must follow the confirmed routing decision:
@@ -401,24 +401,20 @@ Each round follows this sequence:
 - If the resolution is only a clarification that stays within the already approved scope, Architect may refresh `PLAN.md` and return execution to Builder without a new PM approval.
 - A blocked escalation is a control-flow pause, not permission for Builder to improvise around governance boundaries.
 
-### Major-round git snapshot discipline
+### Round-level git snapshot discipline
 
-- Governance requires a formal git snapshot only when a major round is being closed and the next round is advancing to the next major round.
-- Intermediate engineering commits are optional local/team checkpoints; they are allowed, but they do not replace the formal major-round governance snapshot.
-- Create a round-governance commit when all of the following are true:
-  - the current round is the closing round of a major round (for example, `R-005.3` closes `R-005`),
-  - Architect recommends `advance-major`,
-  - PM confirms that the next round should open the next major round,
-  - and the repo state is coherent enough to snapshot code plus governance artifacts together.
-- Minor rounds inside an open major round do not require their own governance commit unless PM explicitly asks for an intermediate snapshot.
-- The major-round snapshot commit should include the relevant code changes plus synchronized governance artifacts (`PLAN.md`, `FEEDBACK.md`, `ROADMAP.md`, `tech_debt.md`, `ADR.md`) when they were part of the round outcome.
+- Governance requires a formal git snapshot commit for every completed round (major and minor).
+- Intermediate engineering commits are optional local/team checkpoints; they are allowed, but they do not replace the formal round snapshot commit.
+- Create the round snapshot commit after Builder overwrites `FEEDBACK.md` and Architect reconciles roadmap/debt artifacts for that round.
+- The round snapshot commit should include the relevant code changes plus synchronized governance artifacts (`PLAN.md`, `FEEDBACK.md`, `ROADMAP.md`, `tech_debt.md`, `ADR.md`) when they were part of the round outcome.
+- If the repo is not coherent enough to snapshot, Architect must obtain explicit PM approval to defer and record the defer reason in the round closeout context.
 - Commit messages should follow conventional commit style:
   - title format: `<type>(<scope>): <summary>`
-  - choose `feat`, `fix`, `refactor`, `docs`, `test`, or another conventional type that best matches the dominant outcome of the completed major round
+  - choose `feat`, `fix`, `refactor`, `docs`, `test`, or another conventional type that best matches the dominant outcome of the completed round
   - keep the title concise and outcome-oriented
   - if a commit body is present, leave exactly one blank line after the title before starting the body
   - write the commit body as flat bullet points rather than prose paragraphs
-  - use the commit body for the major round context, such as the major round ID, capability outcome, roadmap/debt updates, and notable cutovers
+  - use the commit body for round context, such as the round ID, capability outcome, roadmap/debt updates, and notable cutovers
 - Example title: `feat(agents): close R-005 governance refinements`
 - Example body topics:
   - `Major round: R-005`
@@ -440,7 +436,7 @@ Each round follows this sequence:
   - debt entries selected for this round (**`Debt ID` + title**),
   - debt entries explicitly deferred this round (with rationale, **ID + title**),
   - any debt status corrections made during sweep (e.g. `RESOLVED` / `SUPERSEDED` / priority change).
-  - for each debt marked `close` / `partial` / `defer`, include concrete implementation handling in the plan (specific modules/files/behaviors/tests), not generic wording such as "stability hardening partial" without execution detail.
+  - for each debt marked `close` / `partial`, include concrete implementation handling in the plan (specific modules/files/behaviors/tests), not generic wording such as "stability hardening partial" without execution detail.
 - Ordered execution steps.
 - Acceptance criteria (testable checklist).
 - Required Builder feedback format reminder.
