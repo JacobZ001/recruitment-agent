@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from integrations.api.app import create_app
+_api_mod = importlib.import_module("integrations.api.app")
+create_app = _api_mod.create_app
 
 
 def test_demo_route_unaffected_without_frontend_dist(tmp_path, monkeypatch) -> None:
@@ -15,6 +17,7 @@ def test_demo_route_unaffected_without_frontend_dist(tmp_path, monkeypatch) -> N
     env_file.write_text("", encoding="utf-8")
     monkeypatch.setenv("VERTICAL_SLICE_ENV_FILE", str(env_file))
     monkeypatch.setenv("VERTICAL_SLICE_DB_PATH", "")
+    monkeypatch.setattr(_api_mod, "_frontend_dist_dir", lambda: None)
 
     with TestClient(create_app(db_path="")) as client:
         assert client.get("/demo").status_code == 200
@@ -27,11 +30,12 @@ def test_spa_served_when_frontend_dist_exists(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("VERTICAL_SLICE_ENV_FILE", str(env_file))
     monkeypatch.setenv("VERTICAL_SLICE_DB_PATH", "")
 
-    repo_root = Path(__file__).resolve().parents[2]
-    dist = repo_root / "frontend" / "dist"
-    dist.mkdir(parents=True, exist_ok=True)
-    index = dist / "index.html"
+    fake_dist = tmp_path / "dist"
+    fake_dist.mkdir(parents=True, exist_ok=True)
+    index = fake_dist / "index.html"
     index.write_text("<!doctype html><html><body>recruiter spa</body></html>", encoding="utf-8")
+
+    monkeypatch.setattr(_api_mod, "_frontend_dist_dir", lambda: fake_dist)
 
     with TestClient(create_app(db_path="")) as client:
         root = client.get("/", follow_redirects=False)

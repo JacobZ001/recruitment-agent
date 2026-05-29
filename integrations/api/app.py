@@ -82,9 +82,19 @@ CORS_ORIGINS_ENV_VAR = "VERTICAL_SLICE_CORS_ORIGINS"
 def _frontend_dist_dir() -> Optional[Path]:
     """Return ``frontend/dist`` when a production build exists."""
     dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-    if dist.is_dir() and (dist / "index.html").is_file():
+    index = dist / "index.html"
+    if dist.is_dir() and index.is_file() and _spa_index_looks_valid(index):
         return dist
     return None
+
+
+def _spa_index_looks_valid(index: Path) -> bool:
+    """Ignore placeholder index.html (e.g. pytest wrote a one-line stub over a real build)."""
+    try:
+        text = index.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return 'id="root"' in text and "/assets/" in text
 
 
 def _configure_cors(app: FastAPI) -> None:

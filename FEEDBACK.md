@@ -1,74 +1,78 @@
-# FEEDBACK — R-009.1 (Corrective Minor)
+# FEEDBACK — R-010 (Major)
 
 ## Round
 
-- **Round ID:** R-009.1
+- **Round ID:** R-010
 - **Status:** `done`
 
 ## PLAN step mapping
 
 | Step | Status | Notes |
 |------|--------|-------|
-| 1. Reconciliation helper(s) | done | `modules/recruitment/candidate_sync.py` |
-| 2. Subscriber integration | done | `bootstrap._OrchestrationSubscriber.handle` uses `persist_candidate_and_snapshot_with_reconcile` |
-| 3. Read-time convergence (list/detail) | done | `load_candidate_and_snapshot_for_read` + `converge_snapshot_for_read` |
-| 4. Fail-fast 503 | done | `CandidateStoreUnavailableError` / `CandidateCanonicalMissingError` → `integrations/api/errors.py` |
-| 5. Pydantic v2 (touched files) | done | `projection._model_dump_json` uses `model_dump` only; `requirements.txt` already pins `pydantic>=2` |
-| 6. HTTP schema doc fix | done | `CandidateListItem.headline` description |
-| 7. Regression tests | done | `tests/modules/test_candidate_snapshot_sync.py`; `test_list_candidates.py` updated |
-| 8. DB reset + seed | done | No prior `data/app.db`; ran `scripts/seed_testing_candidate_from_pdf.py` → `21024f7f-e639-580f-aae6-d4d2776f910e` |
-| 9. Verification | done | see below |
-| 10. FEEDBACK | done | this file |
+| 1. Detail header / pane structure | done | `CandidateDetailPage` + `HeaderBar` |
+| 2. Job Title + Organization + Recruiter Identity in header | done | From `scoring_context` on candidate view |
+| 3. List Stage/Status tags, Score %, Actions buttons | done | `CandidateListPage` |
+| 4. Actions: `available_actions` only | done | No disabled placeholders |
+| 5. Profile pane full fields + key labels | done | `ProfilePane.tsx` |
+| 6. Scores pane layers + evaluation blocks + progress bars | done | `ScoresPane.tsx` |
+| 7. Remove detail Scoring Context; add list panel | done | `ScoringContextPanel` + `GET /scoring-context` |
+| 8. Remove TD-API-007 hint; label formatting | done | `lib/format.ts` |
+| 9. Types cleanup | done | `api/types.ts` |
+| 10. UI enhancements (tags, 2-col, expand) | done | Shared recruiter components |
+| 11. Backend DTO/projection | skipped | Existing API already exposes profile, evaluation, scores, scoring_context |
+| 12–13. Tests + smoke | done | Automated; manual smoke recommended locally |
+| 14. FEEDBACK | done | this file |
 
 ## File changes
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/candidate_sync.py` | A |
-| `modules/recruitment/exceptions.py` | M |
-| `modules/recruitment/bootstrap.py` | M |
-| `modules/recruitment/projection.py` | M |
-| `modules/recruitment/use_cases.py` | M |
-| `integrations/api/errors.py` | M |
-| `integrations/api/schemas_http.py` | M |
-| `integrations/api/demo_page.py` | M |
-| `tests/modules/test_candidate_snapshot_sync.py` | A |
-| `tests/modules/test_list_candidates.py` | M |
+| `frontend/src/pages/CandidateDetailPage.tsx` | M |
+| `frontend/src/pages/CandidateListPage.tsx` | M |
+| `frontend/src/api/types.ts` | M |
+| `frontend/src/api/client.ts` | M |
+| `frontend/src/lib/format.ts` | A |
+| `frontend/src/lib/format.test.ts` | A |
+| `frontend/src/hooks/useRecruiterActions.ts` | A |
+| `frontend/src/components/recruiter/*.tsx` | A (8 files) |
 | `FEEDBACK.md` | M |
 
 ## Tests
 
 ```text
-python -m pytest -q
-→ 179 passed, 2 skipped
-
 cd frontend && npm test
-→ 4 passed
+→ 7 passed (3 files)
 
 cd frontend && npm run build
 → OK
+
+python -m pytest -q
+→ 179 passed, 2 skipped
 ```
 
-## Acceptance criteria
+## Acceptance criteria (summary)
 
-- [x] Partial dual-write: bounded snapshot retries in `persist_candidate_and_snapshot_with_reconcile`; failure codes + pending marker on candidate extensions when exhausted.
-- [x] List/detail converge stale `evaluation_status_ref` when `evaluation_revision` is newer.
-- [x] Candidate store outage on recruiter read → HTTP 503 with `candidate_store_unavailable` / `fail_fast_no_legacy_snapshot_fallback` (no legacy ingress profile/evaluation fallback on list/detail).
-- [x] Recruiter list/detail/action flows: full suite green.
-- [x] `CandidateListItem.headline` doc reflects canonical Candidate source.
-- [x] Pydantic v2 pinned; v1 fallback removed in touched `projection.py`.
-- [x] DB seed documented and executed.
+- [x] Detail header: `Candidate Details`, large `full_name`, `Candidate ID: …`, pipeline merged (no Pipeline pane).
+- [x] Job Title / Organization / Recruiter Identity in white header bar.
+- [x] Stage/Status tag-like styling (list + detail aligned).
+- [x] Scores as percent (`formatScorePercent`, no rounding; null → `— —`).
+- [x] Overall score + type in header; list Score column percent + type tag.
+- [x] List Actions = clickable buttons; same dialog flow as detail (`useRecruiterActions`).
+- [x] Profile full key-value; Scores three layers + hard_filter/light/deep meta + progress bars.
+- [x] Detail: no Scoring Context panel; list: panel below table via `/scoring-context`.
+- [x] TD-API-007 recruiter hint removed.
+- [x] No backend contract / state-machine changes this round.
 
 ## Debt
 
-- **TD-PERSISTENCE-008** (Evaluation precedence semantics): partial hardening via convergence; full precedence policy still open.
-- **TD-ORCHESTRATOR-012**, **TD-PERSISTENCE-012**: deferred per PLAN.
-- **TD-DX-003** (repo-wide Pydantic v1 fallback cleanup): suggest register/open — only touched-file cleanup done this round (`projection`, not `candidate_writes`).
+- **TD-PERSISTENCE-008** — deferred per PLAN (no change).
+- **TD-ORCHESTRATOR-012**, **TD-PERSISTENCE-012**, **TD-API-010** — deferred per PLAN.
 
 ## Risks / deviations
 
-- None blocking. Demo HTML page loads candidate from store before `build_candidate_view` (not a recruiter API surface).
+- List `Scoring Context` uses global `GET /scoring-context` (not per-row); matches “list testing surface” intent.
+- List row actions share one dialog instance with `candidateId` passed on open (ref-synced hook).
 
 ## Suggested next-round focus
 
-- R-010 or next major: remove legacy snapshot `ingress_profile` / `evaluation` fields after migration window; continue TD-PERSISTENCE-008 precedence semantics.
+- **R-011** — OrchestrationState linkage cleanup + legacy compatibility branch removal (per roadmap queue).

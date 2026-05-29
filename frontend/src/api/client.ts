@@ -1,4 +1,9 @@
-import type { ApiErrorBody, CandidateListItem, CandidateViewResponse } from '@/api/types'
+import type {
+  ApiErrorBody,
+  CandidateListItem,
+  CandidateViewResponse,
+  ScoringContextResponse,
+} from '@/api/types'
 
 export class ApiRequestError extends Error {
   readonly status: number
@@ -57,6 +62,10 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 
 export function listCandidates(): Promise<CandidateListItem[]> {
   return fetchJson<CandidateListItem[]>('/candidates')
+}
+
+export function getScoringContext(): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context')
 }
 
 export function getCandidate(candidateId: string): Promise<CandidateViewResponse> {

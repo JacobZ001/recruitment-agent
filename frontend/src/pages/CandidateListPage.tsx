@@ -1,16 +1,30 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { listCandidates } from '@/api/client'
+import { getScoringContext, listCandidates } from '@/api/client'
+import type { CandidateListItem, RecruiterActionItem } from '@/api/types'
+import { RecruiterActionDialog } from '@/components/recruiter/RecruiterActionDialog'
+import { RecruiterActionsSection } from '@/components/recruiter/RecruiterActionsSection'
+import { ScoringContextPanel } from '@/components/recruiter/ScoringContextPanel'
+import { StageTag, StatusTag } from '@/components/recruiter/StageStatusTags'
+import { useRecruiterActions } from '@/hooks/useRecruiterActions'
+import { formatScorePercent } from '@/lib/format'
 import { LIST_DISPLAY_LIMIT } from '@/lib/constants'
 
-function CandidateLabel({
-  fullName,
-}: {
-  fullName: string
-}) {
+function CandidateLabel({ fullName }: { fullName: string }) {
   const name = fullName.trim()
   return <span className="font-medium text-indigo-700">{name || 'Unnamed candidate'}</span>
+}
+
+function ListRowActions({
+  row,
+  onAction,
+}: {
+  row: CandidateListItem
+  onAction: (a: RecruiterActionItem) => void
+}) {
+  const available = row.available_actions ?? []
+  return <RecruiterActionsSection actions={available} onAction={onAction} compact />
 }
 
 export function CandidateListPage() {
@@ -19,8 +33,15 @@ export function CandidateListPage() {
     queryFn: listCandidates,
   })
 
+  const scoringQ = useQuery({
+    queryKey: ['scoring-context'],
+    queryFn: getScoringContext,
+    retry: false,
+  })
+
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const rowActions = useRecruiterActions()
 
   const stageOptions = useMemo(() => {
     if (!data) return ['all']
@@ -38,6 +59,22 @@ export function CandidateListPage() {
   }, [data, stageFilter, statusFilter])
 
   const capped = useMemo(() => filtered.slice(0, LIST_DISPLAY_LIMIT), [filtered])
+
+  const scoringPanelData = useMemo(() => {
+    if (!scoringQ.data) return null
+    const ctx = scoringQ.data
+    return {
+      context_version: ctx.context_version,
+      status: ctx.status,
+      organization: ctx.organization_context?.company_name ?? null,
+      job_title: ctx.job_context?.title ?? null,
+      recruiter_actor_id: ctx.recruiter_actor_context?.actor_id ?? null,
+    }
+  }, [scoringQ.data])
+
+  const openRowAction = (candidateId: string, action: RecruiterActionItem) => {
+    rowActions.openAction(action, candidateId)
+  }
 
   return (
     <div className="space-y-6">
@@ -138,24 +175,27 @@ export function CandidateListPage() {
                         <CandidateLabel fullName={row.full_name} />
                       </Link>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.stage}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.status.kind}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                      {row.overall_score?.value != null ? (
-                        <>
-                          {row.overall_score.value.toFixed(2)}
-                          {row.overall_score.type ? (
-                            <span className="ml-1 rounded bg-slate-100 px-1.5 text-xs text-slate-600">
-                              {row.overall_score.type}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <StageTag stage={row.stage} />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                      {row.available_actions?.length ?? 0}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <StatusTag kind={row.status.kind} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-800">
+                      <span className="font-semibold">
+                        {formatScorePercent(row.overall_score?.value ?? null)}
+                      </span>
+                      {row.overall_score?.type ? (
+                        <span className="ml-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-900">
+                          {row.overall_score.type}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="max-w-xs px-4 py-3">
+                      <ListRowActions
+                        row={row}
+                        onAction={(a) => openRowAction(row.candidate_id, a)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -163,6 +203,22 @@ export function CandidateListPage() {
             </table>
           </div>
         </div>
+      )}
+
+      <ScoringContextPanel sc={scoringPanelData} />
+
+      {rowActions.dialog.open && (
+        <RecruiterActionDialog
+          action={rowActions.dialog.action}
+          reason={rowActions.reason}
+          actorId={rowActions.actorId}
+          formError={rowActions.formError}
+          isPending={rowActions.mutation.isPending}
+          onReasonChange={rowActions.setReason}
+          onActorIdChange={rowActions.setActorId}
+          onCancel={() => rowActions.setDialog({ open: false })}
+          onConfirm={() => void rowActions.submitAction()}
+        />
       )}
     </div>
   )

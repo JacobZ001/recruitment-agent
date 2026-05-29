@@ -428,6 +428,9 @@ Each round follows this sequence:
 - Round ID and one-sentence goal.
 - Round type (`major` or `minor`) and parent major round when applicable.
 - Scope in / scope out.
+- Scope must be deterministic at the `what` level: do not leave Builder-facing feature/scope options inside `PLAN.md`.
+- If multiple scope options exist, Architect must explicitly ask PM to choose (and may provide recommendations) **before** freezing `PLAN.md`.
+- Only PM-selected options may be written into `PLAN.md`; unselected alternatives should be excluded rather than left as optional Builder choices.
 - Explicit constraints and architecture boundaries.
 - Planning-phase roadmap alignment summary from `docs/architecture/ROADMAP.md`:
   - capability areas this round is intended to advance,
@@ -456,6 +459,7 @@ Each round follows this sequence:
 ## Governance and Guardrails
 
 - `PLAN.md` is the only execution instruction source for Builder Agent.
+- Builder may choose `how` (implementation technique) only within approved scope; Builder must not choose `what` (scope/features) from optional branches left in `PLAN.md`.
 - Builder Agent should avoid opportunistic scope expansion.
 - Builder Agent does **not** perform independent debt planning during execution.
 - Builder Agent does **not** perform independent roadmap planning during execution.

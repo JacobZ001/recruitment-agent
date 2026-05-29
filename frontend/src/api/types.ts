@@ -37,6 +37,14 @@ export type ScoringContextSummary = {
   job_title?: string | null
 } | null
 
+export type ScoringContextResponse = {
+  context_version: number
+  status: string
+  organization_context?: { company_name?: string | null } | null
+  recruiter_actor_context?: { actor_id?: string | null } | null
+  job_context?: { title?: string | null } | null
+}
+
 export type ScoreCriterion = {
   name: string
   score: number | null
@@ -73,17 +81,15 @@ export type CandidateViewResponse = {
   status: CandidateViewStatus
   summary: string
   profile?: CandidateProfile
-  decision: Record<string, unknown>
   evaluation?: Record<string, unknown> | null
   scoring_context?: ScoringContextSummary
-  flags: Record<string, unknown>
   scores: {
     criteria?: ScoreCriterion[]
     overall_score?: { value?: number | null; type?: string | null }
+    context_version?: number | null
+    stale?: boolean | null
   }
-  ranking: Record<string, unknown>
   available_actions: RecruiterActionItem[]
-  next_actions: string[]
 }
 
 export type ApiErrorBody = {
