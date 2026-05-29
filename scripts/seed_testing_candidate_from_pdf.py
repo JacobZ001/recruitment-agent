@@ -101,11 +101,19 @@ def seed_testing_candidate_from_pdf(
     if not got.ok or got.snapshot is None:
         raise RuntimeError("candidate snapshot missing after ingest")
     snap = got.snapshot
-    prof = snap.ingress_profile
-    summary = prof.summary[:120] if prof and prof.summary else "(no profile summary)"
-    light = snap.evaluation.light.normalized_score if snap.evaluation and snap.evaluation.light else None
+    got_c = runtime.candidate_store.get(candidate_id)
+    if not got_c.ok or got_c.candidate is None:
+        raise RuntimeError("canonical candidate missing after ingest")
+    cand = got_c.candidate
+    summary = (cand.profile.summary or "")[:120] or "(no profile summary)"
+    light = (
+        cand.evaluation_status.light.normalized_score
+        if cand.evaluation_status.light is not None
+        else None
+    )
     print(f"candidate_id={candidate_id}")
     print(f"pipeline_phase={snap.pipeline.phase.value}")
+    print(f"full_name={cand.identity.full_name!r}")
     print(f"profile_summary={summary!r}")
     print(f"light_score={light}")
     print("Open recruiter UI: /app/ then search or open this candidate id in the list.")

@@ -75,7 +75,10 @@ class SQLiteStateStore:
         created_at: str,
         updated_at: str,
     ) -> None:
-        cids = _candidate_ids_from_links(list(snapshot.links))
+        if snapshot.candidate_id is not None:
+            cids = [snapshot.candidate_id]
+        else:
+            cids = _candidate_ids_from_links(list(snapshot.links))
         primary_cand = str(cids[0]) if cids else None
         payload = snapshot.model_dump_json()
 

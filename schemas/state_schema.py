@@ -387,11 +387,21 @@ class ScoreEvaluation(_SchemaBase):
 
 
 class EvaluationState(_SchemaBase):
-    """Canonical home for scoring and filtering results."""
+    """Scoring/filtering payload shape (canonical on Candidate aggregate as of R-009)."""
 
     hard_filter: Optional[HardFilterEvaluation] = Field(default=None)
     light: Optional[ScoreEvaluation] = Field(default=None)
     deep: Optional[ScoreEvaluation] = Field(default=None)
+
+
+class EvaluationStatusRef(_SchemaBase):
+    """Minimal evaluation snapshot recorded on orchestration state at persist time."""
+
+    revision: int = Field(default=0, ge=0)
+    context_version: Optional[int] = Field(default=None, ge=1)
+    overall_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    score_type: Optional[Literal["light", "deep"]] = Field(default=None)
+    stale: bool = Field(default=False)
 
 
 class IngressFlags(_SchemaBase):
@@ -487,6 +497,10 @@ class OrchestrationState(_SchemaBase):
     schema_version: Literal["1.0"] = Field(default=StateSchemaVersion.V1.value)
 
     id: UUID = Field(..., description="Unique state object id.")
+    candidate_id: Optional[UUID] = Field(
+        default=None,
+        description="Explicit candidate binding (R-009); preferred over links-only lookup.",
+    )
     links: List[StateLink] = Field(
         default_factory=list,
         description="Links to candidate/job/event entities without tight coupling.",
@@ -494,8 +508,15 @@ class OrchestrationState(_SchemaBase):
 
     pipeline: PipelineState = Field(default_factory=PipelineState)
     decision: DecisionState = Field(default_factory=DecisionState)
-    ingress_profile: Optional[IngressProfile] = Field(default=None)
-    evaluation: Optional[EvaluationState] = Field(default=None)
+    ingress_profile: Optional[IngressProfile] = Field(
+        default=None,
+        description="Legacy ingress profile; R-009+ writes use Candidate aggregate instead.",
+    )
+    evaluation: Optional[EvaluationState] = Field(
+        default=None,
+        description="Legacy full evaluation on snapshot; R-009+ writes evaluation_status_ref only.",
+    )
+    evaluation_status_ref: Optional[EvaluationStatusRef] = Field(default=None)
     ingress_flags: IngressFlags = Field(default_factory=IngressFlags)
     communication: CommunicationState = Field(default_factory=CommunicationState)
 

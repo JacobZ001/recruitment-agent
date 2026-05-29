@@ -221,18 +221,28 @@ def test_sqlite_full_pipeline_typed_evaluation_survives_reload(tmp_path) -> None
     sid = bundle.state_id
     fin = store.get(sid)
     assert fin.ok and fin.snapshot is not None
-    assert fin.snapshot.evaluation is not None
-    assert fin.snapshot.evaluation.hard_filter is not None
-    assert fin.snapshot.evaluation.light is not None
-    assert fin.snapshot.evaluation.deep is not None
+    got_c = bundle.candidate_store.get(bundle.candidate_id)
+    assert got_c.ok and got_c.candidate is not None
+    assert got_c.candidate.evaluation_status is not None
+    assert fin.snapshot.evaluation is None
+    assert fin.snapshot.evaluation_status_ref is not None
+    ev = got_c.candidate.evaluation_status
+    assert ev.hard_filter is not None
+    assert ev.light is not None
+    assert ev.deep is not None
     store.close()
 
     store2 = SQLiteStateStore(str(db), config=cfg)
+    from runtime.persistence.sqlite_candidate_store import SQLiteCandidateStore
+
+    cand_store2 = SQLiteCandidateStore(str(db))
     reloaded = store2.get(sid)
     assert reloaded.ok and reloaded.snapshot is not None
-    assert reloaded.snapshot.evaluation is not None
-    assert reloaded.snapshot.evaluation.light is not None
-    assert reloaded.snapshot.evaluation.deep is not None
+    got_c2 = cand_store2.get(bundle.candidate_id)
+    assert got_c2.ok and got_c2.candidate is not None
+    ev2 = got_c2.candidate.evaluation_status
+    assert ev2.light is not None
+    assert ev2.deep is not None
     store2.close()
 
 

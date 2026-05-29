@@ -5,42 +5,12 @@ import { listCandidates } from '@/api/client'
 import { LIST_DISPLAY_LIMIT } from '@/lib/constants'
 
 function CandidateLabel({
-  candidateId,
-  headline,
-  summary,
-  topSkills,
+  fullName,
 }: {
-  candidateId: string
-  headline: string
-  summary: string
-  topSkills: string[]
+  fullName: string
 }) {
-  const hasSecondary = Boolean(headline) || Boolean(summary) || (topSkills?.length ?? 0) > 0
-  return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap items-baseline gap-x-2">
-        <span className="font-medium text-indigo-700">{candidateId}</span>
-        {headline ? <span className="text-xs text-slate-600">· {headline}</span> : null}
-      </div>
-      {hasSecondary ? (
-        <div className="space-y-1">
-          {topSkills?.length ? (
-            <div className="flex flex-wrap gap-1">
-              {topSkills.slice(0, 6).map((s) => (
-                <span
-                  key={s}
-                  className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {summary ? <p className="line-clamp-2 text-xs text-slate-600">{summary}</p> : null}
-        </div>
-      ) : null}
-    </div>
-  )
+  const name = fullName.trim()
+  return <span className="font-medium text-indigo-700">{name || 'Unnamed candidate'}</span>
 }
 
 export function CandidateListPage() {
@@ -165,12 +135,7 @@ export function CandidateListPage() {
                         to={`/candidates/${row.candidate_id}`}
                         className="font-medium text-indigo-700 hover:underline"
                       >
-                        <CandidateLabel
-                          candidateId={row.candidate_id}
-                          headline={row.headline}
-                          summary={row.summary}
-                          topSkills={row.top_skills}
-                        />
+                        <CandidateLabel fullName={row.full_name} />
                       </Link>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.stage}</td>

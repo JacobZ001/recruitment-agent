@@ -74,11 +74,14 @@ def test_submit_cv_pdf_persists_typed_snapshot_fields(establish_ready_scoring_co
     assert got.ok and got.snapshot is not None
     snap = got.snapshot
     assert snap.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
-    assert snap.ingress_profile is not None
-    assert snap.evaluation is not None
-    assert snap.evaluation.light is not None
-    assert "Senior Python developer" in snap.ingress_profile.summary
-    assert snap.evaluation.light.normalized_score is not None
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    evaluation = got_c.candidate.evaluation_status
+    assert evaluation.light is not None
+    assert "Senior Python developer" in (got_c.candidate.profile.summary or "")
+    assert evaluation.light.normalized_score is not None
+    assert snap.ingress_profile is None
+    assert snap.evaluation is None
 
 
 def test_submit_cv_pdf_empty_text_extraction_raises() -> None:

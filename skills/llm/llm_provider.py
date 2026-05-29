@@ -119,8 +119,13 @@ def _payload_for_profile(cv_text: str) -> Dict[str, Any]:
 
     cleaned = " ".join(line.strip() for line in cv_text.splitlines() if line.strip())
     summary = cleaned[:220].strip() or "Candidate profile extracted from submitted CV."
+    headline = roles[0] if roles else None
+    # Stub mode is UI/dev focused: keep a stable placeholder identity.
+    full_name = "John Doe"
     return {
         "profile": {
+            "full_name": full_name,
+            "headline": headline,
             "years_experience": years,
             "seniority": seniority,
             "roles": roles,

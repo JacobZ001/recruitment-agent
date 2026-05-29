@@ -41,3 +41,11 @@ class InvalidRecruiterActionPayloadError(RecruitmentUseCaseError):
 
 class ScoringFailedError(RecruitmentUseCaseError):
     """A required scoring/evaluation step failed during ingress processing."""
+
+
+class CandidateStoreUnavailableError(RecruitmentUseCaseError):
+    """Canonical Candidate store cannot be read for recruiter surfaces (fail-fast; no legacy fallback)."""
+
+
+class CandidateCanonicalMissingError(RecruitmentUseCaseError):
+    """Orchestration state exists but canonical Candidate row is absent (fail-fast; no legacy fallback)."""

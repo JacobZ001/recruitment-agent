@@ -20,8 +20,11 @@ from .bootstrap import (
     drive_vertical_slice_primary_sequence,
     wire_vertical_slice_runtime,
 )
+from .candidate_writes import ensure_candidate_record
 from .ingress import FIXED_CLOCK as _FIXED_CLOCK
 from runtime.in_memory_state_store import InMemoryStateStoreConfig
+from runtime.persistence.in_memory_candidate_store import InMemoryCandidateStore
+from runtime.persistence.sqlite_candidate_store import SQLiteCandidateStore
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from runtime.recording_event_bus import RecordingInMemoryEventBus
 from schemas.state_schema import OrchestrationState, PipelinePhase
@@ -49,17 +52,22 @@ class VerticalSliceApiRuntime:
     def __init__(self, *, db_path: Optional[str] = None) -> None:
         if db_path is not None:
             sql_store = SQLiteStateStore(db_path, config=InMemoryStateStoreConfig())
+            cand_store = SQLiteCandidateStore(db_path)
             self.scoring_context_store = SQLiteScoringContextStore(db_path)
+            self.candidate_store = cand_store
             self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
                 planner=VerticalSlicePlanner(demo_skill_context=True),
                 store=sql_store,
+                candidate_store=cand_store,
             )
         else:
             self.scoring_context_store = InMemoryScoringContextStore()
+            self.candidate_store = InMemoryCandidateStore()
             self.bundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
                 planner=VerticalSlicePlanner(demo_skill_context=True),
+                candidate_store=self.candidate_store,
             )
         self._seq = 0
         self._lock = threading.Lock()
@@ -100,6 +108,8 @@ class VerticalSliceApiRuntime:
             )
             store = self.bundle.store
             self.scoring_context_store.clear()
+            if isinstance(self.candidate_store, InMemoryCandidateStore):
+                self.candidate_store.clear_all()
             sqlite_cleared = False
             if isinstance(store, SQLiteStateStore):
                 sqlite_cleared = True
@@ -107,6 +117,8 @@ class VerticalSliceApiRuntime:
                 conn.execute("DELETE FROM state_transition_audit")
                 conn.execute("DELETE FROM orchestration_state_candidate")
                 conn.execute("DELETE FROM orchestration_state")
+                if isinstance(self.candidate_store, SQLiteCandidateStore):
+                    conn.execute("DELETE FROM candidate")
                 try:
                     conn.execute("DELETE FROM sqlite_sequence WHERE name='state_transition_audit'")
                 except sqlite3.OperationalError:
@@ -115,6 +127,11 @@ class VerticalSliceApiRuntime:
                 created = store.create(init)
                 if not created.ok or created.meta is None:
                     raise RuntimeError(f"dev reset create failed: {created.failure}")
+                ensure_candidate_record(
+                    self.candidate_store,
+                    self.bundle.candidate_id,
+                    occurred_at=_FIXED_CLOCK,
+                )
                 rev = created.meta.store_revision
             else:
                 got = store.get(self.bundle.state_id)
@@ -132,6 +149,11 @@ class VerticalSliceApiRuntime:
                     if not rep.ok or rep.meta is None:
                         raise RuntimeError(f"dev reset replace failed: {rep.failure}")
                     rev = rep.meta.store_revision
+                ensure_candidate_record(
+                    self.candidate_store,
+                    self.bundle.candidate_id,
+                    occurred_at=_FIXED_CLOCK,
+                )
 
             return DevResetResult(
                 store_revision=rev,

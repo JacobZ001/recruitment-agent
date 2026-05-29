@@ -35,6 +35,8 @@ from interfaces.skill_interface import (
     SkillOutputEnvelope,
     SkillInterfaceVersion,
 )
+import hashlib
+
 from schemas.state_schema import IngressProfile
 from skills.llm.llm_provider import LLMProvider, LLMProviderError, build_llm_provider_from_env
 
@@ -47,7 +49,8 @@ _SYSTEM_PROMPT: Final[str] = """
 You are extracting structured recruiter intake profile data from a submitted CV.
 Return strict JSON only, no markdown.
 Required top-level keys: profile, explanation.
-Profile keys: years_experience, seniority, roles, skills, industries, summary.
+Profile keys: full_name, headline, years_experience, seniority, roles, skills, industries, summary.
+Optional: primary_email, primary_phone.
 Seniority must be junior, mid, senior, or null.
 Do not include raw CV text in the response.
 """.strip()
@@ -63,6 +66,10 @@ class _SkillModel(BaseModel):
 
 
 class _LLMProfile(_SkillModel):
+    full_name: Optional[str] = Field(default=None)
+    headline: Optional[str] = Field(default=None)
+    primary_email: Optional[str] = Field(default=None)
+    primary_phone: Optional[str] = Field(default=None)
     years_experience: Optional[int] = Field(default=None, ge=0, le=80)
     seniority: Optional[Literal["junior", "mid", "senior"]] = Field(default=None)
     roles: list[str] = Field(default_factory=list)
@@ -259,13 +266,31 @@ class CvLlmParseProfileSkill:
             industries=list(parsed.profile.industries),
             summary=parsed.profile.summary,
         )
+        aggregate_profile = {
+            "full_name": parsed.profile.full_name,
+            "headline": parsed.profile.headline or (parsed.profile.roles[0] if parsed.profile.roles else None),
+            "primary_email": parsed.profile.primary_email,
+            "primary_phone": parsed.profile.primary_phone,
+            "years_experience": parsed.profile.years_experience,
+            "seniority": parsed.profile.seniority,
+            "roles": list(parsed.profile.roles),
+            "skills": list(parsed.profile.skills),
+            "industries": list(parsed.profile.industries),
+            "summary": parsed.profile.summary,
+        }
         return SkillExecutionResult(
             metadata=self.metadata,
             status=ExecutionStatus.SUCCEEDED,
             output=SkillOutputEnvelope(
                 payload={
-                    "profile": _dump_model(profile),
+                    "profile": aggregate_profile,
+                    "ingress_profile": _dump_model(profile),
                     "profile_explanation": parsed.explanation,
+                    "cv_content_fingerprint": hashlib.sha256(
+                        " ".join(
+                            ln.strip().lower() for ln in cv_text.splitlines() if ln.strip()
+                        ).encode("utf-8")
+                    ).hexdigest(),
                 },
                 extensions={"interface_version": SkillInterfaceVersion.V1.value},
             ),

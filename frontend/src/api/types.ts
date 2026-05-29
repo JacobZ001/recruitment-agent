@@ -17,6 +17,7 @@ export type CandidateListItemOverallScore = {
 
 export type CandidateListItem = {
   candidate_id: string
+  full_name: string
   stage: string
   status: CandidateViewStatus
   headline: string
@@ -45,12 +46,24 @@ export type ScoreCriterion = {
 }
 
 export type CandidateProfile = {
-  years_experience?: number | null
-  seniority?: 'junior' | 'mid' | 'senior' | string | null
-  roles: string[]
-  skills: string[]
-  industries: string[]
+  full_name?: string | null
+  primary_email?: string | null
+  primary_phone?: string | null
+  preferred_contact_method?: string | null
+  location?: string | null
+  timezone?: string | null
+  external_profile_urls?: string[]
+  headline?: string | null
   summary: string
+  seniority?: string | null
+  years_experience?: number | null
+  languages?: string[]
+  skills: string[]
+  industries?: string[]
+  roles?: string[]
+  work_authorization?: string | null
+  compensation_expectation?: string | null
+  availability_date?: string | null
   extensions: Record<string, unknown>
 } | null
 

@@ -302,6 +302,8 @@ These rules apply to both Architect Agent and Builder Agent:
 
 - Plan mode artifacts are Architect planning / PM review artifacts, not execution instruction sources.
 - In this repository, a plan artifact's purpose is to help Architect and PM converge on the next round before `PLAN.md` is overwritten.
+- **Every development-round plan artifact must include an explicit handoff note stating:** "After PM approval, Architect only overwrites root `PLAN.md` and then stops; Builder implementation must run in a separate `Builder Agent` session."
+- Plan artifacts may be written in Chinese by default for PM readability; use English only when PM explicitly requests it.
 - When a plan artifact is created for a development round, its todo list should contain only the Architect handoff action:
   - overwrite `PLAN.md` with the approved round instruction
 - Do **not** use plan-artifact todos as a direct implementation task list for Builder work.
@@ -438,6 +440,7 @@ Each round follows this sequence:
   - debt entries selected for this round (**`Debt ID` + title**),
   - debt entries explicitly deferred this round (with rationale, **ID + title**),
   - any debt status corrections made during sweep (e.g. `RESOLVED` / `SUPERSEDED` / priority change).
+  - for each debt marked `close` / `partial` / `defer`, include concrete implementation handling in the plan (specific modules/files/behaviors/tests), not generic wording such as "stability hardening partial" without execution detail.
 - Ordered execution steps.
 - Acceptance criteria (testable checklist).
 - Required Builder feedback format reminder.

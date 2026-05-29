@@ -16,9 +16,13 @@ from orchestrator.vertical_slice_planner import (
 )
 from .fixtures import DEMO_CANDIDATE_DISPLAY
 from .inspection.timeline import vertical_slice_timeline_text
+from .candidate_sync import load_candidate_and_snapshot_for_read
+from .candidate_writes import evaluation_from_candidate
 from runtime.inspection import skill_decision_summary_parts
+from schemas.candidate_schema import Candidate, SeniorityLevel
 from schemas.state_schema import (
     EvaluationState,
+    EvaluationStatusRef,
     OrchestrationState,
     PipelinePhase,
     ScoringContext,
@@ -41,6 +45,7 @@ _EMPTY_CRITERIA_LAYOUT: Tuple[Tuple[str, str], ...] = (
     ("recruiter_preference_alignment", "recruiter_preference"),
 )
 
+
 class ReadRuntime(Protocol):
     """Runtime surface for read-only projections."""
 
@@ -49,6 +54,9 @@ class ReadRuntime(Protocol):
 
     @property
     def bundle(self) -> Any: ...
+
+    @property
+    def candidate_store(self) -> Any: ...
 
     @property
     def scoring_context_store(self) -> Any: ...
@@ -66,52 +74,30 @@ def _status_block(phase: str) -> Dict[str, Any]:
     return {"kind": _recruiter_status_kind(phase)}
 
 
-def _float_or_null(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _model_dump_json(model: Any) -> Dict[str, Any]:
-    if hasattr(model, "model_dump"):
-        return model.model_dump(mode="json")
-    return model.dict()
+    return model.model_dump(mode="json")
 
 
-def _evaluation_from_snapshot(snapshot: OrchestrationState) -> Optional[EvaluationState]:
-    return snapshot.evaluation
+def _evaluation_for_read(candidate: Candidate) -> Optional[EvaluationState]:
+    ev = evaluation_from_candidate(candidate)
+    if ev.light is not None or ev.deep is not None or ev.hard_filter is not None:
+        return ev
+    return None
 
 
-def _summary_from_snapshot(snapshot: OrchestrationState) -> str:
-    profile = snapshot.ingress_profile
-    if profile is not None and profile.summary.strip():
-        return profile.summary
-    return CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+def _overall_score_from_evaluation(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
+    if evaluation is not None and evaluation.deep is not None:
+        return {"value": float(evaluation.deep.normalized_score), "type": "deep"}
+    if evaluation is not None and evaluation.light is not None:
+        return {"value": float(evaluation.light.normalized_score), "type": "light"}
+    ref = None  # caller may pass ref separately for list-only snapshots
+    return {"value": None, "type": None}
 
 
-def _headline_from_profile(profile: Optional[Any]) -> str:
-    """
-    Human-friendly list label derived from the ingress profile only.
-
-    No demo/fixture naming assumptions: when roles are present we prefer the first role,
-    otherwise fall back to seniority/years, and finally empty string.
-    """
-    if profile is None:
-        return ""
-    roles = list(getattr(profile, "roles", None) or [])
-    if roles:
-        return str(roles[0])
-    seniority = getattr(profile, "seniority", None)
-    years = getattr(profile, "years_experience", None)
-    parts: List[str] = []
-    if seniority:
-        parts.append(str(seniority))
-    if years is not None:
-        parts.append(f"{years}y")
-    return " · ".join(parts).strip()
+def _overall_score_from_ref(ref: Optional[EvaluationStatusRef]) -> Dict[str, Any]:
+    if ref is None or ref.overall_score is None:
+        return {"value": None, "type": None}
+    return {"value": float(ref.overall_score), "type": ref.score_type}
 
 
 def _criteria_from_layout(evaluation: Optional[EvaluationState]) -> List[Dict[str, Any]]:
@@ -147,14 +133,6 @@ def _criteria_from_layout(evaluation: Optional[EvaluationState]) -> List[Dict[st
     return out
 
 
-def _overall_score_from_evaluation(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
-    if evaluation is not None and evaluation.deep is not None:
-        return {"value": float(evaluation.deep.normalized_score), "type": "deep"}
-    if evaluation is not None and evaluation.light is not None:
-        return {"value": float(evaluation.light.normalized_score), "type": "light"}
-    return {"value": None, "type": None}
-
-
 def _scores_section(evaluation: Optional[EvaluationState]) -> Dict[str, Any]:
     active = None
     if evaluation is not None:
@@ -187,40 +165,89 @@ def _next_actions_from_available_actions(actions: List[Dict[str, Any]]) -> List[
 
 
 def _candidate_id_from_snapshot(snapshot: OrchestrationState) -> Optional[UUID]:
+    if snapshot.candidate_id is not None:
+        return snapshot.candidate_id
     for link in snapshot.links:
         if link.kind.strip().lower() == "candidate":
             return link.id
     return None
 
 
-def build_candidate_list_item(snapshot: OrchestrationState) -> Dict[str, Any]:
-    """
-    Lightweight list row from ``snapshot`` (stage, status kind, overall score).
+def _list_headline(candidate: Optional[Candidate]) -> str:
+    if candidate is None:
+        return ""
+    if candidate.profile.headline:
+        return candidate.profile.headline
+    if candidate.identity.full_name:
+        return candidate.identity.full_name
+    return ""
 
-    ``overall_score`` uses the same deep-then-light rule as :func:`build_candidate_view`
-    (via :func:`_overall_score_from_extensions`). Does not include criteria, timeline,
-    ranking detail, or evaluation summary.
-    """
+
+def _profile_dto(candidate: Candidate) -> Dict[str, Any]:
+    prof = candidate.profile
+    ident = candidate.identity
+    sen = prof.seniority.value if prof.seniority != SeniorityLevel.UNKNOWN else None
+    return {
+        "full_name": ident.full_name,
+        "primary_email": ident.primary_email,
+        "primary_phone": ident.primary_phone,
+        "preferred_contact_method": (
+            ident.preferred_contact_method.value if ident.preferred_contact_method else None
+        ),
+        "location": ident.location,
+        "timezone": ident.timezone,
+        "external_profile_urls": list(ident.external_profile_urls),
+        "headline": prof.headline,
+        "summary": prof.summary or "",
+        "seniority": sen,
+        "years_experience": prof.years_experience,
+        "languages": list(prof.languages),
+        "skills": list(prof.skills),
+        "industries": list(prof.industries),
+        "work_authorization": prof.work_authorization.value,
+        "compensation_expectation": prof.compensation_expectation,
+        "availability_date": (
+            prof.availability_date.isoformat() if prof.availability_date else None
+        ),
+        "roles": [prof.headline] if prof.headline else [],
+        "extensions": {},
+    }
+
+
+def _summary_text(candidate: Candidate) -> str:
+    if candidate.profile.summary and candidate.profile.summary.strip():
+        return candidate.profile.summary
+    return CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER
+
+
+def build_candidate_list_item(
+    snapshot: OrchestrationState,
+    *,
+    candidate: Candidate,
+) -> Dict[str, Any]:
     stage = snapshot.pipeline.phase.value
-    overall = _overall_score_from_evaluation(_evaluation_from_snapshot(snapshot))
+    evaluation = _evaluation_for_read(candidate)
+    overall = _overall_score_from_evaluation(evaluation)
+    if overall["value"] is None and snapshot.evaluation_status_ref is not None:
+        overall = _overall_score_from_ref(snapshot.evaluation_status_ref)
     cid = _candidate_id_from_snapshot(snapshot)
     if cid is None:
-        raise ValueError("snapshot has no candidate StateLink")
-    profile = snapshot.ingress_profile
-    summary = "" if profile is None else str(getattr(profile, "summary", "") or "")
-    skills = [] if profile is None else list(getattr(profile, "skills", None) or [])
-    available_actions = _available_actions_for_snapshot(snapshot)
+        raise ValueError("snapshot has no candidate id")
+    summary = candidate.profile.summary or ""
+    top_skills = list(candidate.profile.skills[:6])
+    full_name = candidate.identity.full_name or ""
     return {
         "candidate_id": str(cid),
+        "full_name": full_name,
         "stage": stage,
         "status": _status_block(stage),
-        "headline": _headline_from_profile(profile),
+        "headline": _list_headline(candidate),
         "summary": summary,
-        "top_skills": skills[:6],
+        "top_skills": top_skills,
         "overall_score": overall,
         "rank": None,
         "total_candidates": None,
-        "available_actions": available_actions,
+        "available_actions": _available_actions_for_snapshot(snapshot),
     }
 
 
@@ -242,35 +269,18 @@ def _scoring_context_summary(active_scoring_context: Optional[ScoringContext]) -
 def build_candidate_view(
     snapshot: OrchestrationState,
     *,
+    candidate: Candidate,
     active_scoring_context: Optional[ScoringContext] = None,
 ) -> Dict[str, Any]:
-    """
-    Compose a recruiter-facing dict from ``snapshot.extensions`` and pipeline phase.
-
-    ``pipeline.phase`` (exposed as ``stage``) is the single source of truth for UI state;
-    no secondary status layer is maintained beyond aggregate ``status.kind``.
-    """
     stage = snapshot.pipeline.phase.value
     status = _status_block(stage)
-    evaluation = _evaluation_from_snapshot(snapshot)
-    profile = snapshot.ingress_profile
+    evaluation = _evaluation_for_read(candidate)
     available_actions = _available_actions_for_snapshot(snapshot)
-    profile_payload: Optional[Dict[str, Any]] = None
-    if profile is not None:
-        profile_payload = {
-            "years_experience": profile.years_experience,
-            "seniority": profile.seniority,
-            "roles": list(profile.roles),
-            "skills": list(profile.skills),
-            "industries": list(profile.industries),
-            "summary": profile.summary,
-            "extensions": {},
-        }
     return {
         "stage": stage,
         "status": status,
-        "summary": _summary_from_snapshot(snapshot),
-        "profile": profile_payload,
+        "summary": _summary_text(candidate),
+        "profile": _profile_dto(candidate),
         "decision": _model_dump_json(snapshot.decision),
         "evaluation": None if evaluation is None else _model_dump_json(evaluation),
         "scoring_context": _scoring_context_summary(active_scoring_context),
@@ -371,14 +381,15 @@ def _load_snapshot_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Or
 
 
 def get_candidate_view_for_runtime(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
+    candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, candidate_id)
     return build_candidate_view(
-        _load_snapshot_for_candidate(runtime, candidate_id),
+        snapshot,
+        candidate=candidate,
         active_scoring_context=runtime.scoring_context_store.get(),
     )
 
 
 def get_state_summary_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
-    """Load state summary for ``candidate_id``; raises :class:`CandidateNotFoundError` when absent."""
     got = runtime.bundle.store.get_for_candidate(candidate_id)
     if not got.ok or got.snapshot is None or got.meta is None:
         raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
@@ -389,11 +400,6 @@ _TIMELINE_MULTI_CANDIDATE_MSG = "timeline not supported for multi-candidate yet"
 
 
 def get_timeline_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
-    """
-    Timeline for the wired default demo candidate only.
-
-    Other candidate ids are rejected so global ``run_history`` does not leak cross-candidate data.
-    """
     if candidate_id != runtime.candidate_id:
         raise CandidateNotFoundError(_TIMELINE_MULTI_CANDIDATE_MSG)
     _load_snapshot_for_candidate(runtime, candidate_id)

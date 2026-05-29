@@ -98,7 +98,9 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
     view_body: Dict[str, Any] = {}
     if got.ok and got.snapshot is not None:
         phase = got.snapshot.pipeline.phase.value
-        view_body = build_candidate_view(got.snapshot)
+        got_c = rt.candidate_store.get(rt.candidate_id)
+        if got_c.ok and got_c.candidate is not None:
+            view_body = build_candidate_view(got.snapshot, candidate=got_c.candidate)
 
     def esc(x: Any) -> str:
         return html.escape(str(x), quote=True)

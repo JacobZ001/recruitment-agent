@@ -97,6 +97,7 @@ from orchestrator.orchestrator import (
     OrchestrationContext,
     OrchestrationExecutionResult,
     Orchestrator,
+    SkillInvocationSpec,
     orchestration_to_handle_result,
 )
 from orchestrator.vertical_slice_planner import (
@@ -114,7 +115,14 @@ from runtime.in_memory_state_store import (
     InMemoryStateStoreConfig,
     StateStoreFailureCode,
 )
+from runtime.persistence.in_memory_candidate_store import InMemoryCandidateStore
+from runtime.persistence.sqlite_candidate_store import SQLiteCandidateStore
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
+from modules.recruitment.candidate_sync import persist_candidate_and_snapshot_with_reconcile
+from modules.recruitment.candidate_writes import (
+    apply_skill_results_to_candidate,
+    ensure_candidate_record,
+)
 from schemas.state_schema import (
     OrchestrationState,
     PipelinePhase,
@@ -306,6 +314,7 @@ def _skill_registry() -> Dict[str, Skill]:
 
 
 StateStoreLike = Union[InMemoryStateStore, SQLiteStateStore]
+CandidateStoreLike = Union[InMemoryCandidateStore, SQLiteCandidateStore]
 
 
 @dataclass
@@ -314,6 +323,7 @@ class VerticalSliceRuntimeBundle:
 
     bus: InMemoryEventBus
     store: StateStoreLike
+    candidate_store: CandidateStoreLike
     state_id: UUID
     candidate_id: UUID
     correlation_id: UUID
@@ -327,6 +337,7 @@ def wire_vertical_slice_runtime(
     skills: Optional[Mapping[str, Skill]] = None,
     planner: Optional[VerticalSlicePlanner] = None,
     store: Optional[StateStoreLike] = None,
+    candidate_store: Optional[CandidateStoreLike] = None,
 ) -> VerticalSliceRuntimeBundle:
     """
     Compose the same runtime as :func:`run_vertical_slice_bootstrap` without publishing events.
@@ -358,6 +369,12 @@ def wire_vertical_slice_runtime(
         use_store = InMemoryStateStore(
             InMemoryStateStoreConfig(clock=tick),
         )
+    if candidate_store is not None:
+        use_candidate_store = candidate_store
+    elif isinstance(use_store, SQLiteStateStore):
+        use_candidate_store = SQLiteCandidateStore(use_store._db_path)
+    else:
+        use_candidate_store = InMemoryCandidateStore()
 
     skill_map: Dict[str, Skill] = dict(skills) if skills is not None else _skill_registry()
 
@@ -374,6 +391,7 @@ def wire_vertical_slice_runtime(
     sub = _OrchestrationSubscriber(
         orchestrator=orchestrator,
         store=use_store,
+        candidate_store=use_candidate_store,
         state_id=state_id,
         bus=use_bus,
         collector=collector,
@@ -390,6 +408,7 @@ def wire_vertical_slice_runtime(
     )
 
     init = _initial_state(state_id=state_id, candidate_id=candidate_id, occurred_at=_FIXED_CLOCK)
+    ensure_candidate_record(use_candidate_store, candidate_id, occurred_at=_FIXED_CLOCK)
     created = use_store.create(init)
     if not created.ok:
         if (
@@ -408,6 +427,7 @@ def wire_vertical_slice_runtime(
     return VerticalSliceRuntimeBundle(
         bus=use_bus,
         store=use_store,
+        candidate_store=use_candidate_store,
         state_id=state_id,
         candidate_id=candidate_id,
         correlation_id=correlation_id,
@@ -504,7 +524,7 @@ def _reject_handle(message: str) -> HandleResult:
     )
 
 
-def _fail_handle(message: str) -> HandleResult:
+def _fail_handle(message: str, *, code: str = "bootstrap_vertical_slice.store_commit") -> HandleResult:
     audit = HandleAudit(handling_id=uuid4(), recorded_at=_FIXED_CLOCK, runtime="bootstrap_vertical_slice")
     return HandleResult(
         status=DeliveryStatus.FAILED,
@@ -512,7 +532,7 @@ def _fail_handle(message: str) -> HandleResult:
         failure=EventBusFailure(
             category=FailureCategory.PERMANENT,
             message=message,
-            code="bootstrap_vertical_slice.store_commit",
+            code=code,
         ),
         audit=audit,
     )
@@ -524,6 +544,7 @@ class _OrchestrationSubscriber:
 
     orchestrator: Orchestrator
     store: StateStoreLike
+    candidate_store: CandidateStoreLike
     state_id: UUID
     bus: InMemoryEventBus
     collector: _EmissionCollector
@@ -545,13 +566,33 @@ class _OrchestrationSubscriber:
         self.run_history.append(result)
 
         if result.ok and result.new_state is not None:
-            rep = self.store.replace(
-                state_id,
-                result.new_state,
-                expected_store_revision=cur.meta.store_revision,
+            candidate_id = envelope.subject_id
+            cand = ensure_candidate_record(self.candidate_store, candidate_id, occurred_at=_FIXED_CLOCK)
+            cv_text = None
+            if envelope.event_type == "cv_submitted":
+                cv_text = str((envelope.payload or {}).get("cv_text") or "").strip() or None
+            skill_specs = [
+                SkillInvocationSpec(skill_name=sr.metadata.skill_name, input=SkillInputEnvelope())
+                for sr in result.skill_results
+            ]
+            cand = apply_skill_results_to_candidate(
+                cand,
+                skill_specs,
+                result.skill_results,
+                cv_text=cv_text,
             )
-            if not rep.ok:
-                return _fail_handle(f"state store replace failed: {rep.failure}")
+            outcome = persist_candidate_and_snapshot_with_reconcile(
+                candidate_store=self.candidate_store,
+                orchestration_store=self.store,
+                state_id=state_id,
+                candidate_id=candidate_id,
+                workflow_snapshot=result.new_state,
+                candidate=cand,
+                expected_snapshot_revision=cur.meta.store_revision,
+            )
+            if not outcome.ok:
+                fail_code = outcome.error_code or "bootstrap_vertical_slice.store_commit"
+                return _fail_handle(outcome.message, code=fail_code)
 
             for em in self.collector.drain():
                 pr = self.bus.publish(em)

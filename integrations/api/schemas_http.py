@@ -164,18 +164,29 @@ class CandidateViewStatus(BaseModel):
 
 class CandidateProfile(BaseModel):
     """
-    Recruiter-facing profile snippet extracted during ingress.
+    Recruiter-facing profile DTO (not the aggregate ``schemas.candidate_schema.Candidate``).
 
-    Typed boundary for the candidate view surface; includes a forward-compatible
-    extensions bag for future enrichment without reopening this contract.
+    Maps from canonical Candidate identity + profile via projection.
     """
 
-    years_experience: Optional[int] = Field(default=None, ge=0, le=80)
+    full_name: Optional[str] = None
+    primary_email: Optional[str] = None
+    primary_phone: Optional[str] = None
+    preferred_contact_method: Optional[str] = None
+    location: Optional[str] = None
+    timezone: Optional[str] = None
+    external_profile_urls: List[str] = Field(default_factory=list)
+    headline: Optional[str] = None
+    summary: str = Field(default="")
     seniority: Optional[str] = Field(default=None, description='One of: "junior" | "mid" | "senior"')
-    roles: List[str] = Field(default_factory=list)
+    years_experience: Optional[float] = Field(default=None, ge=0)
+    languages: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     industries: List[str] = Field(default_factory=list)
-    summary: str = Field(default="")
+    roles: List[str] = Field(default_factory=list)
+    work_authorization: Optional[str] = None
+    compensation_expectation: Optional[str] = None
+    availability_date: Optional[str] = None
     extensions: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -217,11 +228,12 @@ class CandidateListItem(BaseModel):
     """Lightweight row for ``GET /candidates`` (latest snapshot per orchestration state)."""
 
     candidate_id: str
+    full_name: str = Field(default="", description="Display name from canonical Candidate identity.")
     stage: str
     status: CandidateViewStatus
     headline: str = Field(
         default="",
-        description="Human-friendly label derived from ingress profile (no demo assumptions).",
+        description="Human-friendly label from canonical Candidate profile (headline or full name).",
     )
     summary: str = Field(default="", description="Candidate summary snippet for list display.")
     top_skills: List[str] = Field(default_factory=list, description="Top skills for list display.")

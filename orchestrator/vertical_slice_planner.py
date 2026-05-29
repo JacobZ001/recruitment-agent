@@ -1214,29 +1214,24 @@ def apply_vertical_slice_skill_state_updates(
     skill_results: Sequence[SkillExecutionResult],
 ) -> OrchestrationState:
     """
-    Apply typed snapshot updates derived from vertical-slice skill outputs.
+    Apply workflow snapshot updates from vertical-slice skill outputs (R-009).
 
-    Canonical writes target ``ingress_profile`` / ``evaluation`` rather than
-    ``extensions['decision.*']``.
+    Profile and full evaluation are written to the Candidate aggregate by the
+  recruitment subscriber; this function only records ``evaluation_status_ref`` on
+    the orchestration snapshot and clears legacy ``ingress_profile`` / ``evaluation``.
     """
-    new_state = state
+    from modules.recruitment.candidate_writes import evaluation_status_ref_from_evaluation
+
     evaluation = _base_evaluation_state(state)
     evaluation_changed = False
-    profile = state.ingress_profile
-    profile_changed = False
 
     for spec, res in zip(skills, skill_results):
         if res.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL_SUCCESS):
             continue
         if res.output is None:
             continue
-        pl = res.output.payload or {}
 
         if spec.skill_name == SKILL_CV_PARSE_PROFILE:
-            raw_profile = pl.get("profile")
-            if isinstance(raw_profile, Mapping):
-                profile = _model_validate_local(IngressProfile, raw_profile)
-                profile_changed = True
             continue
 
         if spec.skill_name == SKILL_HARD_FILTER:
@@ -1259,8 +1254,12 @@ def apply_vertical_slice_skill_state_updates(
                 evaluation = _model_copy_local(evaluation, deep=deep_eval)
                 evaluation_changed = True
 
-    if profile_changed:
-        new_state = _model_copy_local(new_state, ingress_profile=profile)
+    new_state = _model_copy_local(
+        state,
+        ingress_profile=None,
+        evaluation=None,
+    )
     if evaluation_changed:
-        new_state = _model_copy_local(new_state, evaluation=evaluation)
+        ref = evaluation_status_ref_from_evaluation(evaluation, revision=0)
+        new_state = _model_copy_local(new_state, evaluation_status_ref=ref)
     return new_state

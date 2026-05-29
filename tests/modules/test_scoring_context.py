@@ -78,10 +78,12 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
     assert got.snapshot.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
-    assert got.snapshot.evaluation is not None
-    assert got.snapshot.evaluation.light is not None
-    assert got.snapshot.evaluation.light.context_version == 3
-    assert got.snapshot.evaluation.light.stale is False
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    light = got_c.candidate.evaluation_status.light
+    assert light is not None
+    assert light.context_version == 3
+    assert light.stale is False
 
     stale = author_organization_context(
         rt,
@@ -96,9 +98,10 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
 
     got_stale = rt.bundle.store.get_for_candidate(cid)
     assert got_stale.ok and got_stale.snapshot is not None
-    assert got_stale.snapshot.evaluation is not None
-    assert got_stale.snapshot.evaluation.light is not None
-    assert got_stale.snapshot.evaluation.light.stale is True
+    got_stale_c = rt.candidate_store.get(cid)
+    assert got_stale_c.ok and got_stale_c.candidate is not None
+    assert got_stale_c.candidate.evaluation_status.light is not None
+    assert got_stale_c.candidate.evaluation_status.light.stale is True
 
     ready_again = refresh_active_scoring_context(rt)
     assert ready_again.status.value == "ready"
@@ -116,13 +119,15 @@ def test_submit_cv_run_history_persists_profile_before_scoring(
     assert len(runs) == 3
     assert runs[0].new_state is not None
     assert runs[0].new_state.pipeline.phase == PipelinePhase.CV_RECEIVED
-    assert runs[0].new_state.ingress_profile is not None
-    assert runs[0].new_state.evaluation is None
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    assert got_c.candidate.profile.summary
+    assert runs[0].new_state.ingress_profile is None
     assert runs[1].new_state is not None
     assert runs[1].new_state.pipeline.phase == PipelinePhase.CV_PARSED
     assert runs[2].new_state is not None
-    assert runs[2].new_state.evaluation is not None
-    assert runs[2].new_state.evaluation.light is not None
+    assert runs[2].new_state.evaluation is None
+    assert got_c.candidate.evaluation_status.light is not None
 
 
 def test_recruiter_answers_normalization_requires_role_title() -> None:

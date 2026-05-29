@@ -57,21 +57,24 @@ function ScoreBlock({ scores }: { scores: CandidateViewResponse['scores'] }) {
 
 function ProfileSnippet({ profile }: { profile: CandidateProfile | undefined }) {
   if (!profile) return null
-  const headline = profile.roles?.[0] ?? ''
+  const displayName = profile.full_name || profile.headline || profile.roles?.[0] || ''
   const meta = [
     profile.seniority ? String(profile.seniority) : null,
     profile.years_experience != null ? `${profile.years_experience}y` : null,
+    profile.location ? String(profile.location) : null,
   ]
     .filter(Boolean)
     .join(' · ')
   const summary = profile.summary
   const skills = profile.skills ?? []
-  if (!headline && !meta && !summary && skills.length === 0) return null
+  const contact = [profile.primary_email, profile.primary_phone].filter(Boolean).join(' · ')
+  if (!displayName && !meta && !summary && skills.length === 0 && !contact) return null
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-900">Profile</h2>
-      {headline ? <p className="mt-2 font-medium text-slate-800">{headline}</p> : null}
+      {displayName ? <p className="mt-2 font-medium text-slate-800">{displayName}</p> : null}
       {meta ? <p className="text-sm text-slate-600">{meta}</p> : null}
+      {contact ? <p className="text-sm text-slate-600">{contact}</p> : null}
       {skills.length ? (
         <div className="mt-2 flex flex-wrap gap-1">
           {skills.slice(0, 12).map((s) => (

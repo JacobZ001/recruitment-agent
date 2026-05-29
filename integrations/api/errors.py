@@ -8,7 +8,9 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from modules.recruitment.exceptions import (
+    CandidateCanonicalMissingError,
     CandidateNotFoundError,
+    CandidateStoreUnavailableError,
     DemoRunPreconditionError,
     InvalidCvPdfError,
     InvalidCandidateActionError,
@@ -99,6 +101,24 @@ def recruitment_error_to_http(
             detail={
                 "status": "failed",
                 "error": "scoring_failed",
+            },
+        )
+    if isinstance(exc, CandidateStoreUnavailableError):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "candidate_store_unavailable",
+                "message": str(exc),
+                "diagnostic": "fail_fast_no_legacy_snapshot_fallback",
+            },
+        )
+    if isinstance(exc, CandidateCanonicalMissingError):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "candidate_canonical_missing",
+                "message": str(exc),
+                "diagnostic": "fail_fast_no_legacy_snapshot_fallback",
             },
         )
     return HTTPException(

@@ -54,21 +54,21 @@ def test_build_candidate_list_item_overall_score_light() -> None:
     publish_recruitment_event(rt, cid, "candidate_created", {})
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
-    snap = got.snapshot.model_copy(
-        update={
-            "evaluation": EvaluationState(
-                light=build_score_evaluation(
-                    source="test",
-                    explanation="test",
-                    context_version=1,
-                    l1_universal={"communication": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
-                    l2_role_specific={"role_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
-                    l3_recruiter_preference={"preference_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
-                )
-            )
-        },
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None and got_c.meta is not None
+    evaluation = EvaluationState(
+        light=build_score_evaluation(
+            source="test",
+            explanation="test",
+            context_version=1,
+            l1_universal={"communication": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
+            l2_role_specific={"role_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
+            l3_recruiter_preference={"preference_fit": {"score": 0.82, "confidence": 0.6, "reason": "test"}},
+        )
     )
-    item = build_candidate_list_item(snap)
+    cand = got_c.candidate.model_copy(update={"evaluation_status": evaluation})
+    rt.candidate_store.replace(cand, expected_store_revision=got_c.meta.store_revision)
+    item = build_candidate_list_item(got.snapshot, candidate=cand)
     assert item["overall_score"] == {"value": 0.82, "type": "light"}
 
 
@@ -78,29 +78,29 @@ def test_build_candidate_list_item_overall_score_deep_precedence() -> None:
     publish_recruitment_event(rt, cid, "candidate_created", {})
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
-    snap = got.snapshot.model_copy(
-        update={
-            "evaluation": EvaluationState(
-                light=build_score_evaluation(
-                    source="test",
-                    explanation="light",
-                    context_version=1,
-                    l1_universal={"communication": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
-                    l2_role_specific={"role_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
-                    l3_recruiter_preference={"preference_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
-                ),
-                deep=build_score_evaluation(
-                    source="test",
-                    explanation="deep",
-                    context_version=1,
-                    l1_universal={"communication": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
-                    l2_role_specific={"role_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
-                    l3_recruiter_preference={"preference_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
-                ),
-            )
-        },
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None and got_c.meta is not None
+    evaluation = EvaluationState(
+        light=build_score_evaluation(
+            source="test",
+            explanation="light",
+            context_version=1,
+            l1_universal={"communication": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
+            l2_role_specific={"role_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
+            l3_recruiter_preference={"preference_fit": {"score": 0.5, "confidence": 0.5, "reason": "light"}},
+        ),
+        deep=build_score_evaluation(
+            source="test",
+            explanation="deep",
+            context_version=1,
+            l1_universal={"communication": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
+            l2_role_specific={"role_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
+            l3_recruiter_preference={"preference_fit": {"score": 0.91, "confidence": 0.7, "reason": "deep"}},
+        ),
     )
-    item = build_candidate_list_item(snap)
+    cand = got_c.candidate.model_copy(update={"evaluation_status": evaluation})
+    rt.candidate_store.replace(cand, expected_store_revision=got_c.meta.store_revision)
+    item = build_candidate_list_item(got.snapshot, candidate=cand)
     assert item["overall_score"] == {"value": 0.91, "type": "deep"}
 
 
@@ -110,6 +110,8 @@ def test_build_candidate_list_item_overall_score_null_when_absent() -> None:
     publish_recruitment_event(rt, cid, "candidate_created", {})
     got = rt.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
-    item = build_candidate_list_item(got.snapshot)
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    item = build_candidate_list_item(got.snapshot, candidate=got_c.candidate)
     assert item["overall_score"] == {"value": None, "type": None}
 

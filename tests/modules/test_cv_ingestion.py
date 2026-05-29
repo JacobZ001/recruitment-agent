@@ -26,12 +26,16 @@ def test_submit_cv_persists_extensions(establish_ready_scoring_context) -> None:
     assert got.ok and got.snapshot is not None
     snap = got.snapshot
     assert snap.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
-    assert snap.ingress_profile is not None
-    assert snap.evaluation is not None
-    assert snap.evaluation.light is not None
-    assert snap.ingress_profile.summary
-    assert snap.evaluation.light.normalized_score is not None
-    assert snap.evaluation.light.context_version >= 1
+    got_c = rt.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    evaluation = got_c.candidate.evaluation_status
+    assert evaluation.light is not None
+    assert got_c.candidate.profile.summary
+    assert evaluation.light.normalized_score is not None
+    assert evaluation.light.context_version >= 1
+    assert snap.evaluation_status_ref is not None
+    assert snap.ingress_profile is None
+    assert snap.evaluation is None
     assert "cv.raw_text" not in snap.extensions
     assert snap.decision.current_outcome.value == "undecided"
 

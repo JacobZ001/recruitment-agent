@@ -74,6 +74,16 @@ Backend regression (from repo root):
 python -m pytest -q
 ```
 
+## Database reset (R-009 canonical Candidate store)
+
+After upgrading to R-009, delete `data/app.db` (schema `1.1` + new `candidate` table) and re-seed:
+
+```bash
+# Windows / PowerShell
+Remove-Item -Force data/app.db -ErrorAction SilentlyContinue
+python scripts/seed_testing_candidate_from_pdf.py
+```
+
 ## Richer local test data (PDF candidate)
 
 The default fixture candidate (Alex Morgan) is display-only and sparse. To seed a **real parsed CV** into `data/app.db`:

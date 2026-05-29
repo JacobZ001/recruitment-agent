@@ -107,16 +107,16 @@ def test_get_candidate_after_demo_run_scores_and_ranking_match_extensions(client
     _assert_criteria_shape(data["scores"]["criteria"], expect_scores=True)
 
     rt = client.app.state.vertical_slice
-    got = rt.bundle.store.get_for_candidate(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
-    assert got.ok and got.snapshot is not None
-    assert got.snapshot.evaluation is not None
-    assert got.snapshot.evaluation.deep is not None
+    got_c = rt.candidate_store.get(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
+    assert got_c.ok and got_c.candidate is not None
+    assert got_c.candidate.evaluation_status.deep is not None
 
     overall = data["scores"]["overall_score"]
     _assert_overall_score_shape(overall)
     assert overall["type"] == "deep"
-    assert overall["value"] == got.snapshot.evaluation.deep.normalized_score
-    assert data["evaluation"]["deep"]["normalized_score"] == got.snapshot.evaluation.deep.normalized_score
+    deep_score = got_c.candidate.evaluation_status.deep.normalized_score
+    assert overall["value"] == deep_score
+    assert data["evaluation"]["deep"]["normalized_score"] == deep_score
 
     assert data["ranking"]["rank"] is None
     assert data["ranking"]["total_candidates"] is None

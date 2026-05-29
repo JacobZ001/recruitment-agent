@@ -35,6 +35,7 @@ from .exceptions import (
     ScoringFailedError,
 )
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
+from .candidate_writes import ensure_candidate_record, finalize_orchestration_snapshot
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
 from .scoring_context_service import (
     job_context_to_authoring_text,
@@ -76,6 +77,9 @@ class IngressRuntime(Protocol):
 
     @property
     def bundle(self) -> Any: ...
+
+    @property
+    def candidate_store(self) -> Any: ...
 
     @property
     def scoring_context_store(self) -> Any: ...
@@ -202,36 +206,44 @@ def _refresh_materialized_context_from_prose(
 def _mark_existing_candidate_evaluations_stale(
     runtime: IngressRuntime, *, active_context_version: int
 ) -> None:
-    store = runtime.bundle.store
-    for state_id in store.list_all_state_ids():
-        got = store.get(state_id)
-        if not got.ok or got.snapshot is None or got.meta is None:
+    cand_store = runtime.candidate_store
+    ostore = runtime.bundle.store
+    for cid in cand_store.list_candidate_ids():
+        got_c = cand_store.get(cid)
+        if not got_c.ok or got_c.candidate is None or got_c.meta is None:
             continue
-        snapshot = got.snapshot
-        evaluation = snapshot.evaluation
+        evaluation = got_c.candidate.evaluation_status
         if evaluation is None:
             continue
-        changed = False
         next_light = mark_evaluation_stale(
             evaluation.light, active_context_version=active_context_version
         )
         next_deep = mark_evaluation_stale(
             evaluation.deep, active_context_version=active_context_version
         )
-        if next_light is not evaluation.light or next_deep is not evaluation.deep:
-            changed = True
-        if not changed:
+        if next_light is evaluation.light and next_deep is evaluation.deep:
             continue
         next_evaluation = _model_copy_local(
             evaluation,
             light=next_light,
             deep=next_deep,
         )
-        next_snapshot = _model_copy_local(snapshot, evaluation=next_evaluation)
-        store.replace(
-            state_id,
-            next_snapshot,
-            expected_store_revision=got.meta.store_revision,
+        next_cand = _model_copy_local(
+            got_c.candidate,
+            evaluation_status=next_evaluation,
+            evaluation_revision=got_c.candidate.evaluation_revision + 1,
+        )
+        rep_c = cand_store.replace(next_cand, expected_store_revision=got_c.meta.store_revision)
+        if not rep_c.ok or rep_c.candidate is None:
+            continue
+        got_s = ostore.get_for_candidate(cid)
+        if not got_s.ok or got_s.snapshot is None or got_s.meta is None:
+            continue
+        snap = finalize_orchestration_snapshot(got_s.snapshot, rep_c.candidate)
+        ostore.replace(
+            got_s.meta.state_id,
+            snap,
+            expected_store_revision=got_s.meta.store_revision,
         )
 
 
@@ -478,6 +490,7 @@ def _ensure_candidate_state(runtime: IngressRuntime, candidate_id: UUID) -> UUID
         candidate_id=candidate_id,
         occurred_at=_FIXED_CLOCK,
     )
+    ensure_candidate_record(runtime.candidate_store, candidate_id, occurred_at=_FIXED_CLOCK)
     created = runtime.bundle.store.create(init)
     if created.ok:
         return state_id
@@ -665,6 +678,8 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     Assumes **one candidate ↔ one orchestration state** (single application per candidate).
     Read-only: does not create state. Skips rows without a candidate ``StateLink``.
     """
+    from .candidate_sync import load_candidate_and_snapshot_for_read
+
     store = runtime.bundle.store
     items: List[Dict[str, Any]] = []
     for state_id in store.list_all_state_ids():
@@ -672,7 +687,16 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
         if not got.ok or got.snapshot is None:
             continue
         try:
-            items.append(build_candidate_list_item(got.snapshot))
+            cid = got.snapshot.candidate_id
+            if cid is None:
+                for link in got.snapshot.links:
+                    if link.kind.strip().lower() == "candidate":
+                        cid = link.id
+                        break
+            if cid is None:
+                continue
+            candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, cid)
+            items.append(build_candidate_list_item(snapshot, candidate=candidate))
         except ValueError:
             continue
     def _score_sort_key(row: Dict[str, Any]) -> tuple:

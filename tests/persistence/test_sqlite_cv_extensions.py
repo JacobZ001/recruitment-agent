@@ -59,9 +59,12 @@ def test_sqlite_cv_extensions_survive_reload(tmp_path) -> None:
     assert active_context.derived_l3_criteria
     got = rt2.bundle.store.get_for_candidate(cid)
     assert got.ok and got.snapshot is not None
-    assert got.snapshot.ingress_profile is not None
-    assert got.snapshot.evaluation is not None
-    assert got.snapshot.evaluation.light is not None
-    assert got.snapshot.evaluation.light.normalized_score is not None
+    got_c = rt2.candidate_store.get(cid)
+    assert got_c.ok and got_c.candidate is not None
+    assert got_c.candidate.profile.summary
+    assert got.snapshot.ingress_profile is None
+    assert got.snapshot.evaluation is None
+    assert got_c.candidate.evaluation_status.light is not None
+    assert got_c.candidate.evaluation_status.light.normalized_score is not None
     assert "cv.raw_text" not in got.snapshot.extensions
     rt2.bundle.store.close()

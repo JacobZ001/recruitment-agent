@@ -22,6 +22,7 @@ def initial_orchestration_state(
     """Frozen timestamps so replay harnesses can assert identical aggregates across runs."""
     return OrchestrationState(
         id=state_id,
+        candidate_id=candidate_id,
         links=[StateLink(kind="candidate", id=candidate_id, source="bootstrap_vertical_slice")],
         pipeline=PipelineState(entered_phase_at=occurred_at),
         audit=StateAudit(
