@@ -420,7 +420,7 @@ Each round follows this sequence:
   - use the commit body for round context, such as the round ID, capability outcome, roadmap/debt updates, and notable cutovers
 - Example title: `feat(agents): close R-005 governance refinements`
 - Example body topics:
-  - `Major round: R-005`
+  - `Round: R-005`
   - - capability or architecture milestone reached
   - - debt / roadmap / ADR updates synchronized in the snapshot
 
