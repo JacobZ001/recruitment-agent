@@ -20,7 +20,7 @@ from .bootstrap import (
     drive_vertical_slice_primary_sequence,
     wire_vertical_slice_runtime,
 )
-from .candidate_aggregate import ensure_candidate_record
+from .use_cases import ensure_candidate_record
 from .ingress import FIXED_CLOCK as _FIXED_CLOCK
 from runtime.in_memory_state_store import InMemoryStateStoreConfig
 from runtime.persistence.in_memory_candidate_store import InMemoryCandidateStore

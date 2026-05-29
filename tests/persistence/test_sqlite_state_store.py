@@ -21,7 +21,6 @@ from schemas.state_schema import (
     PipelinePhase,
     PipelineState,
     StateAudit,
-    StateLink,
 )
 from tests.replay.recording_bus import RecordingInMemoryEventBus
 
@@ -30,7 +29,6 @@ def _minimal_state(*, state_id, candidate_id, phase: PipelinePhase = PipelinePha
     return OrchestrationState(
         id=state_id,
         candidate_id=candidate_id,
-        links=[],
         pipeline=PipelineState(phase=phase, entered_phase_at=_FIXED_CLOCK),
         audit=StateAudit(
             created_at=_FIXED_CLOCK,
@@ -225,7 +223,6 @@ def test_sqlite_full_pipeline_typed_evaluation_survives_reload(tmp_path) -> None
     got_c = bundle.candidate_store.get(bundle.candidate_id)
     assert got_c.ok and got_c.candidate is not None
     assert got_c.candidate.evaluation_status is not None
-    assert fin.snapshot.evaluation is None
     assert fin.snapshot.evaluation_status_ref is not None
     ev = got_c.candidate.evaluation_status
     assert ev.hard_filter is not None
@@ -284,14 +281,14 @@ def test_sqlite_inactive_reason_survives_reload(tmp_path) -> None:
 
 
 def test_sqlite_candidate_index_requires_explicit_candidate_id(tmp_path) -> None:
-    """R-011: loose StateLink rows do not populate the candidate lookup index."""
-    db = tmp_path / "links_only.db"
+    """R-011: snapshots without explicit candidate_id do not populate the candidate lookup index."""
+    db = tmp_path / "no_candidate_id.db"
     store = SQLiteStateStore(str(db))
     cid = uuid4()
     sid = uuid4()
     snap = OrchestrationState(
         id=sid,
-        links=[StateLink(kind="candidate", id=cid, source="test")],
+        candidate_id=None,
         pipeline=PipelineState(phase=PipelinePhase.NEW, entered_phase_at=_FIXED_CLOCK),
         audit=StateAudit(
             created_at=_FIXED_CLOCK,

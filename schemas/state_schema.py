@@ -176,16 +176,6 @@ class StateAudit(_SchemaBase):
     )
 
 
-class StateLink(_SchemaBase):
-    """
-    Generic linkage to other entities/schemas without importing them here.
-    """
-
-    kind: str = Field(..., min_length=1, examples=["candidate", "job", "event"])
-    id: UUID
-    source: Optional[str] = Field(default=None, description="Origin system namespace.")
-
-
 class PipelineState(_SchemaBase):
     """
     Where the candidate is in the deterministic pipeline lifecycle.
@@ -258,8 +248,8 @@ class DecisionState(_SchemaBase):
     """
     Governance-only state: recommendations, human/system outcomes, and audit history.
 
-    This model does not carry scoring/filtering results. Those belong on
-    ``OrchestrationState.evaluation``.
+    This model does not carry scoring/filtering results. Those belong on the
+    canonical Candidate aggregate (``evaluation_status``).
     """
 
     current_outcome: DecisionOutcome = Field(default=DecisionOutcome.UNDECIDED)
@@ -501,21 +491,9 @@ class OrchestrationState(_SchemaBase):
         default=None,
         description="Explicit candidate binding (R-009/R-011); required for store index and recruiter read paths.",
     )
-    links: List[StateLink] = Field(
-        default_factory=list,
-        description="Links to candidate/job/event entities without tight coupling.",
-    )
 
     pipeline: PipelineState = Field(default_factory=PipelineState)
     decision: DecisionState = Field(default_factory=DecisionState)
-    ingress_profile: Optional[IngressProfile] = Field(
-        default=None,
-        description="Legacy ingress profile; R-009+ writes use Candidate aggregate instead.",
-    )
-    evaluation: Optional[EvaluationState] = Field(
-        default=None,
-        description="Legacy full evaluation on snapshot; R-009+ writes evaluation_status_ref only.",
-    )
     evaluation_status_ref: Optional[EvaluationStatusRef] = Field(default=None)
     ingress_flags: IngressFlags = Field(default_factory=IngressFlags)
     communication: CommunicationState = Field(default_factory=CommunicationState)
@@ -532,8 +510,7 @@ class OrchestrationState(_SchemaBase):
         description=(
             "Forward-compatible expansion point for cross-cutting fields. "
             "Do not use as the canonical home for candidate-owned evaluation/profile; those belong "
-            "on the Candidate aggregate. Legacy snapshot ingress_profile/evaluation fields may "
-            "exist on old rows but are not read by active recruiter surfaces after R-011."
+            "on the Candidate aggregate."
         ),
     )
 

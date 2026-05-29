@@ -34,8 +34,6 @@ def test_submit_cv_persists_extensions(establish_ready_scoring_context) -> None:
     assert evaluation.light.normalized_score is not None
     assert evaluation.light.context_version >= 1
     assert snap.evaluation_status_ref is not None
-    assert snap.ingress_profile is None
-    assert snap.evaluation is None
     assert "cv.raw_text" not in snap.extensions
     assert snap.decision.current_outcome.value == "undecided"
 

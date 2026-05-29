@@ -80,8 +80,7 @@ def test_submit_cv_pdf_persists_typed_snapshot_fields(establish_ready_scoring_co
     assert evaluation.light is not None
     assert "Senior Python developer" in (got_c.candidate.profile.summary or "")
     assert evaluation.light.normalized_score is not None
-    assert snap.ingress_profile is None
-    assert snap.evaluation is None
+    assert snap.evaluation_status_ref is not None
 
 
 def test_submit_cv_pdf_empty_text_extraction_raises() -> None:

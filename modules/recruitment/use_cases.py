@@ -7,6 +7,9 @@ Runtime is always passed in by the API layer; this module does not construct run
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
+import logging
 from typing import Any, Dict, List, Optional, Protocol
 from uuid import UUID
 
@@ -21,6 +24,7 @@ from runtime.in_memory_state_store import StateStoreFailureCode
 from .state_init import initial_orchestration_state
 from .ingress import FIXED_CLOCK as _FIXED_CLOCK
 from .ingress import build_ingress_envelope as _envelope
+from schemas.candidate_schema import Candidate, new_candidate
 from schemas.state_schema import OrchestrationState
 
 from . import policies
@@ -35,8 +39,13 @@ from .exceptions import (
     ScoringFailedError,
 )
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
-from .candidate_aggregate import ensure_candidate_record, finalize_orchestration_snapshot
-from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
+from .projection import (
+    SYNC_PENDING_SNAPSHOT_RECONCILE,
+    build_candidate_list_item,
+    finalize_orchestration_snapshot,
+    get_candidate_view_for_runtime,
+    get_state_summary,
+)
 from .scoring_context_service import (
     job_context_to_authoring_text,
     mark_evaluation_stale,
@@ -752,3 +761,193 @@ def perform_candidate_action(
             f"governance publish not accepted for {event_type!r}: {result.publish_status}"
         )
     return get_candidate_view_for_runtime(runtime, candidate_id)
+
+
+# --- Canonical candidate record + orchestration dual-write ---
+
+_logger = logging.getLogger(__name__)
+
+SNAPSHOT_RECONCILE_MAX_ATTEMPTS = 3
+SYNC_LAST_OUTCOME = "sync.last_dual_write_outcome"
+
+
+class DualWriteErrorCode(str, Enum):
+    CANDIDATE_REPLACE_FAILED = "candidate_replace_failed"
+    SNAPSHOT_REPLACE_FAILED_AFTER_CANDIDATE = "snapshot_replace_failed_after_candidate_success"
+    RECONCILIATION_SUCCEEDED = "reconciliation_succeeded"
+    RECONCILIATION_FAILED = "reconciliation_failed"
+
+
+@dataclass(frozen=True)
+class PersistDualWriteOutcome:
+    ok: bool
+    error_code: Optional[str] = None
+    message: str = ""
+    reconciliation_attempted: bool = False
+    reconciliation_succeeded: bool = False
+    candidate_revision: Optional[int] = None
+
+
+class _OrchestrationStore(Protocol):
+    def get(self, state_id: UUID) -> Any: ...
+    def get_for_candidate(self, candidate_id: UUID) -> Any: ...
+    def replace(
+        self,
+        state_id: UUID,
+        snapshot: OrchestrationState,
+        *,
+        expected_store_revision: int,
+    ) -> Any: ...
+
+
+class _CandidateStore(Protocol):
+    def get(self, candidate_id: UUID) -> Any: ...
+    def replace(self, candidate: Candidate, *, expected_store_revision: int) -> Any: ...
+
+
+def ensure_candidate_record(
+    store: Any,
+    candidate_id: UUID,
+    *,
+    occurred_at: Optional[datetime] = None,
+    updated_by: str = "vertical_slice",
+) -> Candidate:
+    got = store.get(candidate_id)
+    if got.ok and got.candidate is not None:
+        return got.candidate
+    cand = new_candidate(candidate_id, occurred_at=occurred_at, updated_by=updated_by)
+    created = store.create(cand)
+    if created.ok and created.candidate is not None:
+        return created.candidate
+    if (
+        created.failure is not None
+        and created.failure.code.value == "already_exists"
+    ):
+        retry = store.get(candidate_id)
+        if retry.ok and retry.candidate is not None:
+            return retry.candidate
+    raise RuntimeError(f"candidate create failed: {created.failure}")
+
+
+def find_candidate_ids_by_dedup_signals(
+    store: Any,
+    *,
+    normalized_email: Optional[str] = None,
+    normalized_phone: Optional[str] = None,
+    cv_content_fingerprint: Optional[str] = None,
+) -> List[UUID]:
+    """Deterministic lookup helper (no auto-merge)."""
+    matches: List[UUID] = []
+    for cid in store.list_candidate_ids():
+        got = store.get(cid)
+        if not got.ok or got.candidate is None:
+            continue
+        sig = got.candidate.dedup_signals
+        if normalized_email and sig.normalized_email == normalized_email:
+            matches.append(cid)
+            continue
+        if normalized_phone and sig.normalized_phone == normalized_phone:
+            matches.append(cid)
+            continue
+        if cv_content_fingerprint and sig.cv_content_fingerprint == cv_content_fingerprint:
+            matches.append(cid)
+    return matches
+
+
+def _mark_candidate_pending_reconcile(
+    candidate: Candidate,
+    *,
+    state_id: UUID,
+    outcome_code: str,
+) -> Candidate:
+    sync = dict(candidate.extensions.get("sync") or {})
+    sync[SYNC_PENDING_SNAPSHOT_RECONCILE] = True
+    sync["state_id"] = str(state_id)
+    sync[SYNC_LAST_OUTCOME] = outcome_code
+    return candidate.model_copy(update={"extensions": {**candidate.extensions, "sync": sync}})
+
+
+def persist_candidate_and_snapshot_with_reconcile(
+    *,
+    candidate_store: _CandidateStore,
+    orchestration_store: _OrchestrationStore,
+    state_id: UUID,
+    candidate_id: UUID,
+    workflow_snapshot: OrchestrationState,
+    candidate: Candidate,
+    expected_snapshot_revision: int,
+) -> PersistDualWriteOutcome:
+    """Replace canonical Candidate then orchestration snapshot; reconcile on snapshot failure."""
+    got_c = candidate_store.get(candidate_id)
+    if not got_c.ok or got_c.meta is None:
+        return PersistDualWriteOutcome(
+            ok=False,
+            error_code=DualWriteErrorCode.CANDIDATE_REPLACE_FAILED.value,
+            message=f"candidate store get failed before replace: {got_c.failure}",
+        )
+    rep_c = candidate_store.replace(candidate, expected_store_revision=got_c.meta.store_revision)
+    if not rep_c.ok or rep_c.candidate is None:
+        _logger.warning(
+            "dual_write candidate_replace_failed candidate_id=%s failure=%s",
+            candidate_id,
+            rep_c.failure,
+        )
+        return PersistDualWriteOutcome(
+            ok=False,
+            error_code=DualWriteErrorCode.CANDIDATE_REPLACE_FAILED.value,
+            message=f"candidate store replace failed: {rep_c.failure}",
+        )
+    cand = rep_c.candidate
+    snap = finalize_orchestration_snapshot(workflow_snapshot, cand)
+
+    for attempt in range(1, SNAPSHOT_RECONCILE_MAX_ATTEMPTS + 1):
+        rep_s = orchestration_store.replace(
+            state_id,
+            snap,
+            expected_store_revision=expected_snapshot_revision,
+        )
+        if rep_s.ok:
+            _logger.info(
+                "dual_write snapshot_replace_ok candidate_id=%s state_id=%s attempt=%s",
+                candidate_id,
+                state_id,
+                attempt,
+            )
+            return PersistDualWriteOutcome(
+                ok=True,
+                candidate_revision=cand.evaluation_revision,
+            )
+        _logger.warning(
+            "dual_write snapshot_replace_failed candidate_id=%s state_id=%s attempt=%s failure=%s",
+            candidate_id,
+            state_id,
+            attempt,
+            rep_s.failure,
+        )
+        got_s = orchestration_store.get(state_id)
+        if got_s.ok and got_s.meta is not None:
+            expected_snapshot_revision = got_s.meta.store_revision
+        snap = finalize_orchestration_snapshot(workflow_snapshot, cand)
+
+    _logger.warning(
+        "dual_write reconciliation_failed candidate_id=%s state_id=%s after candidate success",
+        candidate_id,
+        state_id,
+    )
+    cand = _mark_candidate_pending_reconcile(
+        cand,
+        state_id=state_id,
+        outcome_code=DualWriteErrorCode.RECONCILIATION_FAILED.value,
+    )
+    got_c2 = candidate_store.get(candidate_id)
+    if got_c2.ok and got_c2.meta is not None:
+        candidate_store.replace(cand, expected_store_revision=got_c2.meta.store_revision)
+
+    return PersistDualWriteOutcome(
+        ok=False,
+        error_code=DualWriteErrorCode.SNAPSHOT_REPLACE_FAILED_AFTER_CANDIDATE.value,
+        message="state store replace failed after candidate success; reconciliation exhausted",
+        reconciliation_attempted=True,
+        reconciliation_succeeded=False,
+        candidate_revision=cand.evaluation_revision,
+    )

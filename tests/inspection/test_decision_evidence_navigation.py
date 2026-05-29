@@ -29,10 +29,8 @@ from runtime.inspection.decision_evidence import (
     truncate_for_inspection,
 )
 from runtime.inspection.timeline import render_vertical_slice_timeline_text
-from modules.recruitment.scoring_context_service import build_score_evaluation
 from schemas.state_schema import (
     DecisionActorType,
-    EvaluationState,
     OrchestrationState,
     PipelinePhase,
     PipelineState,
@@ -107,14 +105,14 @@ def test_skill_decision_timeline_lines_include_score_summary() -> None:
     assert any("evidence.refs=" in ln for ln in lines)
 
 
-def test_skill_decision_summary_prefers_snapshot_evaluation() -> None:
+def test_skill_decision_summary_uses_skill_output_when_snapshot_has_no_evaluation() -> None:
     sr = SkillExecutionResult(
         metadata=_light_meta(),
         status=ExecutionStatus.SUCCEEDED,
         output=SkillOutputEnvelope(
             payload={
                 "scoring.kind": "light",
-                "scoring.normalized_score": 0.01,
+                "scoring.normalized_score": 0.42,
             },
         ),
         timing=ExecutionTiming(),
@@ -122,27 +120,13 @@ def test_skill_decision_summary_prefers_snapshot_evaluation() -> None:
     )
     state = OrchestrationState(
         id=uuid4(),
-        links=[],
-        evaluation=EvaluationState(
-            light=build_score_evaluation(
-                source="test",
-                explanation="persisted",
-                context_version=1,
-                l1_universal={
-                    "communication": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}
-                },
-                l2_role_specific={"role_fit": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}},
-                l3_recruiter_preference={
-                    "preference_fit": {"score": 0.88, "confidence": 0.66, "reason": "persisted"}
-                },
-                evidence_refs=["persisted://ref"],
-            )
-        ),
+        pipeline=PipelineState(phase=PipelinePhase.NEW),
+        audit=StateAudit(),
     )
     p = skill_decision_summary_parts(sr, state_snapshot=state)
-    assert "from snapshot" in p["score.summary"]
-    assert "0.88" in p["score.summary"]
-    assert p.get("evidence.refs") == ["persisted://ref"]
+    assert "0.42" in p["score.summary"]
+    assert "from snapshot" not in p["score.summary"]
+
 
 def test_transition_trail_rows_include_governance_codes() -> None:
     tr = StateTransitionRecord(

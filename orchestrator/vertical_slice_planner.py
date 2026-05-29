@@ -168,7 +168,7 @@ class VerticalSlicePlanner:
 
     def __init__(self, *, demo_skill_context: bool = False) -> None:
         """
-        When ``demo_skill_context`` is True, merge :mod:`runtime.demo_candidate_fixture`
+        When ``demo_skill_context`` is True, merge :mod:`modules.recruitment.fixtures`
         keys into every skill input (``setdefault``) for recruiter-visible demos.
         Bootstrap/replay should keep the default False so historical payloads stay equal.
         """
@@ -999,9 +999,7 @@ def _confidence_numeric_from_skill_result(
     return None
 
 
-def _base_evaluation_state(state: OrchestrationState) -> EvaluationState:
-    if state.evaluation is not None:
-        return _model_deep_copy_local(state.evaluation)
+def _base_evaluation_state(_state: OrchestrationState) -> EvaluationState:
     return EvaluationState()
 
 
@@ -1217,10 +1215,10 @@ def apply_vertical_slice_skill_state_updates(
     Apply workflow snapshot updates from vertical-slice skill outputs (R-009).
 
     Profile and full evaluation are written to the Candidate aggregate by the
-  recruitment subscriber; this function only records ``evaluation_status_ref`` on
-    the orchestration snapshot and clears legacy ``ingress_profile`` / ``evaluation``.
+    recruitment subscriber; this function only records ``evaluation_status_ref`` on
+    the orchestration snapshot when skill outputs change evaluation signals.
     """
-    from modules.recruitment.candidate_aggregate import evaluation_status_ref_from_evaluation
+    from modules.recruitment.projection import evaluation_status_ref_from_evaluation
 
     evaluation = _base_evaluation_state(state)
     evaluation_changed = False
@@ -1254,12 +1252,8 @@ def apply_vertical_slice_skill_state_updates(
                 evaluation = _model_copy_local(evaluation, deep=deep_eval)
                 evaluation_changed = True
 
-    new_state = _model_copy_local(
-        state,
-        ingress_profile=None,
-        evaluation=None,
-    )
+    new_state = state
     if evaluation_changed:
         ref = evaluation_status_ref_from_evaluation(evaluation, revision=0)
-        new_state = _model_copy_local(new_state, evaluation_status_ref=ref)
+        new_state = _model_copy_local(state, evaluation_status_ref=ref)
     return new_state

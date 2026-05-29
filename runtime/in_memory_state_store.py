@@ -63,7 +63,7 @@ except Exception:  # Pydantic v1 fallback
 
     _PYDANTIC_V2 = False
 
-from schemas.state_schema import OrchestrationState, StateLink
+from schemas.state_schema import OrchestrationState
 
 
 def _utc_now() -> datetime:

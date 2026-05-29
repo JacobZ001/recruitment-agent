@@ -56,9 +56,11 @@ success envelopes so the slice remains runnable without expanding scope.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from uuid import UUID, uuid4, uuid5
 
 from interfaces.event_bus_interface import (
@@ -106,8 +108,14 @@ from orchestrator.vertical_slice_planner import (
     SKILL_CV_PARSED,
     SKILL_CV_SCORE_LIGHT,
     SKILL_CV_UPLOADED,
+    SKILL_DEEP_SCORING,
+    SKILL_HARD_FILTER,
+    SKILL_LIGHT_SCORING,
     SKILL_QUESTIONNAIRE_STAGE,
     VerticalSlicePlanner,
+    _deep_score_evaluation_from_skill_result,
+    _hard_filter_evaluation_from_skill_result,
+    _light_score_evaluation_from_skill_result,
 )
 from runtime.in_memory_event_bus import InMemoryEventBus, SimpleEventSubscription
 from runtime.in_memory_state_store import (
@@ -118,10 +126,16 @@ from runtime.in_memory_state_store import (
 from runtime.persistence.in_memory_candidate_store import InMemoryCandidateStore
 from runtime.persistence.sqlite_candidate_store import SQLiteCandidateStore
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
-from modules.recruitment.candidate_aggregate import (
-    apply_skill_results_to_candidate,
+from modules.recruitment.use_cases import (
     ensure_candidate_record,
     persist_candidate_and_snapshot_with_reconcile,
+)
+from schemas.candidate_schema import (
+    Candidate,
+    CandidateProfile,
+    EvaluationStatus,
+    Identity,
+    SeniorityLevel,
 )
 from schemas.state_schema import (
     OrchestrationState,
@@ -535,6 +549,157 @@ def _fail_handle(message: str, *, code: str = "bootstrap_vertical_slice.store_co
         ),
         audit=audit,
     )
+
+
+def _model_copy_local(model: Any, **updates: Any) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(update=updates, deep=True)
+    return model.copy(update=updates, deep=True)
+
+
+def _normalize_email(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    s = value.strip().lower()
+    return s or None
+
+
+def _normalize_phone(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def cv_content_fingerprint(cv_text: str) -> str:
+    normalized = " ".join(line.strip().lower() for line in cv_text.splitlines() if line.strip())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _seniority_from_parse(value: Optional[str]) -> SeniorityLevel:
+    if value == "junior":
+        return SeniorityLevel.JUNIOR
+    if value == "mid":
+        return SeniorityLevel.MID
+    if value == "senior":
+        return SeniorityLevel.SENIOR
+    return SeniorityLevel.UNKNOWN
+
+
+def _ingress_to_candidate_profile(raw: Mapping[str, Any]) -> Tuple[CandidateProfile, Identity]:
+    full_name = raw.get("full_name")
+    headline = raw.get("headline")
+    primary_email = raw.get("primary_email")
+    primary_phone = raw.get("primary_phone")
+    seniority_raw = raw.get("seniority")
+    years = raw.get("years_experience")
+    profile = CandidateProfile(
+        headline=str(headline) if headline else None,
+        summary=str(raw.get("summary") or ""),
+        seniority=_seniority_from_parse(seniority_raw if isinstance(seniority_raw, str) else None),
+        years_experience=float(years) if years is not None else None,
+        skills=list(raw.get("skills") or []),
+        industries=list(raw.get("industries") or []),
+    )
+    roles = list(raw.get("roles") or [])
+    if roles and not profile.headline:
+        profile = _model_copy_local(profile, headline=str(roles[0]))
+    identity = Identity(
+        full_name=str(full_name) if full_name else None,
+        primary_email=str(primary_email) if primary_email else None,
+        primary_phone=str(primary_phone) if primary_phone else None,
+    )
+    return profile, identity
+
+
+def apply_skill_results_to_candidate(
+    candidate: Candidate,
+    skills: Sequence[Any],
+    skill_results: Sequence[SkillExecutionResult],
+    *,
+    cv_text: Optional[str] = None,
+    updated_by: str = "vertical_slice",
+) -> Candidate:
+    """Merge skill outputs into canonical Candidate (evaluation + profile)."""
+    evaluation = (
+        candidate.evaluation_status.model_copy(deep=True)
+        if candidate.evaluation_status is not None
+        else EvaluationStatus()
+    )
+
+    profile = candidate.profile
+    identity = candidate.identity
+    dedup = candidate.dedup_signals
+    changed_eval = False
+    changed_profile = False
+
+    for spec, res in zip(skills, skill_results):
+        if res.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL_SUCCESS):
+            continue
+        if res.output is None:
+            continue
+        pl = res.output.payload or {}
+
+        if spec.skill_name == SKILL_CV_PARSE_PROFILE:
+            raw_profile = pl.get("profile")
+            if isinstance(raw_profile, Mapping):
+                profile, identity = _ingress_to_candidate_profile(raw_profile)
+                changed_profile = True
+            if cv_text:
+                dedup = _model_copy_local(
+                    dedup,
+                    cv_content_fingerprint=cv_content_fingerprint(cv_text),
+                )
+            if identity.primary_email:
+                dedup = _model_copy_local(
+                    dedup, normalized_email=_normalize_email(identity.primary_email)
+                )
+            if identity.primary_phone:
+                dedup = _model_copy_local(
+                    dedup, normalized_phone=_normalize_phone(identity.primary_phone)
+                )
+            continue
+
+        if spec.skill_name == SKILL_HARD_FILTER:
+            hf = _hard_filter_evaluation_from_skill_result(res)
+            if hf is not None:
+                evaluation = _model_copy_local(evaluation, hard_filter=hf)
+                changed_eval = True
+            continue
+
+        if spec.skill_name in (SKILL_LIGHT_SCORING, SKILL_CV_SCORE_LIGHT):
+            light_eval = _light_score_evaluation_from_skill_result(res)
+            if light_eval is not None:
+                evaluation = _model_copy_local(evaluation, light=light_eval)
+                changed_eval = True
+            continue
+
+        if spec.skill_name == SKILL_DEEP_SCORING:
+            deep_eval = _deep_score_evaluation_from_skill_result(res)
+            if deep_eval is not None:
+                evaluation = _model_copy_local(evaluation, deep=deep_eval)
+                changed_eval = True
+
+    now = datetime.now(timezone.utc)
+    meta = _model_copy_local(
+        candidate.metadata,
+        updated_at=now,
+        updated_by=updated_by,
+    )
+    out = _model_copy_local(
+        candidate,
+        profile=profile if changed_profile else candidate.profile,
+        identity=identity if changed_profile else candidate.identity,
+        dedup_signals=dedup,
+        metadata=meta,
+    )
+    if changed_eval:
+        out = _model_copy_local(
+            out,
+            evaluation_status=evaluation,
+            evaluation_revision=candidate.evaluation_revision + 1,
+        )
+    return out
 
 
 @dataclass

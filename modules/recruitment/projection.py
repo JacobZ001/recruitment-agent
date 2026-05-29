@@ -26,12 +26,6 @@ from schemas.state_schema import (
     ScoringContext,
 )
 
-from .candidate_aggregate import (
-    SYNC_PENDING_SNAPSHOT_RECONCILE,
-    evaluation_from_candidate,
-    evaluation_ref_lags_candidate,
-    finalize_orchestration_snapshot,
-)
 from .exceptions import (
     CandidateCanonicalMissingError,
     CandidateNotFoundError,
@@ -42,8 +36,73 @@ from .policies import get_available_actions_for_phase
 
 logger = logging.getLogger(__name__)
 
+SYNC_PENDING_SNAPSHOT_RECONCILE = "sync.pending_snapshot_reconcile"
+
 READ_CANDIDATE_STORE_MAX_ATTEMPTS = 3
 SNAPSHOT_RECONCILE_MAX_ATTEMPTS = 3
+
+
+def _model_copy_local(model: Any, **updates: Any) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(update=updates, deep=True)
+    return model.copy(update=updates, deep=True)
+
+
+def evaluation_from_candidate(candidate: Candidate) -> EvaluationState:
+    return candidate.evaluation_status
+
+
+def evaluation_status_ref_from_evaluation(
+    evaluation: EvaluationState,
+    *,
+    revision: int,
+) -> EvaluationStatusRef:
+    score_type: Optional[str] = None
+    overall: Optional[float] = None
+    context_version: Optional[int] = None
+    stale = False
+    if evaluation.deep is not None:
+        score_type = "deep"
+        overall = float(evaluation.deep.normalized_score)
+        context_version = int(evaluation.deep.context_version)
+        stale = bool(evaluation.deep.stale)
+    elif evaluation.light is not None:
+        score_type = "light"
+        overall = float(evaluation.light.normalized_score)
+        context_version = int(evaluation.light.context_version)
+        stale = bool(evaluation.light.stale)
+    return EvaluationStatusRef(
+        revision=revision,
+        context_version=context_version,
+        overall_score=overall,
+        score_type=score_type,
+        stale=stale,
+    )
+
+
+def finalize_orchestration_snapshot(
+    snapshot: OrchestrationState,
+    candidate: Candidate,
+) -> OrchestrationState:
+    """Set explicit ``candidate_id`` + ``evaluation_status_ref`` from canonical Candidate."""
+    ref = evaluation_status_ref_from_evaluation(
+        candidate.evaluation_status,
+        revision=candidate.evaluation_revision,
+    )
+    return _model_copy_local(
+        snapshot,
+        candidate_id=candidate.candidate_id,
+        evaluation_status_ref=ref,
+    )
+
+
+def evaluation_ref_lags_candidate(
+    snapshot: OrchestrationState,
+    candidate: Candidate,
+) -> bool:
+    ref = snapshot.evaluation_status_ref
+    ref_rev = int(ref.revision) if ref is not None else -1
+    return int(candidate.evaluation_revision) > ref_rev
 
 CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER = (
     "Not available (model-based evaluation under development)"

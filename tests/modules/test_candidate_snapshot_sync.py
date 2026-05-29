@@ -11,12 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from integrations.api.app import create_app
-from modules.recruitment.candidate_aggregate import (
+from modules.recruitment.use_cases import (
     ensure_candidate_record,
-    evaluation_ref_lags_candidate,
     persist_candidate_and_snapshot_with_reconcile,
 )
-from modules.recruitment.projection import load_candidate_and_snapshot_for_read
+from modules.recruitment.projection import (
+    evaluation_ref_lags_candidate,
+    load_candidate_and_snapshot_for_read,
+)
 from modules.recruitment.ingress import FIXED_CLOCK
 from modules.recruitment.registry import get_state_id
 from modules.recruitment.state_init import initial_orchestration_state

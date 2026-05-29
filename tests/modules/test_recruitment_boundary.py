@@ -18,7 +18,6 @@ import modules.recruitment.bootstrap as recruitment_bootstrap
 import modules.recruitment.fixtures as recruitment_fixtures
 import modules.recruitment.ranking as recruitment_ranking
 import runtime.bootstrap_vertical_slice as runtime_bootstrap_shim
-import runtime.demo_candidate_fixture as runtime_fixture_shim
 import runtime.vertical_slice_ranking as runtime_ranking_shim
 from modules.recruitment.bootstrap import (
     VERTICAL_SLICE_DEFAULT_CANDIDATE_ID,
@@ -54,19 +53,12 @@ def test_runtime_bootstrap_shim_reexports_canonical_symbols() -> None:
     assert runtime_bootstrap_shim.drive_vertical_slice_primary_sequence is recruitment_bootstrap.drive_vertical_slice_primary_sequence
 
 
-def test_runtime_fixture_and_ranking_shims() -> None:
-    _assert_shim_only(
-        Path(__file__).resolve().parents[2] / "runtime" / "demo_candidate_fixture.py",
-        forbidden_substrings=("def merge_demo_profile_into_skill_payload",),
-    )
+def test_runtime_ranking_shim() -> None:
     _assert_shim_only(
         Path(__file__).resolve().parents[2] / "runtime" / "vertical_slice_ranking.py",
         forbidden_substrings=("def resolve_ranking_branch", "TOP_K ="),
     )
-    assert runtime_fixture_shim.merge_demo_profile_into_skill_payload is merge_demo_profile_into_skill_payload
-    assert runtime_fixture_shim.TESTING_DESKTOP_CANDIDATE_ID == TESTING_DESKTOP_CANDIDATE_ID
     assert runtime_ranking_shim.resolve_ranking_branch is recruitment_ranking.resolve_ranking_branch
-
 
 def test_bootstrap_module_does_not_import_fastapi() -> None:
     path = Path(__file__).resolve().parents[2] / "modules" / "recruitment" / "bootstrap.py"

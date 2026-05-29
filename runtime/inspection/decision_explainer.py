@@ -46,49 +46,21 @@ def build_ranking_decision_dict(extensions: Dict[str, Any]) -> Optional[Dict[str
     }
 
 
-def evidence_refs_from_snapshot(state: OrchestrationState) -> Optional[List[str]]:
-    evaluation = state.evaluation
-    ordered: List[str] = []
-    if evaluation is None:
-        return None
-    for part in (evaluation.hard_filter, evaluation.light, evaluation.deep):
-        if part is None:
-            continue
-        for ref in part.evidence_refs[:_MAX_EVIDENCE_REFS]:
-            s = str(ref)
-            if s not in ordered:
-                ordered.append(s)
-    return ordered or None
+def evidence_refs_from_snapshot(_state: OrchestrationState) -> Optional[List[str]]:
+    """Legacy snapshot evaluation removed (R-011.2); inspection uses skill output payloads."""
+    return None
 
 
-def format_hard_filter_from_snapshot(state: OrchestrationState) -> Optional[str]:
-    evaluation = state.evaluation
-    if evaluation is None or evaluation.hard_filter is None:
-        return None
-    return (
-        f"filter computed_pass={evaluation.hard_filter.computed_pass!r} "
-        f"source={evaluation.hard_filter.source!r} (from snapshot)"
-    )
+def format_hard_filter_from_snapshot(_state: OrchestrationState) -> Optional[str]:
+    return None
 
 
-def format_light_scoring_from_snapshot(state: OrchestrationState) -> Optional[str]:
-    evaluation = state.evaluation
-    if evaluation is None or evaluation.light is None:
-        return None
-    return (
-        f"kind=light normalized={evaluation.light.normalized_score!r} "
-        f"confidence_numeric={evaluation.light.confidence!r} (from snapshot)"
-    )
+def format_light_scoring_from_snapshot(_state: OrchestrationState) -> Optional[str]:
+    return None
 
 
-def format_deep_scoring_from_snapshot(state: OrchestrationState) -> Optional[str]:
-    evaluation = state.evaluation
-    if evaluation is None or evaluation.deep is None:
-        return None
-    return (
-        f"kind=deep normalized={evaluation.deep.normalized_score!r} "
-        f"confidence_numeric={evaluation.deep.confidence!r} (from snapshot)"
-    )
+def format_deep_scoring_from_snapshot(_state: OrchestrationState) -> Optional[str]:
+    return None
 
 
 def build_evaluation_summary_text(state: OrchestrationState) -> str:

@@ -22,7 +22,6 @@ def initial_orchestration_state(
     return OrchestrationState(
         id=state_id,
         candidate_id=candidate_id,
-        links=[],
         pipeline=PipelineState(entered_phase_at=occurred_at),
         audit=StateAudit(
             created_at=occurred_at,

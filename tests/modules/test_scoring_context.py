@@ -122,11 +122,9 @@ def test_submit_cv_run_history_persists_profile_before_scoring(
     got_c = rt.candidate_store.get(cid)
     assert got_c.ok and got_c.candidate is not None
     assert got_c.candidate.profile.summary
-    assert runs[0].new_state.ingress_profile is None
     assert runs[1].new_state is not None
     assert runs[1].new_state.pipeline.phase == PipelinePhase.CV_PARSED
     assert runs[2].new_state is not None
-    assert runs[2].new_state.evaluation is None
     assert got_c.candidate.evaluation_status.light is not None
 
 
