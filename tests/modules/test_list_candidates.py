@@ -20,13 +20,12 @@ def test_in_memory_list_all_state_ids() -> None:
     from modules.recruitment.ingress import FIXED_CLOCK
 
     sid = get_state_id(cid)
-    store.create(
-        initial_orchestration_state(
-            state_id=sid,
-            candidate_id=cid,
-            occurred_at=FIXED_CLOCK,
-        )
+    snap = initial_orchestration_state(
+        state_id=sid,
+        candidate_id=cid,
+        occurred_at=FIXED_CLOCK,
     )
+    store.create(snap)
     assert store.list_all_state_ids() == [sid]
 
 

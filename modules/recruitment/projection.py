@@ -164,13 +164,11 @@ def _next_actions_from_available_actions(actions: List[Dict[str, Any]]) -> List[
     return [str(item["label"]) for item in actions]
 
 
-def _candidate_id_from_snapshot(snapshot: OrchestrationState) -> Optional[UUID]:
-    if snapshot.candidate_id is not None:
-        return snapshot.candidate_id
-    for link in snapshot.links:
-        if link.kind.strip().lower() == "candidate":
-            return link.id
-    return None
+def _candidate_id_from_snapshot(snapshot: OrchestrationState) -> UUID:
+    """Explicit ``candidate_id`` is the only supported binding (R-011)."""
+    if snapshot.candidate_id is None:
+        raise ValueError("orchestration snapshot missing candidate_id")
+    return snapshot.candidate_id
 
 
 def _list_headline(candidate: Optional[Candidate]) -> str:
@@ -231,8 +229,6 @@ def build_candidate_list_item(
     if overall["value"] is None and snapshot.evaluation_status_ref is not None:
         overall = _overall_score_from_ref(snapshot.evaluation_status_ref)
     cid = _candidate_id_from_snapshot(snapshot)
-    if cid is None:
-        raise ValueError("snapshot has no candidate id")
     summary = candidate.profile.summary or ""
     top_skills = list(candidate.profile.skills[:6])
     full_name = candidate.identity.full_name or ""

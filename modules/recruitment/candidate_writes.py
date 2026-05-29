@@ -36,9 +36,7 @@ from schemas.candidate_schema import (
 from schemas.state_schema import (
     EvaluationState,
     EvaluationStatusRef,
-    IngressProfile,
     OrchestrationState,
-    StateLink,
 )
 
 
@@ -227,21 +225,16 @@ def finalize_orchestration_snapshot(
     snapshot: OrchestrationState,
     candidate: Candidate,
 ) -> OrchestrationState:
-    """
-  Set explicit candidate_id, evaluation_status_ref, legacy links; strip ingress_profile/evaluation.
-    """
+    """Set explicit ``candidate_id`` + ``evaluation_status_ref``; strip legacy snapshot-owned fields."""
     cid = candidate.candidate_id
     ref = evaluation_status_ref_from_evaluation(
         candidate.evaluation_status,
         revision=candidate.evaluation_revision,
     )
-    links = list(snapshot.links)
-    if not any(lnk.kind.strip().lower() == "candidate" and lnk.id == cid for lnk in links):
-        links.append(StateLink(kind="candidate", id=cid, source="vertical_slice"))
     return _model_copy_local(
         snapshot,
         candidate_id=cid,
-        links=links,
+        links=[],
         evaluation_status_ref=ref,
         ingress_profile=None,
         evaluation=None,
@@ -299,23 +292,3 @@ def find_candidate_ids_by_dedup_signals(
 
 def evaluation_from_candidate(candidate: Candidate) -> EvaluationState:
     return candidate.evaluation_status
-
-
-def legacy_ingress_profile_from_candidate(candidate: Candidate) -> Optional[IngressProfile]:
-    """Fallback for tests reading snapshot.ingress_profile on legacy rows."""
-    prof = candidate.profile
-    if not prof.summary and not prof.skills:
-        return None
-    sen = prof.seniority.value if prof.seniority != SeniorityLevel.UNKNOWN else None
-    years = int(prof.years_experience) if prof.years_experience is not None else None
-    roles: List[str] = []
-    if prof.headline:
-        roles = [prof.headline]
-    return IngressProfile(
-        years_experience=years,
-        seniority=sen,  # type: ignore[arg-type]
-        roles=roles,
-        skills=list(prof.skills),
-        industries=list(prof.industries),
-        summary=prof.summary or "",
-    )

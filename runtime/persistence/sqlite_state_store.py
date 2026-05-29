@@ -21,7 +21,7 @@ from runtime.in_memory_state_store import (
     StateStoreFailureCode,
     StateStoreResult,
     StateStoreSnapshotMeta,
-    _candidate_ids_from_links,
+    _candidate_ids_for_index,
     _state_deep_copy,
 )
 
@@ -75,10 +75,7 @@ class SQLiteStateStore:
         created_at: str,
         updated_at: str,
     ) -> None:
-        if snapshot.candidate_id is not None:
-            cids = [snapshot.candidate_id]
-        else:
-            cids = _candidate_ids_from_links(list(snapshot.links))
+        cids = _candidate_ids_for_index(snapshot)
         primary_cand = str(cids[0]) if cids else None
         payload = snapshot.model_dump_json()
 

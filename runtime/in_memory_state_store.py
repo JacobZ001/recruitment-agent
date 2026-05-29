@@ -19,10 +19,8 @@ replacement** of one snapshot with the next (append-only transition history live
 
 Runtime boundaries
 ------------------
-- **In scope**: keyed CRUD-style access by ``OrchestrationState.id``, optional
-  candidate lookup via ``StateLink`` (``kind`` case-insensitive ``"candidate"``;
-  if multiple candidate links exist, each id maps to this state id, with last
-  write winning in the index—vertical slice assumes one primary candidate per state),
+- **In scope**: keyed CRUD-style access by ``OrchestrationState.id``, candidate
+  lookup via explicit ``OrchestrationState.candidate_id`` (one candidate per state),
   optimistic ``store_revision`` checks, bounded capacity, injectable clock for tests.
 - **Out of scope**: SQL/ORM, distributed cache, locking, async, MVCC across
   processes, replay log ingestion, transition validation (that belongs to
@@ -196,12 +194,11 @@ class InMemoryStateStoreConfig:
     limits: InMemoryStateStoreLimits = field(default_factory=InMemoryStateStoreLimits)
 
 
-def _candidate_ids_from_links(links: List[StateLink]) -> List[UUID]:
-    out: List[UUID] = []
-    for link in links:
-        if link.kind.strip().lower() == "candidate":
-            out.append(link.id)
-    return out
+def _candidate_ids_for_index(snapshot: OrchestrationState) -> List[UUID]:
+    """Primary binding is explicit ``candidate_id`` (R-011); no links fallback."""
+    if snapshot.candidate_id is not None:
+        return [snapshot.candidate_id]
+    return []
 
 
 class InMemoryStateStore:
@@ -376,5 +373,5 @@ class InMemoryStateStore:
             del self._candidate_index[cid]
 
     def _reindex_candidates_for_state(self, state_id: UUID, snapshot: OrchestrationState) -> None:
-        for cid in _candidate_ids_from_links(list(snapshot.links)):
+        for cid in _candidate_ids_for_index(snapshot):
             self._candidate_index[cid] = state_id

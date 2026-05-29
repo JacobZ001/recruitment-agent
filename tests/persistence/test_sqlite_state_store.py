@@ -29,7 +29,8 @@ from tests.replay.recording_bus import RecordingInMemoryEventBus
 def _minimal_state(*, state_id, candidate_id, phase: PipelinePhase = PipelinePhase.NEW) -> OrchestrationState:
     return OrchestrationState(
         id=state_id,
-        links=[StateLink(kind="candidate", id=candidate_id, source="test")],
+        candidate_id=candidate_id,
+        links=[],
         pipeline=PipelineState(phase=phase, entered_phase_at=_FIXED_CLOCK),
         audit=StateAudit(
             created_at=_FIXED_CLOCK,
@@ -280,3 +281,26 @@ def test_sqlite_inactive_reason_survives_reload(tmp_path) -> None:
     assert reloaded.ok and reloaded.snapshot is not None
     assert reloaded.snapshot.extensions.get("inactive.reason") == "recruiter_rejected"
     store2.close()
+
+
+def test_sqlite_candidate_index_requires_explicit_candidate_id(tmp_path) -> None:
+    """R-011: loose StateLink rows do not populate the candidate lookup index."""
+    db = tmp_path / "links_only.db"
+    store = SQLiteStateStore(str(db))
+    cid = uuid4()
+    sid = uuid4()
+    snap = OrchestrationState(
+        id=sid,
+        links=[StateLink(kind="candidate", id=cid, source="test")],
+        pipeline=PipelineState(phase=PipelinePhase.NEW, entered_phase_at=_FIXED_CLOCK),
+        audit=StateAudit(
+            created_at=_FIXED_CLOCK,
+            updated_at=_FIXED_CLOCK,
+            updated_by="test",
+        ),
+    )
+    assert store.create(snap).ok
+    got = store.get_for_candidate(cid)
+    assert not got.ok
+    assert got.failure and got.failure.code == StateStoreFailureCode.NOT_FOUND
+    store.close()

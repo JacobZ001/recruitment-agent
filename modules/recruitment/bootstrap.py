@@ -128,7 +128,6 @@ from schemas.state_schema import (
     PipelinePhase,
     PipelineState,
     StateAudit,
-    StateLink,
 )
 from skills.deterministic.fake_cv_uploaded_skill import FakeCvUploadedSkill
 from skills.deterministic.fake_deep_scoring_skill import FakeDeepScoringSkill

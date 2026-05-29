@@ -676,7 +676,7 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     latest snapshot. It is **not** a domain-level candidate registry or application catalog.
 
     Assumes **one candidate ↔ one orchestration state** (single application per candidate).
-    Read-only: does not create state. Skips rows without a candidate ``StateLink``.
+    Read-only: does not create state. Skips snapshots without explicit ``candidate_id``.
     """
     from .candidate_sync import load_candidate_and_snapshot_for_read
 
@@ -688,11 +688,6 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
             continue
         try:
             cid = got.snapshot.candidate_id
-            if cid is None:
-                for link in got.snapshot.links:
-                    if link.kind.strip().lower() == "candidate":
-                        cid = link.id
-                        break
             if cid is None:
                 continue
             candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, cid)
