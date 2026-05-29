@@ -1,12 +1,13 @@
 """
-Read-only recruitment projections (snapshots, timelines, demo fixtures).
+Read-only recruitment projections and recruiter read-path convergence.
 
-No planner, transition engine, or state mutation.
+No planner or transition engine; read-time snapshot convergence is bounded store I/O only.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple
+import logging
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 from uuid import UUID
 
 from orchestrator.vertical_slice_planner import (
@@ -14,11 +15,8 @@ from orchestrator.vertical_slice_planner import (
     SKILL_HARD_FILTER,
     SKILL_LIGHT_SCORING,
 )
-from .fixtures import DEMO_CANDIDATE_DISPLAY
-from .inspection.timeline import vertical_slice_timeline_text
-from .candidate_sync import load_candidate_and_snapshot_for_read
-from .candidate_writes import evaluation_from_candidate
 from runtime.inspection import skill_decision_summary_parts
+from runtime.persistence.sqlite_candidate_store import CandidateStoreFailureCode
 from schemas.candidate_schema import Candidate, SeniorityLevel
 from schemas.state_schema import (
     EvaluationState,
@@ -28,8 +26,24 @@ from schemas.state_schema import (
     ScoringContext,
 )
 
-from .exceptions import CandidateNotFoundError
+from .candidate_aggregate import (
+    SYNC_PENDING_SNAPSHOT_RECONCILE,
+    evaluation_from_candidate,
+    evaluation_ref_lags_candidate,
+    finalize_orchestration_snapshot,
+)
+from .exceptions import (
+    CandidateCanonicalMissingError,
+    CandidateNotFoundError,
+    CandidateStoreUnavailableError,
+)
+from .inspection.timeline import vertical_slice_timeline_text
 from .policies import get_available_actions_for_phase
+
+logger = logging.getLogger(__name__)
+
+READ_CANDIDATE_STORE_MAX_ATTEMPTS = 3
+SNAPSHOT_RECONCILE_MAX_ATTEMPTS = 3
 
 CANDIDATE_VIEW_EVALUATION_SUMMARY_PLACEHOLDER = (
     "Not available (model-based evaluation under development)"
@@ -352,6 +366,10 @@ def get_demo_candidate(runtime: ReadRuntime) -> Dict[str, Any]:
     state_summary: Optional[Dict[str, Any]] = None
     phase: Optional[str] = None
     inactive_reason: Optional[str] = None
+    profile: Dict[str, Any] = {}
+    got_c = runtime.candidate_store.get(runtime.candidate_id)
+    if got_c.ok and got_c.candidate is not None:
+        profile = _profile_dto(got_c.candidate)
     if got.ok and got.snapshot is not None and got.meta is not None:
         phase = got.snapshot.pipeline.phase.value
         state_summary = get_state_summary(
@@ -361,12 +379,104 @@ def get_demo_candidate(runtime: ReadRuntime) -> Dict[str, Any]:
         inactive_reason = got.snapshot.extensions.get("inactive.reason")
     return {
         "candidate_id": str(runtime.candidate_id),
-        "profile": dict(DEMO_CANDIDATE_DISPLAY),
+        "profile": profile,
         "pipeline_phase": phase,
         "state_summary": state_summary,
         "skill_summaries": demo_skill_summaries(runtime.bundle),
         "inactive_reason": inactive_reason,
     }
+
+
+def load_candidate_for_read(
+    candidate_store: Any,
+    candidate_id: UUID,
+    *,
+    orchestration_exists: bool,
+) -> Candidate:
+    """Load canonical Candidate for recruiter surfaces (fail-fast, bounded retries)."""
+    last_failure: Any = None
+    for attempt in range(1, READ_CANDIDATE_STORE_MAX_ATTEMPTS + 1):
+        got = candidate_store.get(candidate_id)
+        if got.ok and got.candidate is not None:
+            return got.candidate
+        last_failure = got.failure
+        if got.failure is not None and got.failure.code == CandidateStoreFailureCode.NOT_FOUND:
+            if orchestration_exists:
+                raise CandidateCanonicalMissingError(
+                    f"canonical candidate row missing while orchestration state exists: {candidate_id!s}"
+                )
+            raise CandidateCanonicalMissingError(
+                f"candidate not found in canonical store: {candidate_id!s}"
+            )
+        logger.warning(
+            "candidate_store_read_failed candidate_id=%s attempt=%s failure=%s",
+            candidate_id,
+            attempt,
+            got.failure,
+        )
+    raise CandidateStoreUnavailableError(
+        f"candidate store unavailable after {READ_CANDIDATE_STORE_MAX_ATTEMPTS} attempts: {last_failure}"
+    )
+
+
+def converge_snapshot_for_read(
+    runtime: Any,
+    candidate_id: UUID,
+    snapshot: OrchestrationState,
+    candidate: Candidate,
+) -> OrchestrationState:
+    pending = bool((candidate.extensions.get("sync") or {}).get(SYNC_PENDING_SNAPSHOT_RECONCILE))
+    if not evaluation_ref_lags_candidate(snapshot, candidate) and not pending:
+        return snapshot
+
+    snap = finalize_orchestration_snapshot(snapshot, candidate)
+    store = runtime.bundle.store
+    for attempt in range(1, SNAPSHOT_RECONCILE_MAX_ATTEMPTS + 1):
+        got = store.get_for_candidate(candidate_id)
+        if not got.ok or got.snapshot is None or got.meta is None:
+            break
+        rep = store.replace(
+            got.meta.state_id,
+            snap,
+            expected_store_revision=got.meta.store_revision,
+        )
+        if rep.ok and rep.snapshot is not None:
+            logger.info(
+                "reconciliation_read_time_ok candidate_id=%s attempt=%s",
+                candidate_id,
+                attempt,
+            )
+            return rep.snapshot
+        logger.warning(
+            "reconciliation_read_time_failed candidate_id=%s attempt=%s failure=%s",
+            candidate_id,
+            attempt,
+            rep.failure,
+        )
+        got = store.get_for_candidate(candidate_id)
+        if got.ok and got.snapshot is not None:
+            snap = finalize_orchestration_snapshot(got.snapshot, candidate)
+
+    raise CandidateStoreUnavailableError(
+        "snapshot read-time convergence failed; candidate and orchestration stores diverged"
+    )
+
+
+def load_candidate_and_snapshot_for_read(
+    runtime: Any,
+    candidate_id: UUID,
+) -> Tuple[Candidate, OrchestrationState]:
+    got = runtime.bundle.store.get_for_candidate(candidate_id)
+    if not got.ok or got.snapshot is None:
+        raise CandidateNotFoundError(f"no orchestration state for candidate: {candidate_id!s}")
+    snapshot = got.snapshot
+    candidate = load_candidate_for_read(
+        runtime.candidate_store,
+        candidate_id,
+        orchestration_exists=True,
+    )
+    snapshot = converge_snapshot_for_read(runtime, candidate_id, snapshot, candidate)
+    return candidate, snapshot
 
 
 def _load_snapshot_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> OrchestrationState:

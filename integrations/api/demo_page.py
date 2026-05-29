@@ -6,10 +6,8 @@ import html
 import json
 from typing import Any, Dict
 
-from modules.recruitment.fixtures import DEMO_CANDIDATE_DISPLAY
 from modules.recruitment.inspection.timeline import vertical_slice_timeline_text
-
-from modules.recruitment.projection import build_candidate_view
+from modules.recruitment.projection import build_candidate_view, get_demo_candidate
 from modules.recruitment.runtime import VerticalSliceApiRuntime
 
 
@@ -89,15 +87,15 @@ def _format_candidate_view_html(view: Dict[str, Any]) -> str:
 
 
 def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
-    profile = DEMO_CANDIDATE_DISPLAY
+    demo = get_demo_candidate(rt)
+    profile = demo.get("profile") or {}
     timeline = vertical_slice_timeline_text(rt.bundle)
     cid = str(rt.candidate_id)
 
     got = rt.bundle.store.get(rt.bundle.state_id)
-    phase = ""
+    phase = demo.get("pipeline_phase") or ""
     view_body: Dict[str, Any] = {}
     if got.ok and got.snapshot is not None:
-        phase = got.snapshot.pipeline.phase.value
         got_c = rt.candidate_store.get(rt.candidate_id)
         if got_c.ok and got_c.candidate is not None:
             view_body = build_candidate_view(got.snapshot, candidate=got_c.candidate)
@@ -109,7 +107,7 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
         "actor_id": "demo-recruiter",
         "actor_type": "recruiter",
         "reason": "Demo recruiter approval (deterministic governance ingress).",
-        "evidence_refs": list(profile.get("evidence_refs") or ()),
+        "evidence_refs": ["artifact://demo/governance"],
     }
     gov_payload_reject = {
         **gov_payload_approve,
@@ -138,17 +136,15 @@ def build_demo_recruiter_html(rt: VerticalSliceApiRuntime) -> str:
   <h1>BlueOcean vertical slice (demo only)</h1>
   <p>Deterministic in-memory slice: not a production UI. Governance actions call <code>POST /events</code>.</p>
 
-  <h2>Candidate profile (fixture)</h2>
+  <h2>Candidate profile (canonical store)</h2>
   <ul>
-    <li><strong>Name</strong>: {esc(profile.get("candidate_name"))}</li>
-    <li><strong>Target role</strong>: {esc(profile.get("target_role"))}</li>
-    <li><strong>Experience</strong>: {esc(profile.get("years_experience"))} years</li>
+    <li><strong>Full name</strong>: {esc(profile.get("full_name"))}</li>
+    <li><strong>Headline</strong>: {esc(profile.get("headline"))}</li>
+    <li><strong>Experience</strong>: {esc(profile.get("years_experience"))}</li>
     <li><strong>Location</strong>: {esc(profile.get("location"))}</li>
     <li><strong>Work authorization</strong>: {esc(profile.get("work_authorization"))}</li>
-    <li><strong>Education</strong>: {esc(profile.get("education"))}</li>
     <li><strong>Skills</strong>: {esc(", ".join(profile.get("skills") or []))}</li>
     <li><strong>Summary</strong>: {esc(profile.get("summary"))}</li>
-    <li><strong>Evidence refs</strong>: {esc(", ".join(profile.get("evidence_refs") or []))}</li>
   </ul>
 
   <h2>Pipeline</h2>

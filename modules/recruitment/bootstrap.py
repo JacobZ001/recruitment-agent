@@ -118,10 +118,10 @@ from runtime.in_memory_state_store import (
 from runtime.persistence.in_memory_candidate_store import InMemoryCandidateStore
 from runtime.persistence.sqlite_candidate_store import SQLiteCandidateStore
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
-from modules.recruitment.candidate_sync import persist_candidate_and_snapshot_with_reconcile
-from modules.recruitment.candidate_writes import (
+from modules.recruitment.candidate_aggregate import (
     apply_skill_results_to_candidate,
     ensure_candidate_record,
+    persist_candidate_and_snapshot_with_reconcile,
 )
 from schemas.state_schema import (
     OrchestrationState,

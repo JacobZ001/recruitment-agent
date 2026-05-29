@@ -35,7 +35,7 @@ from .exceptions import (
     ScoringFailedError,
 )
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
-from .candidate_writes import ensure_candidate_record, finalize_orchestration_snapshot
+from .candidate_aggregate import ensure_candidate_record, finalize_orchestration_snapshot
 from .projection import build_candidate_list_item, get_candidate_view_for_runtime, get_state_summary
 from .scoring_context_service import (
     job_context_to_authoring_text,
@@ -678,7 +678,7 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     Assumes **one candidate ↔ one orchestration state** (single application per candidate).
     Read-only: does not create state. Skips snapshots without explicit ``candidate_id``.
     """
-    from .candidate_sync import load_candidate_and_snapshot_for_read
+    from .projection import load_candidate_and_snapshot_for_read
 
     store = runtime.bundle.store
     items: List[Dict[str, Any]] = []

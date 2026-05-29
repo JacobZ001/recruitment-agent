@@ -51,13 +51,14 @@ def _assert_overall_score_shape(overall: dict) -> None:
     assert overall["type"] in ("light", "deep", None)
 
 
-def test_get_demo_candidate_returns_fixture_profile(client: TestClient) -> None:
+def test_get_demo_candidate_returns_canonical_profile(client: TestClient) -> None:
     r = client.get("/demo/candidate")
     assert r.status_code == 200
     data = r.json()
-    assert data["profile"]["candidate_name"] == "Alex Morgan"
     assert data["candidate_id"] == str(VERTICAL_SLICE_DEFAULT_CANDIDATE_ID)
     assert data["pipeline_phase"] == PipelinePhase.NEW.value
+    assert isinstance(data["profile"], dict)
+    assert "full_name" in data["profile"] or "skills" in data["profile"]
 
 
 def test_get_candidate_by_id_returns_projection(client: TestClient) -> None:
@@ -188,7 +189,7 @@ def test_api_post_governance_hire_ladder_updates_phase_and_timeline(client: Test
 def test_demo_html_contains_profile_phase_timeline_and_scores(client: TestClient) -> None:
     client.post("/demo/run")
     html = client.get("/demo").text
-    assert "Alex Morgan" in html
+    assert "Candidate profile (canonical store)" in html
     assert "shortlisted" in html
     assert "workflow timeline" in html
     assert "Evaluation" in html

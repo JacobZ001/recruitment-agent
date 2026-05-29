@@ -336,7 +336,7 @@ Each round follows this sequence:
 7. Builder Agent overwrites `FEEDBACK.md` with round execution feedback.
 8. Architect Agent reads `FEEDBACK.md` (and validates critical diffs when needed), then explicitly reconciles `docs/architecture/ROADMAP.md` to reflect execution reality before planning the next round.
 9. Architect Agent updates `docs/architecture/tech_debt.md` and `docs/architecture/ADR.md` when execution materially changes debt posture or produces a durable architecture decision not already recorded.
-10. Architect Agent performs lightweight round closeout by explaining the execution reality, evaluating the effectiveness of current round execution, and recommending the next-round routing decision to PM.
+10. Architect Agent performs lightweight round closeout by explaining the execution reality, evaluating the effectiveness of current round execution, explicitly checking for remaining risks/vulnerabilities after reading `FEEDBACK.md`, and recommending the next-round routing decision to PM.
 11. PM confirms the routing decision:
   - continue within the same major round,
   - run a corrective minor round within the same major round,

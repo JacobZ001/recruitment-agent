@@ -1,9 +1,8 @@
 """
-Deterministic demo candidate / CV artifact for vertical-slice demos (no parsing, no LLM).
+Deterministic demo skill-context defaults for vertical-slice demos (no parsing, no LLM).
 
-Read-only facts merged into planner-built skill inputs when ``VerticalSlicePlanner`` is
-wired with ``demo_skill_context=True`` (e.g. API runtime). Bootstrap/replay defaults omit
-this merge to preserve historical harness equality.
+Merged into planner-built skill inputs when ``VerticalSlicePlanner`` is wired with
+``demo_skill_context=True`` (e.g. API runtime). Bootstrap/replay defaults omit this merge.
 """
 
 from __future__ import annotations
@@ -15,25 +14,6 @@ from modules.recruitment.ingress import BOOT_NS
 
 # Stable id for PDF-seeded testing candidate (see scripts/seed_testing_candidate_from_pdf.py).
 TESTING_DESKTOP_CANDIDATE_ID: UUID = uuid5(BOOT_NS, "vertical_slice.testing_candidate_desktop_cv")
-
-# Human-readable profile for GET /demo/candidate and HTML (not orchestration policy).
-DEMO_CANDIDATE_DISPLAY: Dict[str, Any] = {
-    "candidate_name": "Alex Morgan",
-    "target_role": "Senior Backend Engineer",
-    "years_experience": 9,
-    "location": "Berlin, DE (remote OK)",
-    "skills": ["Python", "Django", "PostgreSQL", "REST APIs", "system design"],
-    "education": "M.Sc. Computer Science (deterministic demo record)",
-    "work_authorization": "authorized",
-    "summary": (
-        "Backend engineer with API and data-layer depth; demo profile for deterministic "
-        "hard-filter and scoring skills—no PDF, no LLM extraction."
-    ),
-    "evidence_refs": [
-        "artifact://demo/cv/alex-morgan-2026",
-        "structured://demo/profile/alex-morgan",
-    ],
-}
 
 
 def _skill_payload_defaults() -> Dict[str, Any]:
@@ -49,7 +29,6 @@ def _skill_payload_defaults() -> Dict[str, Any]:
         "location",
     ]
     return {
-        "demo.candidate_profile": dict(DEMO_CANDIDATE_DISPLAY),
         "declared.years_experience": 9,
         "declared.work_authorization": "authorized",
         "declared.skill_keywords": skills_kw,

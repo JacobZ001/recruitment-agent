@@ -1,36 +1,51 @@
-# FEEDBACK — R-011 (Major)
+# FEEDBACK — R-011.1 (Corrective Minor)
 
 ## Round
 
-- **Round ID:** R-011
+- **Round ID:** R-011.1
 - **Status:** `done`
 
 ## PLAN step mapping
 
 | Step | Status | Notes |
 |------|--------|-------|
-| 1. Remove active `links` binding dependency | done | `projection`, `use_cases`, `state_init`, stores |
-| 2. Contract legacy snapshot branches | done | `finalize_orchestration_snapshot` clears `links`; removed `legacy_ingress_profile_from_candidate` |
-| 3. Calibrate read/write paths | done | Canonical Candidate + explicit `candidate_id` only |
-| 4. SQLite / in-memory index alignment | done | `_candidate_ids_for_index`; no links fallback |
-| 5. API projection/DTO | skipped | No contract change required |
-| 6. Balanced verification | done | see below |
-| 7. FEEDBACK + R-011.1 entry | done | this file |
+| 1. Consolidate transitional modules | done | Writes + dual-write → `candidate_aggregate.py`; read convergence → `projection.py` |
+| 2. Delete `candidate_writes.py` / `candidate_sync.py` | done | `git` deletes; no shim re-exports |
+| 3. Full-repo tail legacy semantics | done | `schemas/state_schema.py` field descriptions aligned with R-011 |
+| 4. Remove `DEMO_CANDIDATE_DISPLAY` | done | `fixtures.py` skill-only defaults; demo routes use canonical store |
+| 5. Minimal projection/DTO | done | `get_demo_candidate` returns `_profile_dto` from store |
+| 6. DB reset/reseed | done | Stopped port 8000 holder, deleted `data/app.db`, seed OK |
+| 7. Verification matrix | done | see below |
+| 8. FEEDBACK | done | this file |
 
 ## File changes
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/state_init.py` | M |
-| `modules/recruitment/candidate_writes.py` | M |
+| `modules/recruitment/candidate_aggregate.py` | A |
+| `modules/recruitment/candidate_writes.py` | D |
+| `modules/recruitment/candidate_sync.py` | D |
 | `modules/recruitment/projection.py` | M |
-| `modules/recruitment/use_cases.py` | M |
 | `modules/recruitment/bootstrap.py` | M |
-| `runtime/in_memory_state_store.py` | M |
-| `runtime/persistence/sqlite_state_store.py` | M |
-| `tests/persistence/test_sqlite_state_store.py` | M |
-| `tests/modules/test_list_candidates.py` | M |
+| `modules/recruitment/use_cases.py` | M |
+| `modules/recruitment/runtime.py` | M |
+| `modules/recruitment/fixtures.py` | M |
+| `orchestrator/vertical_slice_planner.py` | M |
+| `integrations/api/demo_page.py` | M |
+| `runtime/demo_candidate_fixture.py` | M |
+| `schemas/state_schema.py` | M |
+| `tests/modules/test_candidate_snapshot_sync.py` | M |
+| `tests/modules/test_recruitment_boundary.py` | M |
+| `tests/api/test_demo_recruiter_surface.py` | M |
 | `FEEDBACK.md` | M |
+
+## Module ownership (post-consolidation)
+
+| Concern | Module |
+|---------|--------|
+| Skill merge, finalize snapshot, ensure record, dual-write reconcile | `candidate_aggregate.py` |
+| Recruiter read load + snapshot convergence | `projection.py` |
+| Demo skill payload defaults (no display fixture) | `fixtures.py` |
 
 ## Tests
 
@@ -45,37 +60,36 @@ cd frontend && npm run build
 → OK
 ```
 
-New: `test_sqlite_candidate_index_requires_explicit_candidate_id` — links-only snapshots are not indexed.
+## DB reset / reseed (required gate)
 
-## DB reset / seed
+1. Stopped process bound to port 8000 (SQLite lock).
+2. Deleted `data/app.db`.
+3. `python scripts/seed_testing_candidate_from_pdf.py` → `21024f7f-e639-580f-aae6-d4d2776f910e`, `questionnaire_pending`.
+4. TestClient smoke on `data/app.db`: `GET /candidates` + `GET /candidate/{id}` OK with profile keys.
 
-- Attempted delete of `data/app.db` while Uvicorn held the file (file in use); seed script still ran against existing DB.
-- **Recommendation:** stop API, delete `data/app.db`, run `python scripts/seed_testing_candidate_from_pdf.py`, restart Uvicorn so all rows have explicit `candidate_id` and canonical candidate rows.
+**Restart Uvicorn** after pull: `python -m uvicorn integrations.api.app:app --host 127.0.0.1 --port 8000`
 
 ## Acceptance criteria
 
-- [x] `candidate_id` is the only active binding path; no `links` fallback in list/projection/store index.
-- [x] No active-flow legacy `ingress_profile` helper; snapshot finalize strips legacy owned fields.
-- [x] Recruiter surfaces unchanged at API contract level (no schema changes).
-- [x] Persistence index uses `_candidate_ids_for_index` (`candidate_id` only).
-- [x] Balanced test matrix green.
+- [x] Transitional logic consolidated; behavior preserved (pytest green).
+- [x] `candidate_writes.py` / `candidate_sync.py` deleted.
+- [x] Read/write paths remain `candidate_id` + Candidate canonical (no links/ingress fallback).
+- [x] DB delete + reseed executed with evidence.
+- [x] `DEMO_CANDIDATE_DISPLAY` removed; demo uses store-backed profile.
+- [x] Recruiter API contract stable (demo tests updated for canonical profile shape).
 
 ## Debt
 
-- **TD-PERSISTENCE-008 Evaluation precedence semantics** — partial: list/detail still use evaluation from Candidate + `evaluation_status_ref` on snapshot for overall when needed; no links/ingress fallback reintroduced.
+- **TD-PERSISTENCE-008 Evaluation precedence semantics** — partial (unchanged; Candidate + ref semantics preserved).
+- **TD-DX-002 Compatibility shim sprawl and demo-first residue** — partial close: display fixture removed; `runtime/demo_candidate_fixture.py` still shims `merge_demo_profile_into_skill_payload` only.
 - **TD-PERSISTENCE-012**, **TD-ORCHESTRATOR-012**, **TD-INSPECTION-003** — deferred per PLAN.
 
 ## Risks / deviations
 
-- Legacy SQLite rows with **only** `links` and no `candidate_id` will not appear in list or `get_for_candidate` until DB reset/migration.
-- `candidate_sync` / `candidate_writes` module consolidation deferred to **R-011.1** per PLAN.
-
-## R-011.1 entry conditions (suggested)
-
-- R-011 baseline accepted on PM smoke (list/detail/action).
-- Consolidate or absorb `candidate_sync` + `candidate_writes` write-path duplication.
-- Optional: repo-wide cleanup of stale `StateLink` documentation in `tech_debt.md` (not required for Builder this round).
+- Demo HTML no longer shows fictional “Alex Morgan” block; shows canonical store fields (may be sparse before `demo/run`).
+- `merge_demo_profile_into_skill_payload` retained for deterministic demo skill inputs (not a display fixture).
 
 ## Suggested next-round focus
 
-- **R-011.1 (corrective-minor):** write/sync consolidation and any remaining transition helpers after linkage cutover.
+- PM routing: **`advance-major`** to **R-012** (hard-filter restoration) if R-011 major objectives accepted.
+- Optional: further shrink `runtime/demo_candidate_fixture.py` shim after PM confirms no external importers.

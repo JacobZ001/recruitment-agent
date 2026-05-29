@@ -499,7 +499,7 @@ class OrchestrationState(_SchemaBase):
     id: UUID = Field(..., description="Unique state object id.")
     candidate_id: Optional[UUID] = Field(
         default=None,
-        description="Explicit candidate binding (R-009); preferred over links-only lookup.",
+        description="Explicit candidate binding (R-009/R-011); required for store index and recruiter read paths.",
     )
     links: List[StateLink] = Field(
         default_factory=list,
@@ -531,9 +531,9 @@ class OrchestrationState(_SchemaBase):
         default_factory=dict,
         description=(
             "Forward-compatible expansion point for cross-cutting fields. "
-            "Do not use as the canonical home for scoring/filtering results; those belong "
-            "on ingress_profile / evaluation / ingress_flags. Legacy rows may still contain "
-            "older decision.* score keys and remain readable during migration."
+            "Do not use as the canonical home for candidate-owned evaluation/profile; those belong "
+            "on the Candidate aggregate. Legacy snapshot ingress_profile/evaluation fields may "
+            "exist on old rows but are not read by active recruiter surfaces after R-011."
         ),
     )
 

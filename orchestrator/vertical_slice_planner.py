@@ -1220,7 +1220,7 @@ def apply_vertical_slice_skill_state_updates(
   recruitment subscriber; this function only records ``evaluation_status_ref`` on
     the orchestration snapshot and clears legacy ``ingress_profile`` / ``evaluation``.
     """
-    from modules.recruitment.candidate_writes import evaluation_status_ref_from_evaluation
+    from modules.recruitment.candidate_aggregate import evaluation_status_ref_from_evaluation
 
     evaluation = _base_evaluation_state(state)
     evaluation_changed = False

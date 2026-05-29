@@ -26,7 +26,7 @@ from modules.recruitment.bootstrap import (
     wire_vertical_slice_runtime,
 )
 from modules.recruitment.policies import VERTICAL_SLICE_INGRESS_EVENT_TYPES
-from modules.recruitment.fixtures import DEMO_CANDIDATE_DISPLAY
+from modules.recruitment.fixtures import TESTING_DESKTOP_CANDIDATE_ID, merge_demo_profile_into_skill_payload
 from modules.recruitment.ranking import resolve_ranking_branch
 from schemas.governance_schema import GOVERNANCE_EVENT_TYPES
 
@@ -57,13 +57,14 @@ def test_runtime_bootstrap_shim_reexports_canonical_symbols() -> None:
 def test_runtime_fixture_and_ranking_shims() -> None:
     _assert_shim_only(
         Path(__file__).resolve().parents[2] / "runtime" / "demo_candidate_fixture.py",
-        forbidden_substrings=("DEMO_CANDIDATE_DISPLAY =", "def merge_demo"),
+        forbidden_substrings=("def merge_demo_profile_into_skill_payload",),
     )
     _assert_shim_only(
         Path(__file__).resolve().parents[2] / "runtime" / "vertical_slice_ranking.py",
         forbidden_substrings=("def resolve_ranking_branch", "TOP_K ="),
     )
-    assert runtime_fixture_shim.DEMO_CANDIDATE_DISPLAY == recruitment_fixtures.DEMO_CANDIDATE_DISPLAY
+    assert runtime_fixture_shim.merge_demo_profile_into_skill_payload is merge_demo_profile_into_skill_payload
+    assert runtime_fixture_shim.TESTING_DESKTOP_CANDIDATE_ID == TESTING_DESKTOP_CANDIDATE_ID
     assert runtime_ranking_shim.resolve_ranking_branch is recruitment_ranking.resolve_ranking_branch
 
 
@@ -156,7 +157,8 @@ def test_allowed_ingress_matches_policies_allowlist() -> None:
     assert tuple(policies.ALLOWED_INGRESS_EVENT_TYPES) == VERTICAL_SLICE_INGRESS_EVENT_TYPES
     assert policies.allowed_ingress_event_types() == VERTICAL_SLICE_INGRESS_EVENT_TYPES
     assert recruitment_bootstrap.VERTICAL_SLICE_INGRESS_EVENT_TYPES == VERTICAL_SLICE_INGRESS_EVENT_TYPES
-    assert DEMO_CANDIDATE_DISPLAY["candidate_name"] == "Alex Morgan"
+    assert callable(merge_demo_profile_into_skill_payload)
+    assert TESTING_DESKTOP_CANDIDATE_ID is not None
 
 
 def _module_imports_bootstrap(path: Path) -> bool:
