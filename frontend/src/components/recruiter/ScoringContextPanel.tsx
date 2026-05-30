@@ -19,7 +19,7 @@ export function ScoringContextPanel({
   if (!sc) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        {title ? <h2 className="text-lg font-semibold text-slate-900">{title}</h2> : null}
         <p className="mt-2 text-sm text-slate-500">None active for this view.</p>
       </section>
     )
@@ -47,7 +47,7 @@ export function ScoringContextPanel({
   ]
   return (
     <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+      {title ? <h2 className="text-lg font-semibold text-slate-900">{title}</h2> : null}
       <dl className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {scalarFields.map(({ key, value }) => (
           <div key={String(key)} className="border-b border-slate-100 pb-3">

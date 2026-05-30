@@ -8,7 +8,12 @@ import { RecruiterActionDialog } from '@/components/recruiter/RecruiterActionDia
 import { RecruiterActionsSection } from '@/components/recruiter/RecruiterActionsSection'
 import { CandidateGovernancePanel } from '@/components/recruiter/CandidateGovernancePanel'
 import { CreateCandidatePdfUpload } from '@/components/recruiter/CreateCandidatePdfUpload'
+import { ScoringContextDrawer } from '@/components/recruiter/ScoringContextDrawer'
 import { ScoringContextIngress } from '@/components/recruiter/ScoringContextIngress'
+import {
+  ScoringReadinessChecklist,
+  type ChecklistScrollTarget,
+} from '@/components/recruiter/ScoringReadinessChecklist'
 import { StageTag, StatusTag } from '@/components/recruiter/StageStatusTags'
 import { useRecruiterActions } from '@/hooks/useRecruiterActions'
 import { formatScorePercent } from '@/lib/format'
@@ -45,6 +50,8 @@ export function CandidateListPage() {
 
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [scrollTarget, setScrollTarget] = useState<ChecklistScrollTarget | null>(null)
   const rowActions = useRecruiterActions()
 
   const stageOptions = useMemo(() => {
@@ -65,6 +72,15 @@ export function CandidateListPage() {
   const capped = useMemo(() => filtered.slice(0, LIST_DISPLAY_LIMIT), [filtered])
 
   const contextReady = scoringQ.data?.status === 'ready'
+  const showScoringBadge =
+    !scoringQ.isPending &&
+    (scoringQ.data?.status !== 'ready' ||
+      (scoringQ.data?.materialization_blockers?.length ?? 0) > 0)
+
+  const openDrawerTo = (target: ChecklistScrollTarget) => {
+    setScrollTarget(target)
+    setDrawerOpen(true)
+  }
 
   const openRowAction = (candidateId: string, action: RecruiterActionItem) => {
     rowActions.openAction(action, candidateId)
@@ -72,13 +88,33 @@ export function CandidateListPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Candidates</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Showing up to {LIST_DISPLAY_LIMIT} rows after client filters (full list from API; see{' '}
-          <code className="rounded bg-slate-100 px-1 text-xs">TD-API-005</code>).
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Candidates</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            Showing up to {LIST_DISPLAY_LIMIT} rows after client filters (full list from API; see{' '}
+            <code className="rounded bg-slate-100 px-1 text-xs">TD-API-005</code>).
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+          onClick={() => setDrawerOpen(true)}
+        >
+          Scoring context
+          {showScoringBadge ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+              Not ready
+            </span>
+          ) : null}
+        </button>
       </div>
+
+      <ScoringReadinessChecklist
+        context={scoringQ.data}
+        isLoading={scoringQ.isPending}
+        onOpenDimension={openDrawerTo}
+      />
 
       <CreateCandidatePdfUpload contextReady={contextReady} />
 
@@ -206,12 +242,23 @@ export function CandidateListPage() {
         </div>
       )}
 
-      <ScoringContextIngress
-        context={scoringQ.data}
-        isLoading={scoringQ.isPending}
-        isError={scoringQ.isError}
-        errorMessage={scoringQ.error instanceof Error ? scoringQ.error.message : undefined}
-      />
+      <ScoringContextDrawer
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false)
+          setScrollTarget(null)
+        }}
+        showBadge={showScoringBadge}
+      >
+        <ScoringContextIngress
+          context={scoringQ.data}
+          isLoading={scoringQ.isPending}
+          isError={scoringQ.isError}
+          errorMessage={scoringQ.error instanceof Error ? scoringQ.error.message : undefined}
+          scrollToTarget={scrollTarget}
+          onScrollComplete={() => setScrollTarget(null)}
+        />
+      </ScoringContextDrawer>
 
       {rowActions.dialog.open && (
         <RecruiterActionDialog

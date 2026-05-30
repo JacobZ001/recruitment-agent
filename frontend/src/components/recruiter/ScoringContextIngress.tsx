@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ScoringContextResponse } from '@/api/types'
 import {
   clearJobContext,
@@ -14,14 +14,22 @@ import {
   refreshScoringContext,
 } from '@/api/client'
 import { ScoringContextPanel } from '@/components/recruiter/ScoringContextPanel'
+import type { ChecklistScrollTarget } from '@/components/recruiter/ScoringReadinessChecklist'
 
 type Dimension = 'organization' | 'recruiter_actor' | 'job'
 type DimState = 'empty_locked' | 'editing' | 'saved_locked'
 
 const DIMENSION_LABEL: Record<Dimension, string> = {
-  organization: 'Organization',
-  recruiter_actor: 'Recruiter actor',
-  job: 'Job',
+  organization: 'Describe Your Organization',
+  recruiter_actor: 'Describe Your Preferences',
+  job: "Describe Who You're Hiring",
+}
+
+const SECTION_IDS: Record<Dimension | 'materialized', string> = {
+  organization: 'scoring-dim-organization',
+  recruiter_actor: 'scoring-dim-recruiter',
+  job: 'scoring-dim-job',
+  materialized: 'scoring-dim-materialized',
 }
 
 function serverProseComplete(ctx: ScoringContextResponse): boolean {
@@ -36,14 +44,24 @@ function jobPdfSource(ctx: ScoringContextResponse): boolean {
   return (ctx.source_refs ?? []).some((ref) => ref.startsWith('pdf://'))
 }
 
-function parseRefreshBlockers(err: unknown): string[] {
-  const parsed = extractApiError(err)
-  if (!parsed?.message) return ['Materialization failed']
-  const match = parsed.message.match(/blockers:\s*(.+)$/i)
-  if (match?.[1]) {
-    return match[1].split(';').map((s) => s.trim()).filter(Boolean)
+function serverTextForDim(ctx: ScoringContextResponse, dim: Dimension): string {
+  if (dim === 'organization') return ctx.organization_authoring_text ?? ''
+  if (dim === 'recruiter_actor') return ctx.recruiter_actor_authoring_text ?? ''
+  return ctx.job_authoring_text ?? ''
+}
+
+function dimInlineLabel(
+  dim: Dimension,
+  state: DimState,
+  opts: { saving: boolean; fromPdf: boolean },
+): string | null {
+  if (opts.saving) return 'Saving…'
+  if (state === 'editing') return 'Needs confirm'
+  if (state === 'saved_locked') {
+    if (dim === 'job' && opts.fromPdf) return 'From PDF'
+    return 'Saved'
   }
-  return [parsed.message]
+  return null
 }
 
 type ScoringContextIngressProps = {
@@ -51,6 +69,8 @@ type ScoringContextIngressProps = {
   isLoading: boolean
   isError: boolean
   errorMessage?: string
+  scrollToTarget?: ChecklistScrollTarget | null
+  onScrollComplete?: () => void
 }
 
 export function ScoringContextIngress({
@@ -58,6 +78,8 @@ export function ScoringContextIngress({
   isLoading,
   isError,
   errorMessage,
+  scrollToTarget,
+  onScrollComplete,
 }: ScoringContextIngressProps) {
   const queryClient = useQueryClient()
   const [dimState, setDimState] = useState<Record<Dimension, DimState>>({
@@ -71,27 +93,56 @@ export function ScoringContextIngress({
     job: '',
   })
   const [jobPdfFile, setJobPdfFile] = useState<File | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
-  const [warnMsg, setWarnMsg] = useState<string | null>(null)
-  const [blockers, setBlockers] = useState<string[]>([])
+  const [busyDim, setBusyDim] = useState<Dimension | 'job_pdf' | null>(null)
+  const [dimFormErrors, setDimFormErrors] = useState<Partial<Record<Dimension | 'job_pdf', string>>>(
+    {},
+  )
+  const dimStateRef = useRef(dimState)
+  dimStateRef.current = dimState
 
   useEffect(() => {
     if (!context) return
-    setDimState({
-      organization: context.organization_authoring_text?.trim() ? 'saved_locked' : 'empty_locked',
-      recruiter_actor: context.recruiter_actor_authoring_text?.trim()
-        ? 'saved_locked'
-        : 'empty_locked',
-      job: context.job_authoring_text?.trim() ? 'saved_locked' : 'empty_locked',
-    })
-    setDrafts({
-      organization: context.organization_authoring_text ?? '',
-      recruiter_actor: context.recruiter_actor_authoring_text ?? '',
-      job: context.job_authoring_text ?? '',
-    })
+    setDimState((prev) => ({
+      organization:
+        prev.organization === 'editing'
+          ? prev.organization
+          : context.organization_authoring_text?.trim()
+            ? 'saved_locked'
+            : 'empty_locked',
+      recruiter_actor:
+        prev.recruiter_actor === 'editing'
+          ? prev.recruiter_actor
+          : context.recruiter_actor_authoring_text?.trim()
+            ? 'saved_locked'
+            : 'empty_locked',
+      job:
+        prev.job === 'editing'
+          ? prev.job
+          : context.job_authoring_text?.trim()
+            ? 'saved_locked'
+            : 'empty_locked',
+    }))
+    setDrafts((prev) => ({
+      organization:
+        dimStateRef.current.organization === 'editing'
+          ? prev.organization
+          : (context.organization_authoring_text ?? ''),
+      recruiter_actor:
+        dimStateRef.current.recruiter_actor === 'editing'
+          ? prev.recruiter_actor
+          : (context.recruiter_actor_authoring_text ?? ''),
+      job:
+        dimStateRef.current.job === 'editing' ? prev.job : (context.job_authoring_text ?? ''),
+    }))
   }, [context])
+
+  useEffect(() => {
+    if (!scrollToTarget) return
+    const id = SECTION_IDS[scrollToTarget]
+    const el = document.getElementById(id)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    onScrollComplete?.()
+  }, [scrollToTarget, onScrollComplete])
 
   const invalidateContext = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['scoring-context'] })
@@ -105,67 +156,89 @@ export function ScoringContextIngress({
         queryFn: getScoringContext,
       })
       setDimState((s) => ({ ...s, [dim]: 'saved_locked' }))
-      setSuccessMsg('Saved successfully.')
-      setWarnMsg(null)
-      setBlockers([])
       if (!serverProseComplete(latest)) {
-        setWarnMsg(
-          'Saved. Confirm the remaining dimensions before scoring context can refresh to ready.',
-        )
         return
       }
       try {
-        const readyCtx = await refreshScoringContext()
+        await refreshScoringContext()
         await invalidateContext()
-        if (readyCtx.status === 'ready') {
-          setSuccessMsg('Saved successfully. Scoring context is ready.')
-        }
-      } catch (e) {
-        setBlockers(parseRefreshBlockers(e))
+      } catch {
+        // Materialization failures surface via GET materialization_blockers on checklist.
       }
     },
     [invalidateContext, queryClient],
   )
 
-  const confirmDimension = async (dim: Dimension) => {
-    setFormError(null)
-    setSuccessMsg(null)
-    setWarnMsg(null)
-    setBlockers([])
-    setBusy(true)
-    try {
-      if (dim === 'job' && jobPdfFile) {
-        const buf = await jobPdfFile.arrayBuffer()
-        const bytes = new Uint8Array(buf)
-        let binary = ''
-        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!)
-        await postJobContextPdf(btoa(binary), jobPdfFile.name)
-        setJobPdfFile(null)
+  const cancelEditing = (dim: Dimension) => {
+    if (!context) {
+      setDrafts((d) => ({ ...d, [dim]: '' }))
+      setDimState((s) => ({ ...s, [dim]: 'empty_locked' }))
+    } else {
+      const serverText = serverTextForDim(context, dim)
+      if (serverText.trim()) {
+        setDrafts((d) => ({ ...d, [dim]: serverText }))
+        setDimState((s) => ({ ...s, [dim]: 'saved_locked' }))
       } else {
-        const text = drafts[dim].trim()
-        if (!text) {
-          setFormError('Text is required to confirm this dimension.')
-          return
-        }
-        if (dim === 'organization') await postOrganizationContext(text)
-        else if (dim === 'recruiter_actor') await postRecruiterActorContext(text)
-        else await postJobContextText(text)
+        setDrafts((d) => ({ ...d, [dim]: '' }))
+        setDimState((s) => ({ ...s, [dim]: 'empty_locked' }))
       }
+    }
+    setDimFormErrors((e) => ({ ...e, [dim]: undefined }))
+  }
+
+  const confirmDimension = async (dim: Dimension) => {
+    setDimFormErrors((e) => ({ ...e, [dim]: undefined }))
+    setBusyDim(dim)
+    try {
+      const text = drafts[dim].trim()
+      if (!text) {
+        setDimFormErrors((e) => ({ ...e, [dim]: 'Text is required to confirm this dimension.' }))
+        return
+      }
+      if (dim === 'organization') await postOrganizationContext(text)
+      else if (dim === 'recruiter_actor') await postRecruiterActorContext(text)
+      else await postJobContextText(text)
       await maybeRefreshAfterPersist(dim)
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Context update failed')
+      setDimFormErrors((err) => ({
+        ...err,
+        [dim]: e instanceof Error ? e.message : 'Context update failed',
+      }))
     } finally {
-      setBusy(false)
+      setBusyDim(null)
+      await invalidateContext()
+    }
+  }
+
+  const confirmJobPdf = async () => {
+    setDimFormErrors((e) => ({ ...e, job_pdf: undefined, job: undefined }))
+    if (!jobPdfFile) {
+      setDimFormErrors((e) => ({ ...e, job_pdf: 'Choose a PDF file before confirming.' }))
+      return
+    }
+    setBusyDim('job_pdf')
+    try {
+      const buf = await jobPdfFile.arrayBuffer()
+      const bytes = new Uint8Array(buf)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!)
+      await postJobContextPdf(btoa(binary), jobPdfFile.name)
+      setJobPdfFile(null)
+      await maybeRefreshAfterPersist('job')
+    } catch (e) {
+      setDimFormErrors((err) => ({
+        ...err,
+        job_pdf: e instanceof Error ? e.message : 'PDF upload failed',
+      }))
+    } finally {
+      setBusyDim(null)
       await invalidateContext()
     }
   }
 
   const deleteDimension = async (dim: Dimension) => {
-    setFormError(null)
-    setSuccessMsg(null)
-    setWarnMsg(null)
-    setBlockers([])
-    setBusy(true)
+    setDimFormErrors((e) => ({ ...e, [dim]: undefined }))
+    setBusyDim(dim)
     try {
       if (dim === 'organization') await clearOrganizationContext()
       else if (dim === 'recruiter_actor') await clearRecruiterActorContext()
@@ -173,64 +246,111 @@ export function ScoringContextIngress({
       setDimState((s) => ({ ...s, [dim]: 'empty_locked' }))
       setDrafts((d) => ({ ...d, [dim]: '' }))
       if (dim === 'job') setJobPdfFile(null)
-      setSuccessMsg('Dimension cleared.')
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Clear failed')
+      setDimFormErrors((err) => ({
+        ...err,
+        [dim]: e instanceof Error ? e.message : 'Clear failed',
+      }))
     } finally {
-      setBusy(false)
+      setBusyDim(null)
       await invalidateContext()
     }
+  }
+
+  const jobUsesPdfPath = jobPdfFile !== null || (context != null && jobPdfSource(context))
+  const globalBusy = busyDim !== null
+
+  const renderDimensionHeader = (dim: Dimension, state: DimState) => {
+    const saving = busyDim === dim
+    const fromPdf = dim === 'job' && context != null && jobPdfSource(context)
+    const inline = dimInlineLabel(dim, state, { saving, fromPdf })
+    const dimError = dimFormErrors[dim]
+
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="text-sm font-medium text-slate-700">{DIMENSION_LABEL[dim]}</label>
+        <div className="flex flex-wrap items-center gap-2">
+          {inline ? (
+            <span
+              className={`inline-flex items-center gap-1 text-xs font-medium ${
+                inline === 'From PDF'
+                  ? 'text-emerald-800'
+                  : inline === 'Needs confirm'
+                    ? 'text-amber-800'
+                    : inline === 'Saving…'
+                      ? 'text-slate-600'
+                      : 'text-emerald-800'
+              }`}
+            >
+              {inline === 'Saved' || inline === 'From PDF' ? '✓' : null}
+              {inline}
+            </span>
+          ) : null}
+          {dimError ? (
+            <span className="max-w-[14rem] text-xs text-red-700" role="alert">
+              {dimError}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    )
   }
 
   const renderDimension = (dim: Dimension) => {
     const state = dimState[dim]
     const locked = state !== 'editing'
-    const showJobPdfHint =
-      dim === 'job' && state === 'saved_locked' && context && jobPdfSource(context)
+    const hideJobTextConfirm = dim === 'job' && jobUsesPdfPath
 
     return (
-      <div key={dim} className="space-y-2 rounded-md border border-slate-100 bg-slate-50/50 p-3">
-        <label className="block text-sm font-medium text-slate-700">
-          {DIMENSION_LABEL[dim]} (text)
-        </label>
-        {showJobPdfHint && (
-          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            Job text extracted from PDF — use Edit to replace via text.
-          </p>
-        )}
+      <div
+        key={dim}
+        id={SECTION_IDS[dim]}
+        className="scroll-mt-4 space-y-2 rounded-md border border-slate-100 bg-slate-50/50 p-3"
+      >
+        {renderDimensionHeader(dim, state)}
         <textarea
           className="min-h-[88px] w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm disabled:bg-slate-100"
           value={drafts[dim]}
           onChange={(e) => setDrafts((d) => ({ ...d, [dim]: e.target.value }))}
-          disabled={locked || busy}
+          disabled={locked || globalBusy}
         />
         <div className="flex flex-wrap gap-2">
           {state === 'empty_locked' && (
             <button
               type="button"
               className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-              disabled={busy}
+              disabled={globalBusy}
               onClick={() => setDimState((s) => ({ ...s, [dim]: 'editing' }))}
             >
               Create
             </button>
           )}
           {state === 'editing' && (
-            <button
-              type="button"
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              disabled={busy}
-              onClick={() => void confirmDimension(dim)}
-            >
-              Confirm
-            </button>
+            <>
+              <button
+                type="button"
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                disabled={globalBusy || hideJobTextConfirm}
+                onClick={() => void confirmDimension(dim)}
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                disabled={globalBusy}
+                onClick={() => cancelEditing(dim)}
+              >
+                Cancel
+              </button>
+            </>
           )}
           {state === 'saved_locked' && (
             <>
               <button
                 type="button"
                 className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                disabled={busy}
+                disabled={globalBusy}
                 onClick={() => setDimState((s) => ({ ...s, [dim]: 'editing' }))}
               >
                 Edit
@@ -238,7 +358,7 @@ export function ScoringContextIngress({
               <button
                 type="button"
                 className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
-                disabled={busy}
+                disabled={globalBusy}
                 onClick={() => void deleteDimension(dim)}
               >
                 Delete
@@ -250,96 +370,91 @@ export function ScoringContextIngress({
     )
   }
 
-  const ready = context?.status === 'ready'
-
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Scoring context ingress</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Confirm each dimension in order. When all three are saved on the server, the last Confirm
-          triggers refresh. Candidate PDF upload requires{' '}
-          <code className="rounded bg-slate-100 px-1 text-xs">ready</code>.
+      <p className="text-sm text-slate-600">
+        Confirm each section. When all three are saved on the server, the last Confirm triggers
+        refresh automatically.
+      </p>
+      {isLoading && <p className="text-sm text-slate-500">Loading scoring context…</p>}
+      {isError && (
+        <p className="text-sm text-red-700" role="alert">
+          {errorMessage ?? 'Failed to load scoring context'}
         </p>
-        {!ready && context && (
-          <p
-            className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-            role="status"
-          >
-            Scoring context is <strong>{context.status}</strong> — create candidate by PDF is blocked
-            until ready.
-          </p>
-        )}
-        {successMsg && (
-          <p className="mt-3 text-sm text-emerald-800" role="status">
-            {successMsg}
-          </p>
-        )}
-        {warnMsg && (
-          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {warnMsg}
-          </p>
-        )}
-        {blockers.length > 0 && (
-          <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-            <p className="font-medium">Materialization blockers</p>
-            <ul className="mt-1 list-inside list-disc">
-              {blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
+      )}
+      <div className="space-y-4">
+        {renderDimension('organization')}
+        {renderDimension('recruiter_actor')}
+        {renderDimension('job')}
+        <div
+          id={SECTION_IDS.materialized}
+          className="scroll-mt-4 space-y-2 rounded-md border border-slate-100 bg-slate-50/50 p-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-sm font-medium text-slate-700">Upload Job Description</label>
+            {jobPdfFile ? (
+              <span className="text-xs font-medium text-amber-800">Needs confirm</span>
+            ) : context && jobPdfSource(context) ? (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-800">
+                ✓ From PDF
+              </span>
+            ) : null}
           </div>
-        )}
-        {formError && (
-          <p className="mt-3 text-sm text-red-700" role="alert">
-            {formError}
+          <p className="text-xs text-slate-500">
+            Choose a PDF, then Confirm to extract job text. You can upload without opening the text
+            editor first.
           </p>
-        )}
-        {isLoading && <p className="mt-3 text-sm text-slate-500">Loading scoring context…</p>}
-        {isError && (
-          <p className="mt-3 text-sm text-red-700" role="alert">
-            {errorMessage ?? 'Failed to load scoring context'}
-          </p>
-        )}
-        <div className="mt-4 space-y-4">
-          {renderDimension('organization')}
-          {renderDimension('recruiter_actor')}
-          {renderDimension('job')}
-          <div className="space-y-2 rounded-md border border-slate-100 bg-slate-50/50 p-3">
-            <label className="block text-sm font-medium text-slate-700">Job (PDF)</label>
-            <p className="text-xs text-slate-500">
-              Choose a file, then Confirm on the Job dimension (upload runs on Confirm).
-            </p>
+          <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50">
               Choose file
               <input
                 type="file"
                 accept="application/pdf,.pdf"
                 className="sr-only"
-                disabled={busy || dimState.job === 'empty_locked'}
+                disabled={globalBusy}
                 onChange={(e) => setJobPdfFile(e.target.files?.[0] ?? null)}
               />
             </label>
-            {jobPdfFile && (
-              <p className="text-xs text-slate-600">Selected: {jobPdfFile.name} (not uploaded yet)</p>
-            )}
+            <button
+              type="button"
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              disabled={globalBusy || !jobPdfFile}
+              onClick={() => void confirmJobPdf()}
+            >
+              {busyDim === 'job_pdf' ? 'Saving…' : 'Confirm'}
+            </button>
           </div>
+          {jobPdfFile && (
+            <p className="text-xs text-slate-600">Selected: {jobPdfFile.name} (not uploaded yet)</p>
+          )}
+          {dimFormErrors.job_pdf ? (
+            <p className="text-xs text-red-700" role="alert">
+              {dimFormErrors.job_pdf}
+            </p>
+          ) : null}
         </div>
-        {context && context.materialization_blockers && context.materialization_blockers.length > 0 && (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-            <p className="font-medium">Server materialization blockers</p>
-            <ul className="mt-1 list-inside list-disc">
-              {context.materialization_blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-      <ScoringContextPanel
-        sc={context ?? null}
-        title="Processed scoring context (full GET payload)"
-      />
+      </div>
+      <details className="rounded-md border border-slate-200 bg-slate-50/80">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700">
+          Processed scoring context (debug)
+        </summary>
+        <div className="border-t border-slate-200 p-2">
+          <ScoringContextPanel sc={context ?? null} title="" />
+        </div>
+      </details>
     </div>
   )
+}
+
+export function parseRefreshBlockers(err: unknown): string[] {
+  const parsed = extractApiError(err)
+  if (!parsed?.message) return ['Materialization failed']
+  const match = parsed.message.match(/blockers:\s*(.+)$/i)
+  if (match?.[1]) {
+    return match[1]
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  return [parsed.message]
 }

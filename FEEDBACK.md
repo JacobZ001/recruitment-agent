@@ -1,49 +1,47 @@
-# FEEDBACK — R-014
+# FEEDBACK — R-014.1
 
 ## Round ID + Status
 
-- **Round:** R-014 (major)
+- **Round:** R-014.1 (minor, parent R-014)
 - **Status:** `done`
 
 ## Step Completion Mapping
 
 | PLAN step | Status | Notes |
 |-----------|--------|-------|
-| 1. Backend: remove context `stale` / `stale_at`, legacy normalize, fingerprint + version semantics, force/clear evaluation stale, `materialization_blockers` | done | `ScoringContextStatus` only `collecting` \| `ready`; `last_ready_materialized_fingerprint`; author/clear from `ready` → `collecting` without version bump |
-| 2. Frontend: `ScoringContextIngress` state machine, Confirm/Delete/Job PDF, refresh gating, invalidate order | done | `empty_locked` / `editing` / `saved_locked`; POST → optional refresh → `finally` invalidate; amber blockers + green PDF hint via `pdf://` on top-level `source_refs` |
-| 3. `CandidateListPage` layout | done | Title → Create PDF → filters → table → ingress → processed panel |
-| 4. Tests + build + FEEDBACK | done | Scoring-context module tests rewritten; API clear-status assertion updated |
-| 5. PM manual acceptance checklist | done | See below (`LLM_PROVIDER=stub`) |
+| 1. `CandidateListPage` — header button, checklist, drawer, remove inline ingress | done | Scoring context button + Not ready badge; checklist above Create PDF; table下无 ingress |
+| 2. `ScoringContextIngress` — Cancel, labels, inline status, Job PDF Confirm, drawer layout | done | Per-dim inline; Cancel 恢复服务端文案；editing 时 skip context hydrate |
+| 3. Blocker mapping util + unit tests (8 known + fallback) | done | `frontend/src/lib/scoringContextBlockers.ts` + `.test.ts` |
+| 4. npm test / build + FEEDBACK | done | 21 vitest passed; build success |
 
 ## Acceptance Criteria Traceability
 
 | PLAN acceptance criterion | Verification |
 |---------------------------|--------------|
-| Third Confirm triggers refresh; `ready`; Processed updates without full reload | PM manual #3–5; `tests/modules/test_scoring_context.py`; ingress integration via API tests |
-| Single Confirm: green success; incomplete third dim → amber | PM manual #4; frontend build + manual |
-| No context `stale`; only `collecting` / `ready` | `tests/modules/test_scoring_context.py`; `pytest -q` |
-| Edit from `ready` → `collecting`, eval stale, no version bump until new ready | `test_*` edit/collecting paths in `test_scoring_context.py`; PM manual #7 |
-| Same fingerprint refresh: version unchanged, stale cleared | `test_idempotent_refresh_does_not_bump_version`; PM manual #8 |
-| Different fingerprint ready: `context_version +1` | `test_scoring_context.py` refresh/changed materialize assertions; PM manual #7–8 |
-| No `stale_at` field | schema tests + grep; PM ops note delete `app.db` |
-| `materialization_blockers` readable when collecting / refresh fails | API/GET tests; PM manual #10 |
-| Saved_locked hydrate; Job PDF green hint | PM manual #9; frontend manual |
-| Create PDF above filters | PM manual #3 |
-| Tests and build pass | `python -m pytest -q` (208 passed); `npm test`; `npm run build` |
+| Job PDF: Confirm beside Choose file; empty_locked 直传 | `ScoringContextIngress` Upload Job Description 区；Choose + Confirm；无 Create 前置 |
+| 已选 PDF / `pdf://` → Job 文本维 Confirm 隐藏 | `jobUsesPdfPath` disables text Confirm |
+| 四维 label（含 Upload Job Description） | `DIMENSION_LABEL` + PDF section title |
+| 无顶部全局绿/黄；无 drawer 内 Server materialization blockers 黄框 | Removed `successMsg`/`warnMsg`/blocker panels from ingress |
+| 维度标题行 inline 状态；无 per-dim Materialization issue | `renderDimensionHeader` Saved / Needs confirm / Saving… / From PDF |
+| Checklist 点击 → drawer + scroll 到维 | `ScoringReadinessChecklist` + `scrollToTarget` + section ids |
+| Drawer Esc / overlay / X 关闭 | `ScoringContextDrawer` |
+| formError per-dimension inline | `dimFormErrors` on header row |
+| Job PDF `pdf://` 仅 inline（无 emerald 横幅） | ✓ From PDF on job header / PDF section |
+| Cancel 无闪回（editing 不随 invalidate 覆盖） | `useEffect` skips dims in `editing` |
+| Blocker 映射单测 8 + fallback | `scoringContextBlockers.test.ts` |
+| Scoring context 仅 drawer 编辑 | Removed table-bottom ingress |
+| Checklist 合并 collecting + blockers | `ScoringReadinessChecklist` |
+| R-014 regression smoke (stub 手工) | PM manual checklist below |
+| npm test + build | 21 passed; build OK |
 
 ## File Change Summary
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/scoring_context_fingerprint.py` | A |
-| `schemas/state_schema.py` | M |
-| `modules/recruitment/scoring_context_service.py` | M |
-| `modules/recruitment/use_cases.py` | M |
-| `integrations/api/schemas_http.py` | M |
-| `integrations/api/app.py` | M |
-| `tests/modules/test_scoring_context.py` | M |
-| `tests/api/test_candidates_cv_pdf_create.py` | M |
-| `frontend/src/api/types.ts` | M |
+| `frontend/src/lib/scoringContextBlockers.ts` | A |
+| `frontend/src/lib/scoringContextBlockers.test.ts` | A |
+| `frontend/src/components/recruiter/ScoringReadinessChecklist.tsx` | A |
+| `frontend/src/components/recruiter/ScoringContextDrawer.tsx` | A |
 | `frontend/src/components/recruiter/ScoringContextIngress.tsx` | M |
 | `frontend/src/components/recruiter/ScoringContextPanel.tsx` | M |
 | `frontend/src/pages/CandidateListPage.tsx` | M |
@@ -52,51 +50,52 @@
 ## Test Commands & Results
 
 ```text
-python -m pytest -q
-→ 208 passed, 2 skipped
-
 cd frontend && npm test -- --run
-→ 7 passed
+→ 21 passed (4 files)
 
 cd frontend && npm run build
 → success
+
+python -m pytest -q
+→ 208 passed, 2 skipped (no backend changes)
 ```
 
 ## Risks, Deviations, Blockers
 
 - **No blockers.**
-- **Build fix:** `scoring_context_service` imported nonexistent `EvaluationStatus`; corrected to `EvaluationState`. `state_schema` legacy normalizer missing `Mapping` import.
-- **Test alignment:** Edit-after-ready + refresh with changed materialized content now asserts `context_version == 2` and evaluations remain stale (per PM fingerprint rules); idempotent same-fingerprint path covered by `test_idempotent_refresh_does_not_bump_version`.
-- **Ops:** Delete `data/app.db` (+ WAL/SHM) after pulling R-014 if local JSON still has removed fields or legacy context `stale`.
-- **Accepted risk:** Real LLM materialize may drift fingerprint → version bump; use stub for deterministic QA.
+- **Scope respected:** No backend / fingerprint / version changes.
+- **Accepted:** Org prose 过严导致 materialization blocker 仍为 stub 行为；checklist 映射 + 点击跳转 Organization 为 R-014.1 验收定义。
+- **Note:** Job 维在 `pdf://` source 或已选 PDF 时文本 Confirm 禁用；改 job 文本需 Delete 或重新 PDF Confirm（PM 冻结双 Confirm 消歧）。
 
 ## PM Manual Acceptance (stub LLM)
 
-1. In API terminal: `$env:LLM_PROVIDER = "stub"` (PowerShell) or `export LLM_PROVIDER=stub`; restart uvicorn.
-2. Optional: delete `data/app.db` for clean cutover.
-3. List page: Create PDF block **above** filters; scoring ingress below table.
-4. Per dimension: Create → Confirm → green success; incomplete third dimension → amber warning (not red).
-5. After third Confirm with all prose on server: auto refresh → `ready`; Processed panel updates without full page reload.
-6. PDF create enabled when `ready`; disabled when `collecting`.
-7. Edit from `ready`: status `collecting`, evaluations stale, version unchanged until new distinct ready refresh.
-8. Repeat refresh without prose/material change: version unchanged, evaluation stale cleared.
-9. Job PDF Confirm: top-level `source_refs` contains `pdf://…` → green PDF hint above disabled job textarea.
-10. Refresh failure: amber lists `materialization_blockers` from GET (and refresh error detail when applicable).
+**Setup:** `$env:LLM_PROVIDER = "stub"`；重启 API；可选删 `data/app.db`。
 
-**Builder verification used:** `LLM_PROVIDER=stub` (pytest autouse in `tests/conftest.py`).
+1. **Layout:** Candidates 标题行右上角 **Scoring context**（collecting 时 **Not ready** badge）；其下 **Scoring readiness** checklist；再下 Create PDF；表格下 **无** ingress 大卡片。
+2. **Drawer:** 点 Scoring context → 右侧 drawer；Esc / 点遮罩 / ✕ 关闭；focus 在 drawer 内。
+3. **Checklist:** 四项 ✓/○/⚠；collecting + org materialization blocker 时第 4 项 ⚠ 显示人话（非 raw 英文堆叠）；点击 Organization 项 → drawer 打开并 scroll 到 Organization 区。
+4. **Labels:** Describe Your Organization / Describe Your Preferences / Describe Who You're Hiring / Upload Job Description。
+5. **Inline status:** Confirm 后标题行 **Saved**；editing 时 **Needs confirm**；Job PDF 成功后 **From PDF**（无 emerald 大横幅）。
+6. **Cancel:** Create → 改草稿 → Cancel → 恢复服务端文案或 empty；invalidate 后草稿不被覆盖。
+7. **Job PDF:** `empty_locked` 下 Choose file + **Confirm**（无需 Job Create）；已选 PDF 时 Job 文本行无 Confirm。
+8. **No global banners:** drawer 内无顶部绿/黄 success；无 Server materialization blockers 黄框。
+9. **formError:** 空 Confirm → 错误在该维标题旁 inline 显示。
+10. **R-014 smoke:** 三维 Confirm（org 写足 company/environment/values）→ ready → Create PDF 可用；collecting 时 Create PDF disabled；Confirm 后 checklist / Processed（details 折叠）与 GET 一致。
+
+**Builder verification:** `LLM_PROVIDER=stub` via pytest autouse; frontend vitest for blocker mapping.
+
+## PM Closeout (Architect, 2026-05-30)
+
+- **PM UAT:** Manual steps **1–9 passed**; overall satisfaction **high**.
+- **Residual:** Org **materialization** blocker still blocks `ready` / Create PDF when prose lacks stub-parseable company / environment / values — expected per R-014.1 scope (FE readability only); PM requests **explicit format example on checklist item 1**.
+- **PM routing (confirmed):** **`corrective-minor`** → **R-014.2** (org format guidance in checklist); then **`advance-major`** → **R-015** if R-014.2 UAT passes.
 
 ## Debt Handling
 
-- **TD-PERSISTENCE-009 — Requisition-scoped scoring context** — **partial** (fingerprint + `last_ready_materialized_fingerprint` on global context; full requisition scope still deferred).
-- **TD-API-001 — Single-process shared scoring context** — **partial** (unchanged deployment model; ingress UX + blockers improve operability).
-- **TD-CONTRACTS-015 / TD-INSPECTION-*** / **TD-API-011/012/015** — **deferred** per PLAN → R-015 / R-016.
-
-## Roadmap Updates
-
-- **R-014** removed from Upcoming; posture and capability notes reconciled in `docs/architecture/ROADMAP.md` (Architect closeout).
+- **Deferred:** Org prose 解析过严 / stub normalize 引导 → FEEDBACK 建议后续 round（非 R-014.1 scope）。
+- R-015 / R-016 queue unchanged per PLAN.
 
 ## Suggested Next Round
 
-- **PM routing (confirmed):** **`corrective-minor`** → **R-014.1** (List scoring-context ingress UX).
-- **PM UAT specifics (2026-05-30, stub):** materialization blocker readability; Cancel in editing; per-dimension inline status; label copy; Job PDF Confirm missing (Confirm only on job text row in `editing`); sidebar drawer + readiness checklist above Create PDF — frozen in root `PLAN.md`.
-- **After R-014.1:** **`advance-major`** → **R-015** unless further corrective needed.
+- **PM routing (confirmed):** **`corrective-minor`** → **R-014.2** — checklist Organization item shows stub-proven format (bullets + copy example) when org materialization blocker active.
+- **Then:** **`advance-major`** → **R-015** (timeline + `source_ref` lineage slice) after R-014.2 UAT.

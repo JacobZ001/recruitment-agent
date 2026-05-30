@@ -13,7 +13,7 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 ## Current Operating Posture
 
 The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs, including full dedup governance (pre-create block, suspected fingerprint, post-parse `post_ingress_duplicate`, link/keep-separate, orphan/in-progress flags, indexed lookups).
-As of **R-014** closeout, List scoring-context ingress runs on the product path with fingerprint-gated `context_version` and materialization blockers; PM confirmed **`corrective-minor`** → **R-014.1** for stub UAT UI logic gaps (ready gate, dimension state machine, messages, Job PDF).
+As of **R-014.1**, List scoring-context ingress uses a drawer, readiness checklist, per-dimension inline status, Job PDF direct upload, and blocker-friendly copy on the product path; PM confirmed **`corrective-minor`** → **R-014.2** for org materialization **format example** on the checklist when stub parsing still blocks `ready`.
 
 ## Capability Roadmap Layer
 
