@@ -84,6 +84,21 @@ Remove-Item -Force data/app.db -ErrorAction SilentlyContinue
 python scripts/seed_testing_candidate_from_pdf.py
 ```
 
+### R-013.2 dedup index cutover (local only)
+
+Upgrading from a pre–R-013.2 SQLite file **without** `dedup_email` / `dedup_phone` / `dedup_cv_fingerprint` columns is **not** supported in-app. Use this cutover only (do **not** use `POST /admin/reset` as a substitute):
+
+1. Stop the API process.
+2. Delete `data/app.db` at the repository root.
+3. If present, also delete `data/app.db-wal` and `data/app.db-shm`.
+4. Restart the API (startup creates a fresh DB from `sqlite_candidate_schema.sql` including dedup columns and indexes).
+
+Optional re-seed after restart:
+
+```bash
+python scripts/seed_testing_candidate_from_pdf.py
+```
+
 ## Richer local test data (PDF candidate)
 
 The default fixture candidate (Alex Morgan) is display-only and sparse. To seed a **real parsed CV** into `data/app.db`:

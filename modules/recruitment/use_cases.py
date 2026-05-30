@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import logging
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from interfaces.skill_interface import (
@@ -47,12 +47,17 @@ from .exceptions import (
     ScoringFailedError,
 )
 from .dedup import (
+    DedupEvaluation,
+    DedupMatch,
     DedupOutcome,
+    dedup_matches_json_normalized,
     dedup_matches_to_json,
     evaluate_dedup_fingerprint_suspected_from_ingress_signals,
     evaluate_dedup_high_confidence_from_ingress_signals,
     extract_ingress_signals_from_cv_text,
     governance_flags_from_candidate,
+    ingress_signals_from_candidate,
+    merge_dedup_matches,
 )
 from .ingress_governance import (
     IngressGovernanceFlags,
@@ -151,6 +156,7 @@ class CandidatePdfIngressResult:
     event_type: str
     publish_result: Dict[str, Any]
     state_summary: Optional[Dict[str, Any]]
+    dedup: Optional[Dict[str, Any]] = None
 
 
 def _model_copy_local(model: Any, **updates: Any) -> Any:
@@ -816,15 +822,21 @@ def create_and_submit_cv_pdf(
             extracted.cv_text,
             correlation_id=correlation_id,
         )
-        if suspected_dedup is not None:
+        post_eval = _evaluate_post_parse_high_confidence_dedup(runtime, candidate_id)
+        if post_eval is not None and post_eval.outcome == DedupOutcome.HIGH_CONFIDENCE_DUPLICATE:
+            extra = list(suspected_dedup.matches) if suspected_dedup is not None else []
+            _mark_candidate_post_ingress_duplicate(
+                runtime,
+                candidate_id,
+                post_eval,
+                extra_matches=extra,
+            )
+        elif suspected_dedup is not None:
             _mark_candidate_suspected_duplicate(runtime, candidate_id, suspected_dedup)
         response_body = _ingress_result_to_pdf_response(candidate_id, ingress)
-        if suspected_dedup is not None:
-            response_body["dedup"] = {
-                "status": "suspected_duplicate",
-                "pending_resolution": True,
-                "matches": dedup_matches_to_json(suspected_dedup.matches),
-            }
+        dedup_payload = _dedup_extension_response_payload(runtime, candidate_id)
+        if dedup_payload is not None:
+            response_body["dedup"] = dedup_payload
         store.mark_succeeded(
             method_path=IDEMPOTENCY_METHOD_PATH,
             idempotency_key=key,
@@ -839,6 +851,7 @@ def create_and_submit_cv_pdf(
             event_type=ingress.event_type,
             publish_result=ingress.publish_result,
             state_summary=ingress.state_summary,
+            dedup=dedup_payload,
         )
     finally:
         runtime.end_idempotency_operation(key)
@@ -892,6 +905,78 @@ def _governance_flags_for_candidate(
         ingress_in_progress=bool(gov.ingress_in_progress) if gov else False,
         orphan_ingress=bool(gov.orphan_ingress) if gov else False,
     )
+
+
+def _evaluate_post_parse_high_confidence_dedup(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+) -> Optional[DedupEvaluation]:
+    got = runtime.candidate_store.get(candidate_id)
+    if not got.ok or got.candidate is None:
+        return None
+    signals = ingress_signals_from_candidate(got.candidate)
+    return evaluate_dedup_high_confidence_from_ingress_signals(
+        runtime.candidate_store,
+        signals,
+        exclude_candidate_ids=[candidate_id],
+    )
+
+
+def _dedup_extension_response_payload(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+) -> Optional[Dict[str, Any]]:
+    got = runtime.candidate_store.get(candidate_id)
+    if not got.ok or got.candidate is None:
+        return None
+    dedup = dict((got.candidate.extensions or {}).get("dedup") or {})
+    if not dedup.get("status"):
+        return None
+    return {
+        "status": dedup.get("status"),
+        "pending_resolution": bool(dedup.get("pending_resolution")),
+        "matches": list(dedup.get("matches") or []),
+    }
+
+
+def _mark_candidate_post_ingress_duplicate(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    dedup_eval: DedupEvaluation,
+    *,
+    extra_matches: Optional[Sequence[DedupMatch]] = None,
+) -> None:
+    got = runtime.candidate_store.get(candidate_id)
+    if not got.ok or got.candidate is None or got.meta is None:
+        return
+    prior = dict((got.candidate.extensions or {}).get("dedup") or {})
+    prior_matches = list(prior.get("matches") or [])
+    groups: List[Sequence[DedupMatch | Dict[str, Any]]] = [dedup_eval.matches]
+    if extra_matches:
+        groups.append(extra_matches)
+    if prior_matches:
+        groups.append(prior_matches)
+    merged = merge_dedup_matches(*groups)
+    new_matches_json = dedup_matches_to_json(merged)
+    if (
+        prior.get("status") == "post_ingress_duplicate"
+        and bool(prior.get("pending_resolution"))
+        and dedup_matches_json_normalized(prior_matches)
+        == dedup_matches_json_normalized(new_matches_json)
+    ):
+        return
+    detected_at = prior.get("detected_at") or _dedup_now_utc().isoformat()
+    dedup = {
+        "status": "post_ingress_duplicate",
+        "pending_resolution": True,
+        "matches": new_matches_json,
+        "detected_at": detected_at,
+        "audit": list(prior.get("audit") or []),
+    }
+    updated = got.candidate.model_copy(
+        update={"extensions": {**got.candidate.extensions, "dedup": dedup}}
+    )
+    runtime.candidate_store.replace(updated, expected_store_revision=got.meta.store_revision)
 
 
 def _mark_candidate_suspected_duplicate(

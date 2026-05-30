@@ -1,45 +1,40 @@
-# FEEDBACK — R-013.1
+# FEEDBACK — R-013.2
 
 ## Round ID + Status
 
-- **Round:** R-013.1 (minor, parent R-013)
+- **Round:** R-013.2 (minor, parent R-013)
 - **Status:** `done`
 
 ## Step Completion Mapping
 
 | PLAN step | Status | Notes |
 |-----------|--------|-------|
-| 1. Dedup audit UTC timestamps | done | `_dedup_audit_entry`, `detected_at` use `datetime.now(timezone.utc)` |
-| 2. Orphan vs ingress_in_progress | done | `ingress_governance.py`, 24h `ORPHAN_INGRESS_STALE_SECONDS` |
-| 3. API/projection/frontend flags | done | `ingress_in_progress` + distinct UI copy |
-| 4. Indexed dedup lookup | done | SQLite columns/indexes + in-memory indexes; `evaluate_dedup_from_ingress_signals` |
-| 5. Regression tests + verify | done | `test_r013_1_hardening.py`, `test_candidate_governance_r013_1.py` |
-| 6. FEEDBACK | done | This file |
+| 1. SQLite cutover (remove ALTER/backfill) + README | done | `_migrate_dedup_columns` / `_backfill_dedup_columns` removed; `frontend/README.md` R-013.2 four-step cutover |
+| 2. Post-parse dedup + frozen create order | done | `_mark_candidate_post_ingress_duplicate`, `merge_dedup_matches`, retry idempotency |
+| 3. API / projection / frontend | done | `post_ingress_duplicate` in governance panel; `CandidatePdfIngressResult.dedup` + route exposes `dedup` in HTTP body |
+| 4. Module + API tests | done | `test_r013_2_post_parse_dedup.py`, `test_candidate_post_parse_dedup_r013_2.py` |
+| 5. FEEDBACK | done | This file |
 
 ## File Change Summary
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/dedup.py` | M |
-| `modules/recruitment/ingress_governance.py` | A |
-| `modules/recruitment/use_cases.py` | M |
-| `modules/recruitment/projection.py` | M |
-| `runtime/persistence/candidate_store_dedup.py` | A |
-| `runtime/persistence/sqlite_candidate_schema.sql` | M |
 | `runtime/persistence/sqlite_candidate_store.py` | M |
-| `runtime/persistence/in_memory_candidate_store.py` | M |
+| `modules/recruitment/dedup.py` | M |
+| `modules/recruitment/use_cases.py` | M |
+| `integrations/api/app.py` | M |
 | `integrations/api/schemas_http.py` | M |
-| `frontend/src/api/types.ts` | M |
+| `frontend/README.md` | M |
 | `frontend/src/components/recruiter/CandidateGovernancePanel.tsx` | M |
-| `tests/modules/test_r013_1_hardening.py` | A |
-| `tests/api/test_candidate_governance_r013_1.py` | A |
+| `tests/modules/test_r013_2_post_parse_dedup.py` | A |
+| `tests/api/test_candidate_post_parse_dedup_r013_2.py` | A |
 | `FEEDBACK.md` | M |
 
 ## Test Commands & Results
 
 ```text
 python -m pytest -q
-→ 199 passed, 2 skipped
+→ 206 passed, 2 skipped
 
 cd frontend && npm test -- --run
 → 7 passed
@@ -51,17 +46,17 @@ cd frontend && npm run build
 ## Risks, Deviations, Blockers
 
 - **No blockers.**
-- **Note:** Existing SQLite DBs get `ALTER TABLE` + backfill on store open; no separate migration runner.
-- **Note:** `ORPHAN_INGRESS_STALE_SECONDS` is a module constant (tests override via `ingress_governance_by_candidate_id(stale_seconds=...)`).
+- **Fix during round:** `POST /candidates/cv/pdf` route rebuilt JSON without `dedup`; added `CandidatePdfIngressResult.dedup` and route passthrough so HTTP + idempotency bodies align with `extensions.dedup`.
+- **API test note:** Stub email injection uses `rt.bundle.subscriber.orchestrator._ctx.skills[SKILL_CV_PARSE_PROFILE]._provider` because skill instances bind `provider_factory` at construction time.
+- **Ops:** Local DB upgrade remains **delete `data/app.db`** (+ WAL/SHM); no runtime migration.
 
 ## Debt Handling
 
-- **TD-API-016 + Candidate deduplication, merge/link, and orphan governance** — **partial close:** real audit timestamps; orphan only after stale threshold; indexed dedup lookups.
-- **TD-API-004 + Candidate list is store-driven** — **partial close:** `ingress_in_progress` vs `orphan_ingress` on list/detail.
-- **TD-API-011 + HTTP ingress idempotency** — **deferred** (global extension → R-015 per PLAN).
-- **TD-API-012 + API boundary coupling to bootstrap helpers** — **deferred** (R-015 per PLAN).
+- **TD-API-016 + Candidate deduplication, merge/link, and orphan governance** — **ready for Architect RESOLVED** per PLAN closeout checklist (post-parse + cutover delivered; Architect to move to `tech_debt/resolved.md`).
+- **TD-PERSISTENCE-001** — **not modified** (doc-only touch optional for Architect).
+- **TD-API-004 / TD-API-011 / TD-API-012 / TD-API-015** — **deferred** per PLAN.
 
 ## Suggested Next Round
 
-- **Routing:** `advance-major` → **R-014** (timeline / inspection productization) per prior R-013 closeout, unless PM prioritizes **R-015** API hardening.
-- Architect: reconcile `ROADMAP.md` / `tech_debt.md` for TD-API-016 partial close from R-013 + R-013.1.
+- **Routing:** `advance-major` → **R-014** (timeline / inspection productization).
+- Architect: TD-API-016 `RESOLVED` + major-round snapshot if PM confirms advance.

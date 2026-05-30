@@ -2,7 +2,7 @@
 
 Purpose: track active deferred architecture improvements, scaling risks, and engineering rationale so we don't lose critical future considerations, while keeping a lightweight summary index for resolved/superseded debt IDs. This project prioritizes **deterministic orchestration** and **verifiable behavior** over “smart prompts”.
 
-- **Last full registry sweep**: 2026-05-30
+- **Last full registry sweep**: 2026-05-30 (R-013.2 closeout triage: TD-API-016 resolved; TD-PERSISTENCE-001 reviewed)
 - **Resolved/Superseded archive**: `docs/architecture/tech_debt/resolved.md`
 
 ## Debt lifecycle
@@ -468,8 +468,8 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Status**: OPEN
 - **Revisit when**: Before the next breaking local schema/cutover round or before any expectation of preserving developer SQLite rows across upgrades
 - **Introduced in**: 2026-05-25
-- **Last reviewed**: 2026-05-26
-- **Current decision**: The single-tenant reference runtime treats local SQLite as a disposable developer store. When schema or cutover changes invalidate old local rows, the supported workflow is to reset/delete `data/app.db` and let the app recreate it on boot/reset.
+- **Last reviewed**: 2026-05-30
+- **Current decision**: The single-tenant reference runtime treats local SQLite as a disposable developer store. When schema or cutover changes invalidate old local rows, the supported workflow is to reset/delete `data/app.db` and let the app recreate it on boot/reset. **R-013.2** dedup index columns (`dedup_email` / `dedup_phone` / `dedup_cv_fingerprint`) use the same stance: delete `data/app.db` (+ WAL/SHM if present) and restart—no in-app runtime migration (see `frontend/README.md` R-013.2 cutover).
 - **Rationale**: This keeps approved cutovers small and honest while the MVP surface is still evolving quickly. It avoids smuggling migration complexity into runtime read/write paths before a durable migration contract exists.
 - **Future impact**: Repeated local resets are acceptable for MVP development, but they do not scale into a stable operator/developer upgrade story once data longevity matters or schema changes become frequent.
 - **Priority**: Medium
@@ -841,18 +841,6 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Recommended future direction**: Extract one **canonical ingress JSON encoder** (used for first success, replay return, and persistence) and align OpenAPI examples or response class serialization with that encoder; optionally document replay semantics explicitly on the route. Coordinate with **TD-API-011** global ingress hardening.
 
 
-### TD-API-016 Candidate deduplication, merge/link, and orphan governance
-- **Status**: IN_PROGRESS
-- **Revisit when**: Before expanding dedup policy beyond current balanced/hybrid matrix, or when cross-candidate merge semantics need stronger domain guarantees
-- **Introduced in**: 2026-05-30 (R-013)
-- **Last reviewed**: 2026-05-30
-- **Current decision**: R-013 delivered deterministic dedup (email/phone high-confidence block; fingerprint-only suspected), create+upload routing, and recruiter ``link`` / ``keep-separate`` with extension audit. **R-013.1** hardened: dedup audit / suspected ``detected_at`` use real UTC (not ``ingress.FIXED_CLOCK``); ``ingress_in_progress`` vs stale ``orphan_ingress`` (``ORPHAN_INGRESS_STALE_SECONDS``); indexed email/phone/fingerprint lookups (SQLite columns + in-memory indexes) with email/phone pre-check before candidate allocation and fingerprint as second-stage suspected only.
-- **Rationale**: Delivers non-silent, operator-controlled duplicate governance without auto-merge or background auto-delete, while keeping deterministic policy in program logic and preserving R-012 idempotency semantics.
-- **Future impact**: Remaining gaps include no cross-candidate data merge, extension-field audit shape still app-owned, potential false negatives when pre-create CV-text signals are sparse (email may appear only after LLM parse), other product paths may still use ``FIXED_CLOCK`` until R-015/R-019 cutover, and list semantics still store-driven (`TD-API-004`).
-- **Priority**: High
-- **Recommended future direction**: Harden governance contracts (typed dedup decision payloads, durable audit model), decide merge/link lifecycle ownership, and align dedup/orphan handling with candidate-domain read/write boundaries before broader API hardening.
-
-
 ---
 
 ## Inspection
@@ -1111,3 +1099,7 @@ Use this index for fast sweep and ID allocation. When a summary entry's `Revisit
 ### TD-API-013 Candidate view ``next_actions`` (static)
 - **Status**: RESOLVED
 - **Revisit when**: Re-open only if the public candidate detail surface later removes ``next_actions`` entirely in favor of richer action objects
+
+### TD-API-016 Candidate deduplication, merge/link, and orphan governance
+- **Status**: RESOLVED
+- **Revisit when**: Before expanding dedup policy beyond balanced/hybrid, cross-candidate data merge, or typed `extensions.dedup` contracts (see archive intentional non-goals)

@@ -142,10 +142,17 @@ class EventIngressResponse(BaseModel):
     state_summary: Optional[StateSummaryResponse] = None
 
 
+class CandidateDedupIngressSummary(BaseModel):
+    status: str
+    pending_resolution: bool
+    matches: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class CandidateCreatePdfIngressResponse(EventIngressResponse):
     """``POST /candidates/cv/pdf`` — server-assigned candidate + ingress outcome."""
 
     candidate_id: str
+    dedup: Optional[CandidateDedupIngressSummary] = None
 
 
 class DemoCandidateResponse(BaseModel):

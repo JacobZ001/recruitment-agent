@@ -10,7 +10,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 from uuid import UUID
 
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -227,6 +227,57 @@ def evaluate_dedup(
         signals,
         exclude_candidate_ids=exclude_candidate_ids,
     )
+
+
+def ingress_signals_from_candidate(candidate: Any) -> DedupIngressSignals:
+    sig = candidate.dedup_signals
+    return DedupIngressSignals(
+        normalized_email=sig.normalized_email,
+        normalized_phone=sig.normalized_phone,
+        cv_content_fingerprint=sig.cv_content_fingerprint,
+    )
+
+
+def _match_from_mapping(raw: Mapping[str, Any]) -> DedupMatch:
+    kinds = raw.get("match_kinds") or []
+    return DedupMatch(
+        candidate_id=UUID(str(raw["candidate_id"])),
+        match_kinds=list(kinds),
+        full_name=raw.get("full_name"),
+    )
+
+
+def merge_dedup_matches(
+    *groups: Sequence[DedupMatch | Mapping[str, Any]],
+) -> List[DedupMatch]:
+    """Union matches by candidate_id; merge match_kinds per candidate (R-013.2)."""
+    by_id: Dict[UUID, DedupMatch] = {}
+    for group in groups:
+        for item in group:
+            if isinstance(item, DedupMatch):
+                m = item
+            else:
+                m = _match_from_mapping(item)
+            for kind in m.match_kinds:
+                _match_row(
+                    m.candidate_id,
+                    full_name=m.full_name,
+                    kind=kind,
+                    by_id=by_id,
+                )
+    return sorted(by_id.values(), key=lambda m: str(m.candidate_id))
+
+
+def dedup_matches_json_normalized(matches: Sequence[Mapping[str, Any]]) -> tuple:
+    rows = []
+    for m in matches:
+        rows.append(
+            (
+                str(m.get("candidate_id")),
+                tuple(sorted(str(k) for k in (m.get("match_kinds") or []))),
+            )
+        )
+    return tuple(sorted(rows))
 
 
 def dedup_matches_to_json(matches: Sequence[DedupMatch]) -> List[Dict[str, Any]]:

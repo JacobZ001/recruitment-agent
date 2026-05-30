@@ -398,6 +398,7 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
   - sentence 2 = **Round-as-is** (latest completed round's realized posture change only)
 - `Capability Roadmap Layer` tracks major capability areas and status, not round-by-round implementation detail.
 - `Upcoming (Action Queue)` is the near-term queue derived from capability gaps plus debt priorities; it is not a second independent roadmap.
+- `Upcoming` entries are **not** numbered lists; the **round ID** (e.g. `R-014`) is the stable identifier. Add/remove/reorder rows without renumbering; priority is top-to-bottom until PM reprioritizes.
 - Keep round-scoped actions in the same `Upcoming (Action Queue)` list; do **not** create a separate `Round-scoped` subsection in `ROADMAP.md`.
 - If future-round execution detail is temporarily parked in `ROADMAP.md`, Architect must later extract that detail into the active round `PLAN.md` when the round is opened.
 - `Upcoming` items must advance named capability areas; `Debt ID` references are optional and used when the item is debt-driven, not required for capability-only queue entries.

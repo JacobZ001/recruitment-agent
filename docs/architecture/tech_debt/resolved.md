@@ -115,3 +115,24 @@ Summary (v2 cleanup):
 - **Priority**: Low
 - **Recommended future direction**: Keep ``next_actions`` as a compatibility projection only; prefer structured ``available_actions`` for any new recruiter client behavior.
 
+### TD-API-016 Candidate deduplication, merge/link, and orphan governance
+- **Status**: RESOLVED
+- **Revisit when**: Before expanding dedup policy beyond balanced/hybrid matrix, cross-candidate **data** merge, or typed ``extensions.dedup`` contracts
+- **Introduced in**: 2026-05-30 (R-013)
+- **Last reviewed**: 2026-05-30 (closed R-013.2)
+- **Current decision**: Delivered deterministic duplicate governance for the recruiter create+upload path across **R-013**, **R-013.1**, and **R-013.2**:
+  - **R-013**: balanced/hybrid matrix (email/phone high-confidence block; fingerprint-only suspected); ``POST /candidates/cv/pdf`` routing; recruiter ``link`` / ``keep-separate`` with extension audit; orphan visibility from idempotency ``IN_PROGRESS``.
+  - **R-013.1**: real UTC dedup audit timestamps; ``ingress_in_progress`` vs stale ``orphan_ingress`` (``ORPHAN_INGRESS_STALE_SECONDS``); indexed email/phone/fingerprint lookups with email/phone pre-check before allocation.
+  - **R-013.2**: removed runtime SQLite ``ALTER``/backfill for dedup columns (local cutover = delete ``data/app.db`` per ``frontend/README.md``); post-parse high-confidence evaluation after cv_parse persistence → ``post_ingress_duplicate`` flag with matches merge when pre-create suspected also fired; in-flight retry post-parse idempotency; HTTP/idempotency ``dedup`` body aligned with store.
+- **Rationale**: Non-silent, operator-controlled duplicate handling without auto-merge or background delete; deterministic policy in program logic; preserves R-012 idempotency semantics.
+- **Future impact**: None for the original MVP governance slice. Follow-on work is intentionally separate (see non-goals).
+- **Priority**: High (at introduction; closed at baseline)
+- **Recommended future direction**: If policy expands beyond balanced/hybrid or cross-candidate merge is required, open a **new** debt entry rather than re-opening this ID.
+
+**Intentional non-goals (not unresolved debt):**
+
+- No cross-candidate **data** merge (link metadata only).
+- ``extensions.dedup`` remains app-owned dict (typed contract → ``TD-CONTRACTS-004`` or successor).
+- Other ingress paths may still use ``FIXED_CLOCK`` (``TD-API-012`` / R-019).
+- Candidate list source-of-truth remains store-driven (``TD-API-004``).
+

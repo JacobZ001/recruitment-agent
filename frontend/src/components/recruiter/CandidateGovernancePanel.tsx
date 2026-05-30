@@ -26,6 +26,7 @@ export function CandidateGovernancePanel({
   const showDedup =
     flags.dedup_pending_resolution ||
     flags.dedup_status === 'suspected_duplicate' ||
+    flags.dedup_status === 'post_ingress_duplicate' ||
     flags.ingress_in_progress ||
     flags.orphan_ingress
   if (!showDedup && !flags.dedup_status) return null

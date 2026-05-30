@@ -12,8 +12,8 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 
 ## Current Operating Posture
 
-The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs, including dedup governance (high-confidence block / suspected flag), operator `link` / `keep-separate`, and indexed dedup lookups on create+upload.
-As of **R-013.1**, dedup audit and suspected `detected_at` use real UTC; list/detail expose `ingress_in_progress` separately from stale `orphan_ingress` (24h threshold); create+upload blocks on email/phone index hits before allocation and uses fingerprint only as a second-stage suspected check.
+The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs, including full dedup governance (pre-create block, suspected fingerprint, post-parse `post_ingress_duplicate`, link/keep-separate, orphan/in-progress flags, indexed lookups).
+As of **R-013.2**, local SQLite dedup-index upgrades require deleting `data/app.db` (no runtime migration); create+upload runs post-parse high-confidence dedup after cv_parse with merged matches and idempotent in-flight retry handling.
 
 ## Capability Roadmap Layer
 
@@ -74,42 +74,48 @@ Stage status: `Vision`
 
 This is the near-term action queue derived from capability gaps plus debt priorities; it is not a second roadmap: each action should advance one or more capability areas, and debt-driven actions must reference debt entries using `Debt ID + title` (matching `tech_debt.md`). Round-scoped actions and general capability actions are maintained in this same list (no separate subsection). Only not-yet-completed actions belong here; completed rounds/actions must be removed during planning reconciliation.
 
-1. **R-014 — Candidate-scoped timeline safety** (`TD-INSPECTION-002 + Timeline rendering format (plain text vs structured projections)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
-   - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
-   - Goal: replace process-global timeline behavior with candidate-aware history, or explicitly narrow timeline product scope.
+**List format:** entries are **not** numbered. The **round ID** (e.g. `R-014`) is the sole stable identifier; add/remove/reorder rows without renumbering. Priority is top-to-bottom in this file until PM reprioritizes.
 
-2. **R-015 — API hardening** (`TD-API-011 + HTTP ingress idempotency and replay-safe retries`, `TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-API-015 + Idempotency HTTP response canonicalization vs OpenAPI (POST /candidates/cv/pdf)`)
-   - Advances: `Operational Readiness`
-   - Goal: extend replay-safe ingress beyond create+upload, replace bootstrap-shaped envelope construction with a runtime-grade boundary, and align canonical JSON encoding with OpenAPI for idempotent routes.
+- **R-014 — Scoring context ingress hardening** (`TD-PERSISTENCE-009 + Single active scoring_context store (not requisition-scoped yet)`, `TD-API-001 + API runtime singleton (single process, shared runtime)`; PM-selected after recruiter SPA exercise)
+  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
+  - Goal: harden List-page scoring-context ingress (confirm/clear/refresh, ready gating for PDF create+upload, deterministic error surfaces, processed-context visibility) from PM-observed frontend issues; keep scope on product-path ingress UX + API alignment, not timeline or global API hardening.
 
-3. **R-016 — Single-tenant operational playbook** (`TD-PERSISTENCE-001 + Local SQLite schema/cutover migration strategy`, `TD-API-001 + API runtime singleton (single process, shared runtime)`)
-   - Advances: `Operational Readiness`
-   - Goal: document reset, validation, and local deployment expectations for current SQLite runtime posture.
+- **R-015 — Candidate-scoped timeline safety** (`TD-INSPECTION-002 + Timeline rendering format (plain text vs structured projections)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
+  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
+  - Goal: replace process-global timeline behavior with candidate-aware history, or explicitly narrow timeline product scope.
 
-4. **R-017 — Provider-hardening for bounded cognition** (`TD-API-006 + Coarse scoring_failed failure taxonomy`)
-    - Advances: `Controlled Cognition`, `Operational Readiness`
-    - Goal: move from coarse cognition failure surfaces toward deterministic retryability and clearer provider/runtime semantics.
+- **R-016 — API hardening** (`TD-API-011 + HTTP ingress idempotency and replay-safe retries`, `TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-API-015 + Idempotency HTTP response canonicalization vs OpenAPI (POST /candidates/cv/pdf)`)
+  - Advances: `Operational Readiness`
+  - Goal: extend replay-safe ingress beyond create+upload, replace bootstrap-shaped envelope construction with a runtime-grade boundary, and align canonical JSON encoding with OpenAPI for idempotent routes.
 
-5. **R-018 — Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010 + Workflow-context-aware scoring priors`, `TD-ORCHESTRATOR-004 + Conditional questionnaire workflow branching (vertical slice planner)`)
-    - Advances: `Controlled Cognition`, `Human Governance`
-    - Goal: carry typed layered evaluation semantics more clearly through post-light-scoring stages.
+- **R-017 — Single-tenant operational playbook** (`TD-PERSISTENCE-001 + Local SQLite schema/cutover migration strategy`, `TD-API-001 + API runtime singleton (single process, shared runtime)`)
+  - Advances: `Operational Readiness`
+  - Goal: document reset, validation, and local deployment expectations for current SQLite runtime posture.
 
-6. **R-019 — Full demo phase-out** (`TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
-   - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
-   - Goal: remove `/demo*` routes and compatibility shims, including default candidate bootstrap path (`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`); keep product-path recruiter/API surfaces only.
-   - **Production runtime clock policy (post-cutover):** product-path ingress, audit, and governance timestamps must use real UTC time (`datetime.now(timezone.utc)` or injected clock provider). `modules/recruitment/ingress.FIXED_CLOCK` and other demo fixed clocks must not be used for production audit/governance write paths after cutover.
+- **R-018 — Provider-hardening for bounded cognition** (`TD-API-006 + Coarse scoring_failed failure taxonomy`)
+  - Advances: `Controlled Cognition`, `Operational Readiness`
+  - Goal: move from coarse cognition failure surfaces toward deterministic retryability and clearer provider/runtime semantics.
 
-7. **R-020 — Contract and timestamp hardening** (`TD-CONTRACTS-005 + Timezone-aware datetime handling`, `TD-CONTRACTS-011 + Shared execution metadata structures`, `TD-CONTRACTS-012 + Future shared timing/audit abstractions`)
-    - Advances: `Deterministic Foundation`, `Operational Readiness`
-    - Goal: remove naive UTC defaults and tighten shared execution metadata/timing semantics before broader contract hardening.
+- **R-019 — Questionnaire/deep-evaluation continuity** (`TD-CONTRACTS-010 + Workflow-context-aware scoring priors`, `TD-ORCHESTRATOR-004 + Conditional questionnaire workflow branching (vertical slice planner)`)
+  - Advances: `Controlled Cognition`, `Human Governance`
+  - Goal: carry typed layered evaluation semantics more clearly through post-light-scoring stages.
 
-8. **R-021 — Contract hardening wave** (`TD-CONTRACTS-001 + Typed payload contracts (events + skill IO)`, `TD-CONTRACTS-004 + Potential migration from Dict[str, Any] to stricter structures (extensions governance)`)
-    - Advances: `Deterministic Foundation`, `Operational Readiness`
-    - Goal: push typed payload contracts beyond recruiter read models and tighten `extensions` governance.
+- **R-020 — Full demo phase-out** (`TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
+  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
+  - Goal: remove `/demo*` routes and compatibility shims, including default candidate bootstrap path (`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`); keep product-path recruiter/API surfaces only.
+  - **Production runtime clock policy (post-cutover):** product-path ingress, audit, and governance timestamps must use real UTC time (`datetime.now(timezone.utc)` or injected clock provider). `modules/recruitment/ingress.FIXED_CLOCK` and other demo fixed clocks must not be used for production audit/governance write paths after cutover.
 
-9. **R-022 — Governance domain storage evaluation (planning spike)**
-    - Advances: `Human Governance`, `Deterministic Foundation`
-    - Goal: decide whether `DecisionState` / `CommunicationState` remain on `OrchestrationState` or split storage without cross-store coupling in orchestrator hot path.
+- **R-021 — Contract and timestamp hardening** (`TD-CONTRACTS-005 + Timezone-aware datetime handling`, `TD-CONTRACTS-011 + Shared execution metadata structures`, `TD-CONTRACTS-012 + Future shared timing/audit abstractions`)
+  - Advances: `Deterministic Foundation`, `Operational Readiness`
+  - Goal: remove naive UTC defaults and tighten shared execution metadata/timing semantics before broader contract hardening.
+
+- **R-022 — Contract hardening wave** (`TD-CONTRACTS-001 + Typed payload contracts (events + skill IO)`, `TD-CONTRACTS-004 + Potential migration from Dict[str, Any] to stricter structures (extensions governance)`)
+  - Advances: `Deterministic Foundation`, `Operational Readiness`
+  - Goal: push typed payload contracts beyond recruiter read models and tighten `extensions` governance.
+
+- **R-023 — Governance domain storage evaluation (planning spike)**
+  - Advances: `Human Governance`, `Deterministic Foundation`
+  - Goal: decide whether `DecisionState` / `CommunicationState` remain on `OrchestrationState` or split storage without cross-store coupling in orchestrator hot path.
 
 ## Deferred Without Round Assignment
 

@@ -383,6 +383,8 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         }
         if state_summary is not None:
             body["state_summary"] = state_summary.model_dump(mode="json")
+        if result.dedup is not None:
+            body["dedup"] = result.dedup
         return JSONResponse(
             content=json.loads(json.dumps(body, sort_keys=True, separators=(",", ":"))),
         )
