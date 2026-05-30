@@ -1,0 +1,44 @@
+---
+description: Builder Agent session — execute approved PLAN.md only (enable when chat is named "Builder Agent")
+alwaysApply: false
+---
+
+# Builder Agent
+
+**Normative source:** root `AGENTS.md` wins on conflict; this file is a session checklist only.
+
+Use this rule in chats named **`Builder Agent`**. Enable via **Cursor Settings → Rules** when opening an implementation session.
+
+## Preconditions
+
+- Root `PLAN.md` must contain **`PM Approved: YYYY-MM-DD`** (not `Pending PM approval`).
+- If scope is unclear or missing from `PLAN.md`, set `FEEDBACK.md` **`status: blocked`** and stop — do not improvise.
+
+## Execution
+
+- Implement **only** what `PLAN.md` lists (scope in / acceptance criteria).
+- Do **not** change schemas, state transitions, or API contracts unless explicitly in `PLAN.md`.
+- Do **not** update `ROADMAP.md` / `tech_debt.md` unless `PLAN.md` authorizes it; otherwise note suggestions in `FEEDBACK.md`.
+
+## FEEDBACK.md (overwrite each round)
+
+Required sections per `AGENTS.md`. Additionally include:
+
+### Acceptance criteria traceability
+
+Table mapping each **`PLAN.md` acceptance criterion** → **automated test(s)** and/or **PM manual step**:
+
+| Acceptance criterion | Verification |
+|---|-----|
+| (copy from PLAN) | `tests/...` or `pytest -k ...` or PM manual #N |
+
+- Every acceptance bullet must have at least one verification row.
+- PM manual checklist items must reference the same numbers used in the Verification column.
+
+## Tests
+
+- Run `python -m pytest -q` and frontend `npm test` / `npm run build` when PLAN touches those areas; paste results in FEEDBACK.
+
+## Product path default
+
+- PM acceptance and new behavior validation use **product path** (List/Detail SPA), not `/demo/*`, unless `PLAN.md` says otherwise. Demo cleanup is **R-020** (see `AGENTS.md` → `Demo vs product path discipline`).

@@ -253,6 +253,17 @@ These rules apply to both Architect Agent and Builder Agent:
 - Architecture/planning session name: `Architect Agent`.
 - Implementation/execution session name: `Builder Agent`.
 
+### Cursor session rules (PM-approved)
+
+Project rules live in `.cursor/rules/`:
+
+| Rule file | Enable when |
+|-----------|-------------|
+| `architect-agent.mdc` | Chat titled **Architect Agent** — planning, closeout, governance docs; includes **round closeout checklist** |
+| `builder-agent.mdc` | Chat titled **Builder Agent** — code/tests per `PLAN.md`; includes **acceptance traceability** in `FEEDBACK.md` |
+
+Enable the matching rule in **Cursor Settings → Rules** at the start of each session (`alwaysApply: false` — pick explicitly). `AGENTS.md` remains the normative source; session rules are operational shortcuts.
+
 ## Development Round Protocol
 
 Each round follows this sequence:
@@ -332,6 +343,7 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 ### `PLAN.md` must include
 
 - Round ID and one-sentence goal.
+- **`PM Approved: YYYY-MM-DD`** on the line immediately after the title while awaiting or after PM confirmation. Use **`PM Approved: pending`** only before PM confirms; Builder must not start until the date is set.
 - Round type (`major` or `minor`) and parent major round when applicable.
 - Scope in / scope out.
 - Scope must be deterministic at the `what` level: do not leave Builder-facing feature/scope options inside `PLAN.md`.
@@ -354,6 +366,7 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 
 - Round ID and execution status (`done` / `partial` / `blocked`).
 - Step-by-step completion mapping against `PLAN.md`.
+- **`Acceptance criteria traceability`**: table mapping each `PLAN.md` acceptance bullet → pytest path/`pytest -k …` and/or PM manual step id (see `builder-agent.mdc`).
 - Full file change summary (`A` / `M` / `D`).
 - Test commands and results.
 - Risks, deviations, and blockers.
@@ -453,6 +466,7 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 ### Round-level git snapshot discipline
 
 - Governance requires a formal git snapshot commit for every completed round (major and minor).
+- **PM policy:** Architect **must** create the round snapshot commit in closeout step 12 after PM confirms routing — **without** waiting for a separate PM commit request. This mandatory snapshot is an explicit exception to generic “do not commit unless asked” agent defaults for **round snapshots only**; ad-hoc commits remain PM-directed.
 - Intermediate engineering commits are optional local/team checkpoints; they are allowed, but they do not replace the formal round snapshot commit.
 - Create the round snapshot commit after Builder overwrites `FEEDBACK.md` and Architect reconciles roadmap/debt artifacts for that round.
 - The round snapshot commit should include the relevant code changes plus synchronized governance artifacts (`PLAN.md`, `FEEDBACK.md`, `ROADMAP.md`, `tech_debt.md`, `tech_debt/resolved.md`, `ADR.md`) when they were part of the round outcome.
@@ -465,10 +479,27 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
   - write the commit body as flat bullet points rather than prose paragraphs
   - use the commit body for round context, such as the round ID, capability outcome, roadmap/debt updates, and notable cutovers
 - Example title: `feat(agents): close R-005 governance refinements`
-- Example body topics:
+  - Example body topics:
   - `Round: R-005`
   - - capability or architecture milestone reached
   - - debt / roadmap / ADR updates synchronized in the snapshot
+
+### Round sizing discipline
+
+Before PM approval, Architect sanity-checks round scope. **Split** into major + follow-on minor (or corrective minor) when **any** trigger fires:
+
+- `PLAN.md` body **> ~200 lines** (excluding acceptance checklist boilerplate).
+- **> 2** contract changes among: canonical schema, state transitions, public HTTP API shape, persistence cutover.
+- **Both** substantial backend workflow **and** substantial SPA state-machine work in one round unless PM explicitly accepts the risk.
+- More than **one** major product surface (e.g. List ingress **and** Detail timeline **and** API hardening) without PM reprioritization.
+
+When splitting: freeze the smaller deliverable as the current major or minor round; park the rest in `ROADMAP.md` Upcoming with a new round ID.
+
+### Demo vs product path discipline
+
+- **Until R-020 (demo phase-out):** PM acceptance, Builder verification, and FEEDBACK manual checklists default to the **product recruiter path** (`/app/` List/Detail, scoring-context APIs, `POST /candidates/cv/pdf`). `/demo/*`, `POST /demo/run`, and default demo candidate bootstrap are **harness/reference only** — not Definition of Done.
+- **R-020 scope (when scheduled):** remove demo routes and shims; product path only; real UTC on governance write paths per `ROADMAP.md`. Do not extend demo behavior in intervening rounds unless `PLAN.md` explicitly requires it for harness migration.
+- FEEDBACK must state which path was used for manual verification.
 
 ## Governance and Guardrails
 
