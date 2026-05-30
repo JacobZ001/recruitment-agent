@@ -54,6 +54,8 @@ from .use_cases import (
     clear_organization_context,
     clear_recruiter_actor_context,
     create_and_submit_cv_pdf,
+    keep_separate_candidate_dedup,
+    link_candidate_dedup,
     get_active_scoring_context,
     refresh_active_scoring_context,
     publish_ingress_event,
@@ -121,5 +123,7 @@ __all__ = (
     "clear_organization_context",
     "clear_recruiter_actor_context",
     "create_and_submit_cv_pdf",
+    "keep_separate_candidate_dedup",
+    "link_candidate_dedup",
     "VerticalSliceApiRuntime",
 )

@@ -1,8 +1,10 @@
 import type {
   ApiErrorBody,
   CandidateCreatePdfIngressResponse,
+  CandidateGovernanceFlags,
   CandidateListItem,
   CandidateViewResponse,
+  DedupMatch,
   ScoringContextResponse,
 } from '@/api/types'
 
@@ -126,6 +128,41 @@ export function clearRecruiterActorContext(): Promise<ScoringContextResponse> {
 
 export function clearJobContext(): Promise<ScoringContextResponse> {
   return fetchJson<ScoringContextResponse>('/scoring-context/job', { method: 'DELETE' })
+}
+
+export function parseDuplicateCandidateError(body: unknown): DedupMatch[] | null {
+  const parsed = extractApiError(body)
+  if (parsed?.code !== 'duplicate_candidate_high_confidence') return null
+  const detail = (body as { detail?: { matches?: DedupMatch[] } })?.detail
+  if (detail && Array.isArray(detail.matches)) return detail.matches
+  return null
+}
+
+export function linkCandidateDedup(
+  candidateId: string,
+  targetCandidateId: string,
+  actorId: string,
+  reason: string,
+): Promise<CandidateGovernanceFlags> {
+  return fetchJson<CandidateGovernanceFlags>(`/candidates/${candidateId}/dedup/link`, {
+    method: 'POST',
+    body: JSON.stringify({
+      target_candidate_id: targetCandidateId,
+      actor_id: actorId,
+      reason,
+    }),
+  })
+}
+
+export function keepSeparateCandidateDedup(
+  candidateId: string,
+  actorId: string,
+  reason: string,
+): Promise<CandidateGovernanceFlags> {
+  return fetchJson<CandidateGovernanceFlags>(`/candidates/${candidateId}/dedup/keep-separate`, {
+    method: 'POST',
+    body: JSON.stringify({ actor_id: actorId, reason }),
+  })
 }
 
 export function createCandidateWithPdf(args: {

@@ -742,8 +742,8 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Status**: OPEN
 - **Revisit when**: When multi-application-per-candidate or candidate lifecycle outside pipeline is required
 - **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: ``GET /candidates`` is implemented by ``list_candidates`` in ``modules/recruitment/use_cases.py``, which calls ``store.list_all_state_ids()``, loads each snapshot, and projects via ``build_candidate_list_item``. There is **no** explicit candidate aggregate, application entity, or domain registry—only orchestration snapshots indexed by ``StateLink`` (candidate kind).
+- **Last reviewed**: 2026-05-30
+- **Current decision**: ``GET /candidates`` remains implemented by ``list_candidates`` in ``modules/recruitment/use_cases.py``, which calls ``store.list_all_state_ids()``, loads each snapshot, and projects via ``build_candidate_list_item``. There is **no** explicit candidate aggregate, application entity, or domain registry—only orchestration snapshots indexed by ``StateLink`` (candidate kind). R-013 added governance visibility flags (duplicate/orphan indicators) on list/detail projections as a partial mitigation, but list source-of-truth semantics are unchanged.
 - **Rationale**: Stage B MVP needs a recruiter-facing list **without** new persistence models or snapshot schema changes; store enumeration reuses existing SQLite/in-memory stores and keeps the read path simple.
 - **Future impact** / **risks**—cannot support without redesign:
   - **Multiple applications per candidate** (same person, different reqs / pipelines).
@@ -798,7 +798,7 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, and before any external integrator/webhook ingress depends on retry-safe semantics
 - **Introduced in**: 2026-05-12
 - **Last reviewed**: 2026-05-30
-- **Current decision**: **`POST /candidates/cv/pdf`** (R-012) enforces required ``Idempotency-Key``, SQLite-backed dedupe/replay, and bounded retry semantics for create+upload only. **`POST /events`** and other ingress routes still have **no** enforced idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation).
+- **Current decision**: **`POST /candidates/cv/pdf`** (R-012/R-013) enforces required ``Idempotency-Key``, SQLite-backed dedupe/replay, bounded retry semantics, and now dedup-aware create-path routing before new allocation. **`POST /events`** and other ingress routes still have **no** enforced idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation).
 - **Rationale**: Sync-first reference boundary prioritizes validated publish semantics over distributed ingress guarantees; idempotency keys, dedupe stores, and ingress audit trails imply infrastructure and policy choices deferred for the slice beyond the bounded create+upload path.
 - **Future impact**: Retries, double-clicks, and proxy duplicates on non-idempotent routes can still produce **duplicate workflow signals** or confusing audit narratives unless upstream compensates; compliance-heavy deployments will need **replay-safe** ingress semantics on all public write surfaces.
 - **Priority**: High
@@ -839,6 +839,18 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Future impact**: OpenAPI/codegen clients may assume default FastAPI response encoding (key order, optional omission rules) that differs from replay bytes; integrators comparing raw bodies to schema examples may see harmless but confusing drift. Terminology risk: this is **HTTP idempotency replay**, not inspection event replay or audit-trail replay.
 - **Priority**: Low
 - **Recommended future direction**: Extract one **canonical ingress JSON encoder** (used for first success, replay return, and persistence) and align OpenAPI examples or response class serialization with that encoder; optionally document replay semantics explicitly on the route. Coordinate with **TD-API-011** global ingress hardening.
+
+
+### TD-API-016 Candidate deduplication, merge/link, and orphan governance
+- **Status**: IN_PROGRESS
+- **Revisit when**: Before expanding dedup policy beyond current balanced/hybrid matrix, or when cross-candidate merge semantics need stronger domain guarantees
+- **Introduced in**: 2026-05-30 (R-013)
+- **Last reviewed**: 2026-05-30
+- **Current decision**: R-013 introduced deterministic dedup evaluation (email/phone high-confidence duplicate; fingerprint-only suspected), create+upload routing on ``POST /candidates/cv/pdf`` (block high-confidence, allow suspected with pending flag), and recruiter-governed ``link`` / ``keep-separate`` APIs with audit trail on candidate extensions. Orphan/incomplete ingress is surfaced via governance flags from in-progress idempotency records.
+- **Rationale**: Delivers non-silent, operator-controlled duplicate governance without auto-merge or background auto-delete, while keeping deterministic policy in program logic and preserving R-012 idempotency semantics.
+- **Future impact**: Remaining gaps include no cross-candidate data merge, extension-field audit shape still app-owned, potential false negatives when pre-create signals are sparse, and list/source-of-truth semantics still store-driven (`TD-API-004`).
+- **Priority**: High
+- **Recommended future direction**: Harden governance contracts (typed dedup decision payloads, durable audit model), decide merge/link lifecycle ownership, and align dedup/orphan handling with candidate-domain read/write boundaries before broader API hardening.
 
 
 ---

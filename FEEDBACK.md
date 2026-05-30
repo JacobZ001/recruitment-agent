@@ -1,58 +1,54 @@
-# FEEDBACK — R-012
+# FEEDBACK — R-013
 
 ## Round ID + Status
 
-- **Round:** R-012 (major)
+- **Round:** R-013 (major)
 - **Status:** `done`
 
 ## Step Completion Mapping
 
 | PLAN step | Status | Notes |
 |-----------|--------|-------|
-| 1. Inventory ingress call chains | done | Reused `submit_cv` / `submit_cv_pdf` / scoring-context author + refresh |
-| 2. `POST /candidates/cv/pdf` create+upload API | done | Server-assigned `candidate_id`; response includes full ingress fields |
-| 3. Atomic order ready → idempotency → write | done | Ready + replay/conflict before allocation; write via existing ingress |
-| 4. Idempotency (TD-API-011 bounded) | done | SQLite + in-memory store; 24h lazy purge; dev_reset clears table |
-| 5. Frontend PDF create button + idempotency UX | done | `CreateCandidatePdfUpload` with session key + retry/new session |
-| 6. Scoring context text + job PDF ingress UI | done | `ScoringContextIngress` component |
-| 7. Confirm → upsert/clear + auto refresh | done | Confirm triggers POST or DELETE then `POST /scoring-context/refresh` |
-| 8. DELETE clear routes (3) + use cases | done | Clears authoring + structured + derived; returns full response |
-| 9. Ready gating (backend + UI) | done | `ScoringContextStatus.READY` required; UI blocks upload when non-ready |
-| 10. Full GET field visualization | done | `ScoringContextPanel` renders all `ScoringContextResponse` fields |
-| 11. Regression tests | done | New API tests + existing suite green |
-| 12. Verification + FEEDBACK | done | This file |
+| 1. Dedup inputs + normalization | done | `modules/recruitment/dedup.py` — email/phone/fingerprint + CV text extraction |
+| 2. Dedup evaluation model | done | `DedupOutcome`, `DedupMatch`, `DedupEvaluation` |
+| 3. `POST /candidates/cv/pdf` dedup分流 | done | High-confidence block before allocate; suspected flag after success |
+| 4. Link / keep-separate API + audit | done | `POST .../dedup/link`, `POST .../dedup/keep-separate` on `candidate.extensions.dedup` |
+| 5. Frontend duplicate + governance UI | done | Create flow shows block matches; list/detail governance panel |
+| 6. Orphan detection | done | `idempotency_store.list_in_progress()` → `governance_flags.orphan_ingress` on list/detail |
+| 7. Tests | done | `test_dedup.py`, `test_candidate_dedup_r013.py`; full suite green |
+| 8. FEEDBACK | done | This file |
 
 ## File Change Summary
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/idempotency_store.py` | A |
+| `modules/recruitment/dedup.py` | A |
 | `modules/recruitment/exceptions.py` | M |
 | `modules/recruitment/use_cases.py` | M |
-| `modules/recruitment/runtime.py` | M |
-| `modules/recruitment/scoring_context_service.py` | M |
+| `modules/recruitment/projection.py` | M |
+| `modules/recruitment/idempotency_store.py` | M |
 | `modules/recruitment/__init__.py` | M |
 | `integrations/api/app.py` | M |
 | `integrations/api/errors.py` | M |
 | `integrations/api/schemas_http.py` | M |
-| `runtime/persistence/sqlite_state_store.py` | M |
-| `tests/api/test_candidates_cv_pdf_create.py` | A |
+| `tests/modules/test_dedup.py` | A |
+| `tests/api/test_candidate_dedup_r013.py` | A |
 | `frontend/src/api/client.ts` | M |
 | `frontend/src/api/types.ts` | M |
 | `frontend/src/pages/CandidateListPage.tsx` | M |
-| `frontend/src/components/recruiter/ScoringContextPanel.tsx` | M |
-| `frontend/src/components/recruiter/ScoringContextIngress.tsx` | A |
-| `frontend/src/components/recruiter/CreateCandidatePdfUpload.tsx` | A |
+| `frontend/src/pages/CandidateDetailPage.tsx` | M |
+| `frontend/src/components/recruiter/CandidateGovernancePanel.tsx` | A |
+| `frontend/src/components/recruiter/CreateCandidatePdfUpload.tsx` | M |
 | `FEEDBACK.md` | M |
 
 ## Test Commands & Results
 
 ```text
 python -m pytest -q
-→ 187 passed, 2 skipped
+→ 192 passed, 2 skipped
 
 cd frontend && npm test -- --run
-→ 3 files, 7 tests passed
+→ 7 passed
 
 cd frontend && npm run build
 → success
@@ -61,17 +57,17 @@ cd frontend && npm run build
 ## Risks, Deviations, Blockers
 
 - **No blockers.**
-- **Deviation:** `POST /candidates/cv/pdf` success/replay responses use `JSONResponse` with sorted JSON keys for byte-identical HTTP replay (OpenAPI still documents `CandidateCreatePdfIngressResponse`). Tracked as **`TD-API-015 + Idempotency HTTP response canonicalization vs OpenAPI (POST /candidates/cv/pdf)`** — deferred to API hardening (R-015).
-- **Residual:** Orphan candidates after failed create+upload mid-write remain until R-013 dedup/governance. Legacy snapshot JSON keys stripped on SQLite read (R-011.2 compat) — not idempotency-related.
+- **Deviation:** Dedup signals for create+upload are extracted from CV text pre-create (regex), not post-parse skill output; aligns with “block before write” and may miss email only present after LLM parse (conservative for high-confidence block).
+- **Deviation:** `TD-API-016` registry entry not added in this Builder pass (Architect/PM may add in roadmap/debt sync).
+- **Residual:** Link governance records audit on source candidate only; no cross-candidate data merge (by design).
 
 ## Debt Handling
 
-- **TD-SKILLS-001 + CV ingestion evolution (MVP cv_submitted)** — **partial close:** real PDF create+upload path is primary recruiter ingress for new candidates.
-- **TD-PERSISTENCE-009 + Single active scoring_context store** — **partial close:** context ingress → refresh → ready → scoring consumption visible in UI; still single active store.
-- **TD-API-011 + HTTP ingress idempotency and replay-safe retries** — **partial close:** implemented for `POST /candidates/cv/pdf` only; other ingress deferred.
-- **TD-API-012 + API boundary coupling to bootstrap helpers** — **partial close:** create+upload reuses use-case ingress; no second business semantics layer.
+- **TD-API-016 + Candidate deduplication, merge/link, and orphan governance** — **partial close:** deterministic dedup matrix, create+upload分流, link/keep-separate with audit, orphan visibility.
+- **TD-API-004 + Candidate list is store-driven** — **partial close:** `governance_flags` on list/detail rows.
+- **TD-API-011 + HTTP ingress idempotency** — **partial close:** dedup runs after idempotency replay path, before new allocation; replay unchanged.
 
 ## Suggested Next Round
 
-- **Routing:** `advance-major` → **R-013** (dedup merge policy + orphan candidate governance per roadmap).
-- Optional hardening: extend idempotency pattern to other ingress endpoints in a dedicated API round.
+- **Routing:** `advance-major` → **R-014** (timeline / inspection productization per roadmap) or PM-selected API hardening (**R-015**).
+- Architect: register **TD-API-016** in `tech_debt.md` if not already present; reconcile `ROADMAP.md`.

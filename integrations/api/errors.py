@@ -10,6 +10,8 @@ from fastapi import HTTPException
 from modules.recruitment.exceptions import (
     CandidateCanonicalMissingError,
     CandidateNotFoundError,
+    DuplicateCandidateHighConfidenceError,
+    InvalidDedupGovernanceError,
     CandidateStoreUnavailableError,
     DemoRunPreconditionError,
     IdempotencyKeyConflictError,
@@ -151,6 +153,23 @@ def recruitment_error_to_http(
         )
     if isinstance(exc, IdempotencyReplayError):
         return HTTPException(status_code=exc.status_code, detail=exc.body)
+    if isinstance(exc, DuplicateCandidateHighConfidenceError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "duplicate_candidate_high_confidence",
+                "message": str(exc),
+                "matches": exc.matches,
+            },
+        )
+    if isinstance(exc, InvalidDedupGovernanceError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_dedup_governance",
+                "message": str(exc),
+            },
+        )
     return HTTPException(
         status_code=400,
         detail={

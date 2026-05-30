@@ -4,6 +4,7 @@ import { getCandidate } from '@/api/client'
 import type { ScoringContextSummary } from '@/api/types'
 import { ProfilePane } from '@/components/recruiter/ProfilePane'
 import { RecruiterActionDialog } from '@/components/recruiter/RecruiterActionDialog'
+import { CandidateGovernancePanel } from '@/components/recruiter/CandidateGovernancePanel'
 import { RecruiterActionsSection } from '@/components/recruiter/RecruiterActionsSection'
 import { ScoresPane } from '@/components/recruiter/ScoresPane'
 import {
@@ -148,6 +149,11 @@ export function CandidateDetailPage() {
             recruiterIdentity={sc?.recruiter_actor_id ?? null}
             overallValue={q.data.scores.overall_score?.value}
             overallType={q.data.scores.overall_score?.type ?? null}
+          />
+          <CandidateGovernancePanel
+            candidateId={candidateId}
+            flags={q.data.governance_flags}
+            onResolved={() => void q.refetch()}
           />
           <ProfilePane profile={q.data.profile} />
           <ScoresPane scores={q.data.scores} evaluation={q.data.evaluation} />

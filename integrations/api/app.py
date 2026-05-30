@@ -23,7 +23,10 @@ from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
     CandidateActionBody,
+    CandidateGovernanceFlags,
     CandidateCreatePdfIngressResponse,
+    DedupGovernanceBody,
+    DedupLinkBody,
     CandidatePdfIngressBody,
     CandidateListItem,
     CandidateViewResponse,
@@ -54,6 +57,8 @@ from modules.recruitment import (
     clear_organization_context,
     clear_recruiter_actor_context,
     create_and_submit_cv_pdf,
+    keep_separate_candidate_dedup,
+    link_candidate_dedup,
     get_active_scoring_context,
     get_candidate_view_for_runtime,
     get_demo_candidate,
@@ -481,6 +486,41 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=candidate_id)
         return CandidateViewResponse(candidate_id=str(candidate_id), **view)
+
+    @app.post("/candidates/{candidate_id}/dedup/link", response_model=CandidateGovernanceFlags)
+    def post_candidate_dedup_link(
+        candidate_id: UUID,
+        body: DedupLinkBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> CandidateGovernanceFlags:
+        try:
+            flags = link_candidate_dedup(
+                rt,
+                candidate_id,
+                body.target_candidate_id,
+                actor_id=body.actor_id,
+                reason=body.reason,
+            )
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
+        return CandidateGovernanceFlags(**flags)
+
+    @app.post("/candidates/{candidate_id}/dedup/keep-separate", response_model=CandidateGovernanceFlags)
+    def post_candidate_dedup_keep_separate(
+        candidate_id: UUID,
+        body: DedupGovernanceBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> CandidateGovernanceFlags:
+        try:
+            flags = keep_separate_candidate_dedup(
+                rt,
+                candidate_id,
+                actor_id=body.actor_id,
+                reason=body.reason,
+            )
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=candidate_id)
+        return CandidateGovernanceFlags(**flags)
 
     @app.post("/candidates/{candidate_id}/cv/pdf", response_model=EventIngressResponse)
     def post_candidate_pdf_cv(

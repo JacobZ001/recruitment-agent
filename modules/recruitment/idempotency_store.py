@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 IDEMPOTENCY_METHOD_PATH = "POST:/candidates/cv/pdf"
@@ -107,6 +107,14 @@ class InMemoryIdempotencyStore:
     def clear_all(self) -> None:
         with self._lock:
             self._rows.clear()
+
+    def list_in_progress(self) -> List[IdempotencyRecord]:
+        with self._lock:
+            return [
+                r
+                for r in self._rows.values()
+                if r.status == IdempotencyRecordStatus.IN_PROGRESS
+            ]
 
 
 class SQLiteIdempotencyStore:
@@ -240,3 +248,30 @@ class SQLiteIdempotencyStore:
         with self._lock:
             self._conn.execute("DELETE FROM ingress_idempotency")
             self._conn.commit()
+
+    def list_in_progress(self) -> List[IdempotencyRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT method_path, idempotency_key, status, payload_fingerprint, candidate_id,
+                   response_status_code, response_body_json, created_at
+            FROM ingress_idempotency
+            WHERE status = ?
+            """,
+            (IdempotencyRecordStatus.IN_PROGRESS.value,),
+        ).fetchall()
+        out: List[IdempotencyRecord] = []
+        for row in rows:
+            method_path, idem_key, status_s, fingerprint, cid, status_code, body_json, created_s = row
+            out.append(
+                IdempotencyRecord(
+                    method_path=method_path,
+                    idempotency_key=idem_key,
+                    status=IdempotencyRecordStatus(status_s),
+                    payload_fingerprint=fingerprint,
+                    candidate_id=cid,
+                    response_status_code=status_code,
+                    response_body_json=body_json,
+                    created_at=datetime.fromisoformat(created_s),
+                )
+            )
+        return out

@@ -51,6 +51,18 @@ class CandidateCanonicalMissingError(RecruitmentUseCaseError):
     """Orchestration state exists but canonical Candidate row is absent (fail-fast; no legacy fallback)."""
 
 
+class DuplicateCandidateHighConfidenceError(RecruitmentUseCaseError):
+    """Create+upload blocked: high-confidence dedup match on email or phone."""
+
+    def __init__(self, message: str, *, matches: list) -> None:
+        self.matches = matches
+        super().__init__(message)
+
+
+class InvalidDedupGovernanceError(RecruitmentUseCaseError):
+    """Dedup link/keep-separate action failed validation."""
+
+
 class IdempotencyKeyRequiredError(RecruitmentUseCaseError):
     """POST /candidates/cv/pdf requires an Idempotency-Key header."""
 

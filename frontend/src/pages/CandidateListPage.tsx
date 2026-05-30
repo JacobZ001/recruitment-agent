@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getScoringContext, listCandidates } from '@/api/client'
 import type { CandidateListItem, RecruiterActionItem } from '@/api/types'
 import { RecruiterActionDialog } from '@/components/recruiter/RecruiterActionDialog'
 import { RecruiterActionsSection } from '@/components/recruiter/RecruiterActionsSection'
+import { CandidateGovernancePanel } from '@/components/recruiter/CandidateGovernancePanel'
 import { CreateCandidatePdfUpload } from '@/components/recruiter/CreateCandidatePdfUpload'
 import { ScoringContextIngress } from '@/components/recruiter/ScoringContextIngress'
 import { StageTag, StatusTag } from '@/components/recruiter/StageStatusTags'
@@ -29,6 +31,7 @@ function ListRowActions({
 }
 
 export function CandidateListPage() {
+  const queryClient = useQueryClient()
   const { data, isPending, isError, error } = useQuery({
     queryKey: ['candidates'],
     queryFn: listCandidates,
@@ -165,6 +168,11 @@ export function CandidateListPage() {
                       >
                         <CandidateLabel fullName={row.full_name} />
                       </Link>
+                      <CandidateGovernancePanel
+                        candidateId={row.candidate_id}
+                        flags={row.governance_flags}
+                        onResolved={() => void queryClient.invalidateQueries({ queryKey: ['candidates'] })}
+                      />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       <StageTag stage={row.stage} compact />

@@ -15,6 +15,20 @@ export type CandidateListItemOverallScore = {
   type: string | null
 }
 
+export type CandidateGovernanceFlags = {
+  orphan_ingress: boolean
+  dedup_status?: string | null
+  dedup_pending_resolution: boolean
+  dedup_linked_to_candidate_id?: string | null
+  dedup_match_count?: number | null
+}
+
+export type DedupMatch = {
+  candidate_id: string
+  match_kinds: string[]
+  full_name?: string | null
+}
+
 export type CandidateListItem = {
   candidate_id: string
   full_name: string
@@ -27,6 +41,7 @@ export type CandidateListItem = {
   rank?: number | null
   total_candidates?: number | null
   available_actions: RecruiterActionItem[]
+  governance_flags?: CandidateGovernanceFlags
 }
 
 export type ScoringContextSummary = {
@@ -121,6 +136,7 @@ export type CandidateViewResponse = {
   ranking: Record<string, unknown>
   available_actions: RecruiterActionItem[]
   next_actions: string[]
+  governance_flags?: CandidateGovernanceFlags
 }
 
 export type ApiErrorBody = {

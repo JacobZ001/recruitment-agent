@@ -26,6 +26,7 @@ from schemas.state_schema import (
     ScoringContext,
 )
 
+from .dedup import governance_flags_from_candidate
 from .exceptions import (
     CandidateCanonicalMissingError,
     CandidateNotFoundError,
@@ -545,13 +546,22 @@ def _load_snapshot_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Or
     return got.snapshot
 
 
-def get_candidate_view_for_runtime(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:
+def get_candidate_view_for_runtime(
+    runtime: ReadRuntime,
+    candidate_id: UUID,
+    *,
+    orphan_ingress: bool = False,
+) -> Dict[str, Any]:
     candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, candidate_id)
-    return build_candidate_view(
+    view = build_candidate_view(
         snapshot,
         candidate=candidate,
         active_scoring_context=runtime.scoring_context_store.get(),
     )
+    view["governance_flags"] = governance_flags_from_candidate(
+        candidate, orphan_ingress=orphan_ingress
+    )
+    return view
 
 
 def get_state_summary_for_candidate(runtime: ReadRuntime, candidate_id: UUID) -> Dict[str, Any]:

@@ -168,6 +168,14 @@ class CandidateViewStatus(BaseModel):
     kind: str
 
 
+class CandidateGovernanceFlags(BaseModel):
+    orphan_ingress: bool = False
+    dedup_status: Optional[str] = None
+    dedup_pending_resolution: bool = False
+    dedup_linked_to_candidate_id: Optional[str] = None
+    dedup_match_count: Optional[int] = None
+
+
 class CandidateProfile(BaseModel):
     """
     Recruiter-facing profile DTO (not the aggregate ``schemas.candidate_schema.Candidate``).
@@ -212,6 +220,7 @@ class CandidateViewResponse(BaseModel):
     ranking: Dict[str, Any] = Field(default_factory=dict)
     available_actions: List["RecruiterActionItem"] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
+    governance_flags: CandidateGovernanceFlags = Field(default_factory=CandidateGovernanceFlags)
 
 
 class CandidateListItemOverallScore(BaseModel):
@@ -247,6 +256,16 @@ class CandidateListItem(BaseModel):
     rank: Optional[int] = None
     total_candidates: Optional[int] = None
     available_actions: List[RecruiterActionItem] = Field(default_factory=list)
+    governance_flags: CandidateGovernanceFlags = Field(default_factory=CandidateGovernanceFlags)
+
+
+class DedupGovernanceBody(BaseModel):
+    actor_id: str = Field(..., min_length=1)
+    reason: str = Field(..., min_length=1)
+
+
+class DedupLinkBody(DedupGovernanceBody):
+    target_candidate_id: UUID
 
 
 class CandidateActionBody(BaseModel):

@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { createCandidateWithPdf } from '@/api/client'
+import { ApiRequestError, createCandidateWithPdf, parseDuplicateCandidateError } from '@/api/client'
+import type { DedupMatch } from '@/api/types'
 
 type CreateCandidatePdfUploadProps = {
   contextReady: boolean
@@ -20,6 +21,7 @@ export function CreateCandidatePdfUpload({ contextReady }: CreateCandidatePdfUpl
   const idempotencyKeyRef = useRef<string | null>(null)
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [duplicateMatches, setDuplicateMatches] = useState<DedupMatch[] | null>(null)
   const [lastCandidateId, setLastCandidateId] = useState<string | null>(null)
 
   const mutation = useMutation({
@@ -40,9 +42,19 @@ export function CreateCandidatePdfUpload({ contextReady }: CreateCandidatePdfUpl
     onSuccess: (data) => {
       setLastCandidateId(data.candidate_id)
       setError(null)
+      setDuplicateMatches(null)
       void queryClient.invalidateQueries({ queryKey: ['candidates'] })
     },
     onError: (e) => {
+      if (e instanceof ApiRequestError) {
+        const matches = parseDuplicateCandidateError(e.body)
+        if (matches) {
+          setDuplicateMatches(matches)
+          setError('High-confidence duplicate: create blocked. Open the match below or use an existing profile.')
+          return
+        }
+      }
+      setDuplicateMatches(null)
       setError(e instanceof Error ? e.message : 'Upload failed')
     },
   })
@@ -57,6 +69,7 @@ export function CreateCandidatePdfUpload({ contextReady }: CreateCandidatePdfUpl
     idempotencyKeyRef.current = newIdempotencyKey()
     setSelectedName(file.name)
     setError(null)
+    setDuplicateMatches(null)
     mutation.mutate(file)
   }
 
@@ -64,6 +77,7 @@ export function CreateCandidatePdfUpload({ contextReady }: CreateCandidatePdfUpl
     idempotencyKeyRef.current = null
     setSelectedName(null)
     setError(null)
+    setDuplicateMatches(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -128,6 +142,25 @@ export function CreateCandidatePdfUpload({ contextReady }: CreateCandidatePdfUpl
             {lastCandidateId}
           </Link>
         </p>
+      )}
+      {duplicateMatches && (
+        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+          <p className="font-medium text-amber-950">Duplicate detected — create blocked</p>
+          <ul className="mt-2 list-inside list-disc text-xs">
+            {duplicateMatches.map((m) => (
+              <li key={m.candidate_id}>
+                <Link to={`/candidates/${m.candidate_id}`} className="text-indigo-700 hover:underline">
+                  {m.full_name || m.candidate_id}
+                </Link>{' '}
+                ({m.match_kinds.join(', ')})
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-slate-600">
+            If this upload belongs to an existing person, record a link decision on that candidate from the list after
+            they exist, or open the match above.
+          </p>
+        </div>
       )}
       {error && (
         <p className="mt-2 text-sm text-red-700" role="alert">

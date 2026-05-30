@@ -33,6 +33,8 @@ from . import policies
 from .exceptions import (
     CandidateNotFoundError,
     DemoRunPreconditionError,
+    DuplicateCandidateHighConfidenceError,
+    InvalidDedupGovernanceError,
     IdempotencyKeyConflictError,
     IdempotencyKeyInProgressError,
     IdempotencyKeyRequiredError,
@@ -44,6 +46,13 @@ from .exceptions import (
     ScoringContextNotReadyError,
     ScoringFailedError,
 )
+from .dedup import (
+    DedupOutcome,
+    dedup_matches_to_json,
+    evaluate_dedup,
+    extract_ingress_signals_from_cv_text,
+    governance_flags_from_candidate,
+)
 from .idempotency_store import (
     IDEMPOTENCY_METHOD_PATH,
     IdempotencyRecordStatus,
@@ -53,9 +62,9 @@ from .projection import (
     SYNC_PENDING_SNAPSHOT_RECONCILE,
     build_candidate_list_item,
     finalize_orchestration_snapshot,
-    get_candidate_view_for_runtime,
     get_state_summary,
 )
+from .projection import get_candidate_view_for_runtime as _projection_candidate_view
 from .scoring_context_service import (
     job_context_to_authoring_text,
     mark_evaluation_stale,
@@ -755,11 +764,13 @@ def create_and_submit_cv_pdf(
                 body=json.loads(record.response_body_json or "{}"),
             )
 
-        if (
+        suspected_dedup: Optional[Any] = None
+        is_retry = (
             record is not None
             and record.status == IdempotencyRecordStatus.IN_PROGRESS
             and record.candidate_id
-        ):
+        )
+        if is_retry:
             if record.payload_fingerprint != fingerprint:
                 raise IdempotencyKeyConflictError(
                     "idempotency_key_conflict: payload fingerprint differs from in-flight request"
@@ -770,6 +781,16 @@ def create_and_submit_cv_pdf(
                 raise IdempotencyKeyConflictError(
                     "idempotency_key_conflict: payload fingerprint differs from prior attempt"
                 )
+            extracted_for_dedup = extract_text_from_pdf_bytes(pdf_bytes, file_name=file_name)
+            signals = extract_ingress_signals_from_cv_text(extracted_for_dedup.cv_text)
+            dedup_eval = evaluate_dedup(runtime.candidate_store, signals)
+            if dedup_eval.outcome == DedupOutcome.HIGH_CONFIDENCE_DUPLICATE:
+                raise DuplicateCandidateHighConfidenceError(
+                    "duplicate_candidate_high_confidence: email or phone matches existing candidate",
+                    matches=dedup_matches_to_json(dedup_eval.matches),
+                )
+            if dedup_eval.outcome == DedupOutcome.SUSPECTED_FINGERPRINT:
+                suspected_dedup = dedup_eval
             candidate_id = uuid4()
             store.upsert_in_progress(
                 method_path=IDEMPOTENCY_METHOD_PATH,
@@ -785,7 +806,15 @@ def create_and_submit_cv_pdf(
             extracted.cv_text,
             correlation_id=correlation_id,
         )
+        if suspected_dedup is not None:
+            _mark_candidate_suspected_duplicate(runtime, candidate_id, suspected_dedup)
         response_body = _ingress_result_to_pdf_response(candidate_id, ingress)
+        if suspected_dedup is not None:
+            response_body["dedup"] = {
+                "status": "suspected_duplicate",
+                "pending_resolution": True,
+                "matches": dedup_matches_to_json(suspected_dedup.matches),
+            }
         store.mark_succeeded(
             method_path=IDEMPOTENCY_METHOD_PATH,
             idempotency_key=key,
@@ -803,6 +832,145 @@ def create_and_submit_cv_pdf(
         )
     finally:
         runtime.end_idempotency_operation(key)
+
+
+def _dedup_audit_entry(
+    *,
+    action: str,
+    actor_id: str,
+    reason: str,
+    target_candidate_id: Optional[UUID] = None,
+) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {
+        "action": action,
+        "actor_id": actor_id,
+        "reason": reason,
+        "recorded_at": _FIXED_CLOCK.isoformat(),
+    }
+    if target_candidate_id is not None:
+        entry["target_candidate_id"] = str(target_candidate_id)
+    return entry
+
+
+def _orphan_candidate_ids(runtime: IngressRuntime) -> set[UUID]:
+    orphans: set[UUID] = set()
+    for rec in runtime.idempotency_store.list_in_progress():
+        if rec.candidate_id:
+            orphans.add(UUID(rec.candidate_id))
+    return orphans
+
+
+def _mark_candidate_suspected_duplicate(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    dedup_eval: Any,
+) -> None:
+    got = runtime.candidate_store.get(candidate_id)
+    if not got.ok or got.candidate is None or got.meta is None:
+        return
+    dedup = {
+        "status": "suspected_duplicate",
+        "pending_resolution": True,
+        "matches": dedup_matches_to_json(dedup_eval.matches),
+        "detected_at": _FIXED_CLOCK.isoformat(),
+        "audit": [],
+    }
+    updated = got.candidate.model_copy(
+        update={"extensions": {**got.candidate.extensions, "dedup": dedup}}
+    )
+    runtime.candidate_store.replace(updated, expected_store_revision=got.meta.store_revision)
+
+
+def link_candidate_dedup(
+    runtime: IngressRuntime,
+    source_candidate_id: UUID,
+    target_candidate_id: UUID,
+    *,
+    actor_id: str,
+    reason: str,
+) -> Dict[str, Any]:
+    """Record recruiter link decision (no data merge)."""
+    if source_candidate_id == target_candidate_id:
+        raise InvalidDedupGovernanceError("cannot link candidate to itself")
+    reason_s = str(reason or "").strip()
+    if not reason_s:
+        raise InvalidDedupGovernanceError("reason is required")
+    actor_s = str(actor_id or "").strip()
+    if not actor_s:
+        raise InvalidDedupGovernanceError("actor_id is required")
+    got_t = runtime.candidate_store.get(target_candidate_id)
+    if not got_t.ok or got_t.candidate is None:
+        raise CandidateNotFoundError(f"candidate not found: {target_candidate_id!s}")
+    got_s = runtime.candidate_store.get(source_candidate_id)
+    if not got_s.ok or got_s.candidate is None or got_s.meta is None:
+        raise CandidateNotFoundError(f"candidate not found: {source_candidate_id!s}")
+    prior = dict((got_s.candidate.extensions or {}).get("dedup") or {})
+    audit = list(prior.get("audit") or [])
+    audit.append(
+        _dedup_audit_entry(
+            action="link",
+            actor_id=actor_s,
+            reason=reason_s,
+            target_candidate_id=target_candidate_id,
+        )
+    )
+    dedup = {
+        **prior,
+        "status": "linked",
+        "pending_resolution": False,
+        "linked_to_candidate_id": str(target_candidate_id),
+        "matches": prior.get("matches") or [],
+        "audit": audit,
+    }
+    updated = got_s.candidate.model_copy(
+        update={"extensions": {**got_s.candidate.extensions, "dedup": dedup}}
+    )
+    runtime.candidate_store.replace(updated, expected_store_revision=got_s.meta.store_revision)
+    return governance_flags_from_candidate(updated)
+
+
+def get_candidate_view_for_runtime(runtime: IngressRuntime, candidate_id: UUID) -> Dict[str, Any]:
+    orphan_ids = _orphan_candidate_ids(runtime)
+    return _projection_candidate_view(
+        runtime,
+        candidate_id,
+        orphan_ingress=candidate_id in orphan_ids,
+    )
+
+
+def keep_separate_candidate_dedup(
+    runtime: IngressRuntime,
+    candidate_id: UUID,
+    *,
+    actor_id: str,
+    reason: str,
+) -> Dict[str, Any]:
+    """Record recruiter keep-separate decision."""
+    reason_s = str(reason or "").strip()
+    if not reason_s:
+        raise InvalidDedupGovernanceError("reason is required")
+    actor_s = str(actor_id or "").strip()
+    if not actor_s:
+        raise InvalidDedupGovernanceError("actor_id is required")
+    got = runtime.candidate_store.get(candidate_id)
+    if not got.ok or got.candidate is None or got.meta is None:
+        raise CandidateNotFoundError(f"candidate not found: {candidate_id!s}")
+    prior = dict((got.candidate.extensions or {}).get("dedup") or {})
+    audit = list(prior.get("audit") or [])
+    audit.append(
+        _dedup_audit_entry(action="keep_separate", actor_id=actor_s, reason=reason_s)
+    )
+    dedup = {
+        **prior,
+        "status": "keep_separate",
+        "pending_resolution": False,
+        "audit": audit,
+    }
+    updated = got.candidate.model_copy(
+        update={"extensions": {**got.candidate.extensions, "dedup": dedup}}
+    )
+    runtime.candidate_store.replace(updated, expected_store_revision=got.meta.store_revision)
+    return governance_flags_from_candidate(updated)
 
 
 def clear_organization_context(runtime: IngressRuntime) -> ScoringContext:
@@ -881,6 +1049,7 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     from .projection import load_candidate_and_snapshot_for_read
 
     store = runtime.bundle.store
+    orphan_ids = _orphan_candidate_ids(runtime)
     items: List[Dict[str, Any]] = []
     for state_id in store.list_all_state_ids():
         got = store.get(state_id)
@@ -891,7 +1060,11 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
             if cid is None:
                 continue
             candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, cid)
-            items.append(build_candidate_list_item(snapshot, candidate=candidate))
+            row = build_candidate_list_item(snapshot, candidate=candidate)
+            row["governance_flags"] = governance_flags_from_candidate(
+                candidate, orphan_ingress=cid in orphan_ids
+            )
+            items.append(row)
         except ValueError:
             continue
     def _score_sort_key(row: Dict[str, Any]) -> tuple:
