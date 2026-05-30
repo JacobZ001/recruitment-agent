@@ -1,8 +1,9 @@
 # BlueOcean Recruitment Agent — Architecture Debt Registry
 
-Purpose: track deferred architecture improvements, scaling risks, and engineering rationale so we don't lose critical future considerations. This project prioritizes **deterministic orchestration** and **verifiable behavior** over “smart prompts”.
+Purpose: track active deferred architecture improvements, scaling risks, and engineering rationale so we don't lose critical future considerations, while keeping a lightweight summary index for resolved/superseded debt IDs. This project prioritizes **deterministic orchestration** and **verifiable behavior** over “smart prompts”.
 
-- **Last full registry sweep**: 2026-05-27
+- **Last full registry sweep**: 2026-05-30
+- **Resolved/Superseded archive**: `docs/architecture/tech_debt/resolved.md`
 
 ## Debt lifecycle
 
@@ -18,7 +19,8 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - The registry is grouped by primary scope; each scope section is separated with `---` for fast planning sweeps.
 - `Last reviewed` means the latest planning-triage review date for that entry, not just the last edit date.
 - A full registry sweep updates the file-level `Last full registry sweep` date and should update each explicitly reviewed entry's `Last reviewed` date.
-- `PLAN.md`, `FEEDBACK.md`, and debt-driven items in `docs/architecture/ROADMAP.md` should reference debt items by `Debt ID`, not only by title.
+- `PLAN.md`, `FEEDBACK.md`, and debt-driven items in `docs/architecture/ROADMAP.md` should reference debt items by `Debt ID + title`.
+- `RESOLVED` / `SUPERSEDED` entries keep summary stubs (title + status + revisit trigger) in this file; full historical rationale/details live in `docs/architecture/tech_debt/resolved.md`.
 
 ## Registry entry format
 
@@ -396,31 +398,6 @@ Purpose: track deferred architecture improvements, scaling risks, and engineerin
 - **Recommended future direction**: Enforce timestamp updates in a single service-layer write path (repository pattern / unit-of-work) with tests and audit logging.
 
 
-### TD-ORCHESTRATOR-006 `ranking_completed` event (deprecated)
-
-Summary (v2 cleanup):
-
-- **Deprecated**: was used as an intermediate orchestration event on the bus.
-- **Replaced by**: direct planner decision (same ingest) for clarity and determinism.
-- **Removal**: enum / timeline skip logic to be fully removed in v2 once replay fixtures allow.
-
-- **Status**: SUPERSEDED (envelope type retained for schema/replay of old recordings only)
-- **Revisit when**: v2 removal of `EventType.RANKING_COMPLETED` and scrub of historical tapes
-- **Introduced in**: 2026-05-14
-- **Last reviewed**: 2026-05-26
-- **Current decision**: Ranking is a **direct planner decision** chained in the same ingest as ``light_scoring_completed`` / ``deep_scoring_completed`` via ``OrchestrationPlan.secondary_proposed_transition`` (validated and committed immediately after the primary transition). The orchestrator **does not** publish ``ranking_completed``. API ingress allowlists no longer include it; inspection timelines **skip** runs whose sole ingest was ``ranking_completed`` so primary lines read ``light_scoring_completed`` → ``questionnaire_pending`` (etc.) without an intermediate envelope row.
-- **Rationale**: ``ranking_completed`` was an intermediate orchestration event; in-process chaining reduces bus noise and keeps replay deterministic with fewer subscriber runs for the same pipeline outcome.
-- **Future impact**: Old event catalogs or tests that published ``ranking_completed`` explicitly must migrate; enum value remains until v2.
-- **Priority**: Low
-- **Recommended future direction**: Remove ``ranking_completed`` from ``EventType`` and delete timeline skip logic once no replay fixtures depend on it.
-
-**Ranking decision visibility**
-
-- ``ranking_completed`` was removed for clarity (no duplicate ingest for the same planner outcome).
-- Ranking decisions are **implicit** in the planner (chained secondary transition on the same envelope as ``light_scoring_completed`` / ``deep_scoring_completed``).
-- For explainability, **persist and surface** ``ranking.branch`` and ``ranking.stage`` on transition records and snapshot ``OrchestrationState.extensions`` (same merge pattern as ``inactive.*``); timelines and inspection read these keys only.
-
-
 ### TD-ORCHESTRATOR-011 Canonical hard-filter stage is not restored on recruiter ingress path
 - **Status**: OPEN
 - **Revisit when**: When `Upcoming (Action Queue)` schedules `Deterministic hard-filter restoration`, or earlier if the canonical recruiter ingress path changes again
@@ -498,17 +475,6 @@ Summary (v2 cleanup):
 - **Priority**: Medium
 - **Recommended future direction**: Define an explicit local migration stance: either (a) codified disposable-dev SQLite with automated reset tooling, or (b) a lightweight deterministic migration/upcaster path with version checks and failure guidance. Do not revive runtime compatibility shims as a substitute for a real migration strategy.
 
-
-### TD-PERSISTENCE-002 SQLite replace uses DELETE + INSERT instead of UPSERT
-- **Status**: RESOLVED
-- **Revisit when**: N/A (re-open only if a narrower child-table write-path debt is carved out later)
-- **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: The central `orchestration_state` write path in `runtime/persistence/sqlite_state_store.py` now uses `INSERT ... ON CONFLICT(state_id) DO UPDATE` for snapshot replacement. The original debt row described a full delete-and-reinsert strategy for the primary state row, which is no longer accurate.
-- **Rationale**: The old debt was specific to the primary SQLite replace path. That implementation detail has now been corrected without reopening broader persistence architecture questions.
-- **Future impact**: None for the original claim. If later optimization work is needed for child tables or audit/index write churn, record that as a narrower new debt instead of keeping this resolved row open.
-- **Priority**: Low
-- **Recommended future direction**: Keep this row as historical closure. Do not re-open unless a new, more precise SQLite write-path debt is identified.
 
 ### TD-PERSISTENCE-003 Transition audit serialization contract
 - **Status**: OPEN
@@ -750,18 +716,6 @@ Summary (v2 cleanup):
 - **Recommended future direction**: Introduce **explicit runtime scopes** (factory or context-owned `VerticalSliceApiRuntime` instances) only when product requirements demand isolation—preserve deterministic wiring and harness-friendly construction; avoid embedding orchestration policy in the API.
 
 
-### TD-API-002 Fixed aggregate identity (single candidate-scoped orchestration instance)
-- **Status**: SUPERSEDED
-- **Revisit when**: N/A (see successor entries below)
-- **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: **Superseded** by Stage B multi-candidate wiring: ``POST /events`` and read APIs accept arbitrary ``candidate_id`` values; orchestration snapshots are created on **ingress (write path)** and resolved via the store’s ``get_for_candidate`` index. The bootstrap **default demo candidate** remains the wired reference subject for ``/demo/*`` and timeline (see **Timeline is global, not candidate-scoped**).
-- **Rationale**: Original entry tracked pre–Stage B single-aggregate HTTP rejection; behavior has moved forward without closing all related debt (mapping duplication, global timeline).
-- **Future impact**: None as a standalone gate; follow **Candidate → state_id mapping (single source of truth)** and timeline entries instead.
-- **Priority**: Low
-- **Recommended future direction**: Treat this registry row as historical; do not re-open unless aggregate lifecycle requirements regress.
-
-
 ### TD-API-003 Candidate → state_id mapping (single source of truth)
 - **Status**: OPEN
 - **Revisit when**: Before changing namespace, mapping format, or orchestration id versioning (including replay fixture regeneration)
@@ -839,44 +793,6 @@ Summary (v2 cleanup):
 - **Recommended future direction**: Expand ``ACTION_DESCRIPTORS`` (or a dedicated labels module) for all recruiter ``event_type`` values exposed by the registry; alternatively move label responsibility entirely to the **frontend** and return ``event_type`` only from the API.
 
 
-### TD-API-008 Action availability ignores transition guards
-- **Status**: RESOLVED
-- **Revisit when**: Re-open only if recruiter surfaces need to expose richer guard diagnostics than the current available/unavailable contract
-- **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: Recruiter action availability now evaluates the canonical transition registry plus optional guard conditions through ``TransitionEngine`` validation. ``GET /candidates``, ``GET /candidate/{candidate_id}``, and ``POST /candidates/{candidate_id}/action`` all use the same action projection path and the same snapshot-derived extensions when checking availability.
-- **Rationale**: `R-006` made recruiter action availability authoritative enough for recruiter-facing surfaces without introducing a duplicate phase→action policy table.
-- **Future impact** / **risks**:
-  - The default registry in the reference slice still has no production guard catalog; guard-aware behavior is now supported and regression-tested, but richer runtime guard coverage remains a separate policy concern.
-- **Priority**: High
-- **Recommended future direction**: Keep action projection routed through transition-engine validation. If product surfaces need to explain *why* an action is blocked, add structured guard-diagnostic metadata without relaxing the single source of truth.
-
-
-### TD-API-009 Untyped recruiter action payloads
-- **Status**: RESOLVED
-- **Revisit when**: Re-open only when a recruiter action needs richer typed fields beyond the current governance payload contract
-- **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: ``POST /candidates/{candidate_id}/action`` now validates payloads through a deterministic recruiter-action payload registry keyed by recruiter ``event_type`` before publish. The current action set still shares the bounded governance payload contract, but unknown or malformed fields now fail fast with a stable ``invalid_candidate_action_payload`` error.
-- **Rationale**: `R-006` hardened the recruiter action boundary without widening scope into new action-specific business fields.
-- **Future impact** / **risks**:
-  - The registry currently maps the bounded recruiter action set to the shared governance payload model; future richer actions should add narrower typed models rather than bypass the registry.
-- **Priority**: Medium
-- **Recommended future direction**: Extend the existing registry one action at a time when interview scheduling, offer authoring, or audit templates require additional typed fields.
-
-
-### TD-API-010 Recruiter action list ordering and grouping (UI)
-- **Status**: RESOLVED
-- **Revisit when**: Re-open only if recruiter product surfaces need more presentation metadata than group/order
-- **Introduced in**: 2026-05-22
-- **Last reviewed**: 2026-05-26
-- **Current decision**: Recruiter action projections now include deterministic ``group`` and ``order`` metadata and are sorted by policy-shaped order rather than raw alphabetical ``event_type``. The metadata is carried on recruiter-facing API surfaces without introducing a second authoritative phase-action map.
-- **Rationale**: `R-006` needed stable ordering/grouping for recruiter clients while preserving transition-registry truth as the availability source.
-- **Future impact**: Minimal for the original debt. If future UI needs richer sections, icons, or role-aware copy, add them as metadata on the same action catalog rather than rebuilding availability logic elsewhere.
-- **Priority**: Low
-- **Recommended future direction**: Keep catalog metadata bounded to presentation concerns and continue deriving actual availability from registry validation.
-
-
 ### TD-API-011 HTTP ingress idempotency and replay-safe retries
 - **Status**: OPEN
 - **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, and before any external integrator/webhook ingress depends on retry-safe semantics
@@ -899,18 +815,6 @@ Summary (v2 cleanup):
 - **Future impact**: Production-shaped ingress may inherit **demo/script assumptions** (fixed clock semantics, bootstrap payload markers, bootstrap actor identity, sequence-derived event ids) instead of explicit runtime provenance and request semantics. This blurs the line between demo wiring and public ingress contracts, and makes API evolution harder once idempotency, auth, provenance, or multiple ingress producers matter.
 - **Priority**: Medium
 - **Recommended future direction**: Extract a **runtime-grade ingress envelope factory** that accepts injected clock policy, request/source provenance, actor identity, correlation/request ids, and idempotency metadata without embedding demo-only defaults. Keep bootstrap/demo flows as thin wrappers around that factory rather than the other way around. Preserve the current rule that HTTP routes stay thin and do not own workflow policy; only envelope construction semantics should graduate.
-
-
-### TD-API-013 Candidate view ``next_actions`` (static)
-- **Status**: RESOLVED
-- **Revisit when**: Re-open only if the public candidate detail surface later removes ``next_actions`` entirely in favor of richer action objects
-- **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: ``build_candidate_view`` now derives both ``available_actions`` and compatibility ``next_actions`` from the same canonical recruiter action projection used by the candidate list and recruiter action POST boundary. ``next_actions`` remains a string list for compatibility, but it is no longer a static phase-hint map.
-- **Rationale**: `R-006` removed the last recruiter-detail action drift without forcing an immediate breaking response-shape cutover.
-- **Future impact**: The original static-drift risk is removed. Remaining product decisions are about how long to keep the compatibility string list alongside structured action items.
-- **Priority**: Low
-- **Recommended future direction**: Keep ``next_actions`` as a compatibility projection only; prefer structured ``available_actions`` for any new recruiter client behavior.
 
 
 ### TD-API-014 Candidate view explanation vs snapshot boundary
@@ -1149,3 +1053,37 @@ Summary (v2 cleanup):
   - Require 2–3 independent call sites with stable semantics + harness coverage before extracting a shared abstraction.
   - Prefer composition (small shared “building blocks”) over inheritance-heavy global base classes.
   - Keep shared modules thin, versioned, and backward compatible; explicitly document invariants and migration paths.
+
+---
+
+## Resolved/Superseded Summary Index
+
+Use this index for fast sweep and ID allocation. When a summary entry's `Revisit when` trigger is met, read full historical detail in `docs/architecture/tech_debt/resolved.md`.
+
+### TD-ORCHESTRATOR-006 `ranking_completed` event (deprecated)
+- **Status**: SUPERSEDED
+- **Revisit when**: v2 removal of `EventType.RANKING_COMPLETED` and scrub of historical tapes
+
+### TD-PERSISTENCE-002 SQLite replace uses DELETE + INSERT instead of UPSERT
+- **Status**: RESOLVED
+- **Revisit when**: N/A (re-open only if a narrower child-table write-path debt is carved out later)
+
+### TD-API-002 Fixed aggregate identity (single candidate-scoped orchestration instance)
+- **Status**: SUPERSEDED
+- **Revisit when**: N/A (see successor entries below)
+
+### TD-API-008 Action availability ignores transition guards
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if recruiter surfaces need to expose richer guard diagnostics than the current available/unavailable contract
+
+### TD-API-009 Untyped recruiter action payloads
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only when a recruiter action needs richer typed fields beyond the current governance payload contract
+
+### TD-API-010 Recruiter action list ordering and grouping (UI)
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if recruiter product surfaces need more presentation metadata than group/order
+
+### TD-API-013 Candidate view ``next_actions`` (static)
+- **Status**: RESOLVED
+- **Revisit when**: Re-open only if the public candidate detail surface later removes ``next_actions`` entirely in favor of richer action objects

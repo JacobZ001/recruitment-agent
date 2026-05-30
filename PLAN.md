@@ -1,103 +1,101 @@
-# R-011.2 (Corrective Minor) — No-Tail Cutover Completion
+# R-012 (Major) — Real Ingress Baseline for Cognition Quality
 
 ## Round Goal
 
-在 `R-011` / `R-011.1` 基线上完成“无尾巴”收口：删除本轮指定 shim 与 legacy schema 字段，清理运行时 legacy 读取；同时保持 seed candidate 测试链路可用，不提前触发 full demo phase-out。
+建立“真实输入优先”的评估基线：以真实 PDF ingress 与真实 scoring-context ingress 驱动候选人评估，替代测试数据/fixture 主导路径，用于后续系统化评估 cognition layer 质量。
 
 ## Round Type
 
-- `corrective-minor`
-- Parent major: `R-011`
+- `major`
+
+## PM-Frozen Scope Decisions
+
+- `TD-ORCHESTRATOR-011` hard-filter restoration：**无限期延期，不分配 round**。
+- R-012 聚焦：**真实 ingress 基线**（而非新增 hard-filter 功能）。
+- 本轮不做 full demo phase-out（`R-019` 再做）。
 
 ## Scope In
 
-1. **删除 `candidate_aggregate.py`（强制）**
-   - 吸收必要逻辑到稳定归属模块（`bootstrap` / `use_cases` / `projection` / `orchestrator` / runtime）。
-   - 验收：`modules/recruitment/candidate_aggregate.py` 文件本体删除（`git` 为 `D`），且无替代 shim 文件。
+1. **真实 PDF ingress 主路径化**
+  - 确保候选人评估主路径可由真实 PDF 文件输入驱动（非 fixture payload 注入）。
+  - 评估链路中必须保留 Candidate canonical 写入与可审计输出。
+2. **真实 scoring-context ingress 主路径化**
+  - 使用真实 context authoring/refresh ingress（组织/岗位/招聘者文本）生成并持久化 active scoring context。
+  - 评分阶段消费持久化 context（含版本/陈旧状态语义），不依赖 demo 默认值兜底。
+3. **测试数据主导路径降级为辅助**
+  - 保留必要测试工具与 seed 能力，但不再作为“默认评估质量验证路径”。
+  - 清理/隔离会影响真实质量评估结论的 demo-first 注入行为（在本轮范围内做最小必要收口）。
+4. **质量评估基线与证据输出**
+  - 增加可复现实验入口（脚本/命令/最小文档）用于跑真实 ingress 样本并产出可比对结果。
+  - 输出至少包含：candidate identity/profile 摘要、overall score/type、关键解释信号、context version/stale 指示。
+5. **回归与稳定性验证**
+  - 保证现有 recruiter list/detail/action surface 契约不回退。
+  - 保证现有 deterministic orchestration 边界不被 LLM 接管（LLM 只做理解/抽取/生成）。
 
-2. **删除 `runtime/demo_candidate_fixture.py`（强制）**
-   - 验收：文件本体删除（`git` 为 `D`），且无等价运行时 fallback 新路径。
+## Scope Out
 
-3. **删除 `OrchestrationState` legacy 字段（强制）**
-   - 删除字段：`links`、`ingress_profile`、`evaluation`。
-   - 删除/重挂相关承载定义（最小必要范围），禁止继续把上述字段保留为 schema contract。
-
-4. **清理所有 legacy 读引用（强制）**
-   - 清理对 `state.links` / `state.ingress_profile` / `state.evaluation` 的运行时读取（`orchestrator/*`、`runtime/*`、`modules/*`、`tests/*`）。
-
-5. **最小必要校准（按需）**
-   - 仅处理删除导致的导入断裂与测试修复，禁止扩 scope。
-
-6. **验证矩阵（balanced）**
-   - `python -m pytest -q`
-   - `cd frontend && npm test`
-   - `cd frontend && npm run build`
-   - list/detail/action smoke
-
-## Scope Out (hard)
-
-- 不进入 `R-012` hard-filter capability。
-- 不在本轮删除 `VERTICAL_SLICE_DEFAULT_CANDIDATE_ID` / default candidate（延期到 `R-019`）。
-- 保留 seed candidate 测试链路（`scripts/seed_testing_candidate_from_pdf.py` + `TESTING_DESKTOP_CANDIDATE_ID`）。
-- 不新增任何 contract-changing capability。
+- 不实现 hard-filter capability（已延期）。
+- 不做 dedup merge policy（`R-013`）。
+- 不做 full demo phase-out（`R-019`）。
+- 不进行 state-machine 契约级重构。
 
 ## Constraints / Architecture Boundaries
 
-- Builder 只能决定 `how`，不得增加 `what`。
-- 本轮目标是“硬删收口”，不是“改名保留兼容层”。
-- 若受阻，必须 `blocked` 升级并给出最小 unblock path。
+- 程序控制流程；LLM 不控制状态迁移、路由、排序或重试策略。
+- 所有质量评估结果必须可复现（同输入、同配置、同输出语义）。
+- Builder 只能决定 `how`，不能改变已冻结 `what`。
 
 ## Roadmap Alignment (Planning Phase)
 
-- Capability area: `Deterministic Foundation`
-- Selected action: `R-011.2 — Residual shim + legacy schema tail removal`
-- Why now: `R-011.1` 后仍有 shim 与 legacy schema/inspection 读尾巴；先收口再进入 `R-012`。
+- Selected action: `R-012 — Real ingress baseline for cognition quality evaluation`
+- Capability advance:
+  - `Controlled Cognition`
+  - `Recruiter Workflow Operation`
+  - `Operational Readiness`
 
 ## Debt Triage (Planning Phase)
 
 - **Selected for this round**
-  - `TD-PERSISTENCE-008 + Candidate/snapshot write ownership still split across transitional helpers`
-    - 实施：删除 `candidate_aggregate.py`，逻辑回归稳定 owner。
-  - `TD-DX-002 + Demo-era fixture/profile assumptions still leak into runtime path`
-    - 实施：删除 `runtime/demo_candidate_fixture.py`，但不提前执行 full demo phase-out。
-
+  - `TD-SKILLS-001 + CV ingestion evolution (MVP cv_submitted)`
+    - Handling: 强化真实 PDF ingress 作为评估主路径，避免测试注入路径主导质量判断。
+  - `TD-PERSISTENCE-009 + Single active scoring_context store (not requisition-scoped yet)`
+    - Handling: 明确真实 scoring-context ingress -> 持久化 active context -> 评分消费链路的一致性与可见性。
+  - `TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`
+    - Handling: 在本轮范围内做最小必要降耦，避免质量评估链路隐式依赖 bootstrap/demo 形态。
 - **Explicitly deferred**
-  - `TD-ORCHESTRATOR-011 + Hard filter still represented as scoring preference`（`R-012`）
-  - `TD-API-012 + Demo bootstrap paths still mixed into API surface`（`R-019`）
-  - `TD-INSPECTION-003 + Timeline is global, not candidate-scoped`（`R-019`）
+  - `TD-ORCHESTRATOR-011 + Canonical hard-filter stage is not restored on recruiter ingress path`（无限期延期）
+  - `TD-PERSISTENCE-012 + Candidate deduplication and merge policy`（`R-013`）
 
 ## Ordered Execution Steps
 
-1. 盘点并吸收 `candidate_aggregate.py` 的 API/调用点。
-2. 删除 `modules/recruitment/candidate_aggregate.py` 并修复引用。
-3. 删除 `runtime/demo_candidate_fixture.py` 并修复 shim 相关测试/导入。
-4. 在 `schemas/state_schema.py` 删除 `links` / `ingress_profile` / `evaluation` 字段。
-5. 清理仓库内对上述 legacy 字段的运行时读取引用。
-6. 最小必要更新受影响测试（不改业务语义）。
-7. 运行验证矩阵并记录结果。
-8. 覆写 `FEEDBACK.md` 并标记 `done/partial/blocked`。
+1. 盘点当前 `cv_submitted` 与 scoring-context authoring/refresh 主链路，标记 demo/test 注入点。
+2. 在 runtime/orchestrator/use_cases 层完成“真实 ingress 优先”最小改造：真实 PDF + 真实 context ingress 成为标准验证路径。
+3. 限定 demo/test 注入行为作用域（测试/演示专用），防止污染真实质量评估结果。
+4. 校准 Candidate/Projection/API 输出，确保质量评估关键信号可观察且契约不回退。
+5. 提供可复现实验入口（脚本/命令）并给出最小运行说明。
+6. 增补/更新回归测试（ingress 链路、context 消费、API 可见面稳定性）。
+7. 运行验证矩阵并覆写 `FEEDBACK.md`。
 
 ## Acceptance Criteria
 
-- [ ] `modules/recruitment/candidate_aggregate.py` 已删除（`git` 为 `D`），且无替代 shim。
-- [ ] `runtime/demo_candidate_fixture.py` 已删除（`git` 为 `D`），且无等价 fallback 新路径。
-- [ ] `schemas/state_schema.py` 不再包含 `links` / `ingress_profile` / `evaluation` 字段。
-- [ ] 全仓运行时代码不存在对 `state.links` / `state.ingress_profile` / `state.evaluation` 的读取引用。
-- [ ] 未删除 `VERTICAL_SLICE_DEFAULT_CANDIDATE_ID` / default candidate 路径（该项明确延期 `R-019`）。
-- [ ] `scripts/seed_testing_candidate_from_pdf.py` 默认 seed candidate 测试链路保持可用。
-- [ ] `python -m pytest -q` 通过。
-- [ ] `frontend` 的 `npm test` 与 `npm run build` 通过。
-- [ ] `FEEDBACK.md` 完整记录步骤映射、文件清单、测试结果、风险/偏差与下一轮建议。
+- 真实 PDF ingress 可独立驱动候选人评估全链路（非 fixture 主导）。
+- 真实 scoring-context ingress 可生成并持久化 active context，评分链路消费该 context。
+- 评估输出包含可审计关键字段（score/type、context version/stale、解释信号）。
+- demo/test 注入路径被限定为辅助用途，不再作为质量评估默认路径。
+- recruiter list/detail/action API surface 无契约回退。
+- `python -m pytest -q` 通过。
+- `frontend` 的 `npm test` 与 `npm run build` 通过。
+- `FEEDBACK.md` 完整记录步骤映射、测试结果、风险/偏差与下一轮建议。
 
 ## Builder Feedback Reminder
 
 `FEEDBACK.md` 必须覆盖：
 
 - Round ID + status (`done` / `partial` / `blocked`)
-- Ordered Steps 逐项完成映射
-- 完整文件变更清单（`A` / `M` / `D`）
-- 全部测试命令与结果
-- 风险、偏差、阻塞
-- Debt 处理结果（按 `Debt ID + title`）
-- 下一轮建议（短句）
+- PLAN step-by-step completion mapping
+- Full file change summary (`A` / `M` / `D`)
+- Test commands + results
+- Risks / deviations / blockers
+- Debt handling result（`Debt ID + title`）
+- Suggested next-round focus
 
