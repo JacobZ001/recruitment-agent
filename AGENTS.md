@@ -80,7 +80,7 @@ No LLM calls allowed.
 
 Examples:
 
-- hard filter
+- hard filter (deferred)
 - ranking
 - deduplication
 - retry logic
@@ -193,22 +193,6 @@ Required validation layers:
 
 ---
 
-# Engineering Workflow
-
-Preferred workflow:
-
-1. Define spec
-2. Define schema
-3. Define interface
-4. Implement deterministic logic
-5. Add tests
-6. Add LLM cognition
-7. Validate behavior
-
-Do NOT start with autonomous agent behavior.
-
----
-
 # Shared Engineering Constraints
 
 These rules apply to both Architect Agent and Builder Agent:
@@ -275,10 +259,7 @@ Each round follows this sequence:
 
 1. Architect Agent proactively switches to Plan mode for round design and proposes a light high-level structured plan for PM review.
 2. Architect Agent reviews `docs/architecture/ROADMAP.md` during planning.
-  - `Current Operating Posture` is reviewed every round, but updated only when repo posture materially changes; keep it to a maximum of three sentences.
-  - `Capability Roadmap Layer` is updated when capability reality or stage status changes.
-  - `Upcoming (Action Queue)` is refreshed from capability gaps plus debt priorities.
-  - Architect proposes the best-fit upcoming action(s) for the round rather than mechanically loading the next listed item.
+  - Follow `Roadmap discipline` as the single normative rule source for posture/capability/upcoming reconciliation.
 3. Architect Agent performs a full `docs/architecture/tech_debt.md` sweep in planning phase and proposes debt handling for this round (`close` / `partial` / `defer` with rationale).
   - Debt triage, ID allocation, status correction, and archive handling must follow `Debt registry discipline` (single rule source).
   - Architect updates the file-level `Last full registry sweep` date when a full sweep is performed and updates per-entry `Last reviewed` for explicitly triaged items.
@@ -402,7 +383,10 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 
 - `docs/architecture/ROADMAP.md` is the canonical project roadmap.
 - `Project Vision Layer` is static background and should change only when business direction or architectural thesis changes.
-- `Current Operating Posture` is reviewed every planning round, but edited only when runtime posture or primary delivery focus materially changes; keep it under three sentences.
+- `Current Operating Posture` is reviewed every planning round, but edited only when runtime posture or primary delivery focus materially changes.
+- `Current Operating Posture` write format is fixed to **two sentences**:
+  - sentence 1 = **Macro-as-is** (stable current operating baseline; no future queue/debt detail)
+  - sentence 2 = **Round-as-is** (latest completed round's realized posture change only)
 - `Capability Roadmap Layer` tracks major capability areas and status, not round-by-round implementation detail.
 - `Upcoming (Action Queue)` is the near-term queue derived from capability gaps plus debt priorities; it is not a second independent roadmap.
 - Keep round-scoped actions in the same `Upcoming (Action Queue)` list; do **not** create a separate `Round-scoped` subsection in `ROADMAP.md`.

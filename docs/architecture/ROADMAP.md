@@ -12,7 +12,8 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 
 ## Current Operating Posture
 
-The current repo is a deterministic, single-process proving runtime with SQLite-backed state, multi-candidate routing, and a recruiter SPA on list/detail/action APIs. **R-012** delivered real ingress on the List page: scoring-context Confirm (upsert/clear + auto refresh), processed-context visualization, and bounded idempotency on ``POST /candidates/cv/pdf``. Orphan incomplete candidates after failed create+upload remain accepted until **R-013**. Hard-filter restoration (`TD-ORCHESTRATOR-011`) is deferred without round assignment. The system is not yet a multi-tenant product runtime, a durable event product, or production-grade infrastructure.
+The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs for controlled local operation.  
+As of **R-012**, the List page establishes a real-ingress baseline via scoring-context Confirm (upsert/clear + auto refresh), processed-context visualization, and bounded idempotency on `POST /candidates/cv/pdf`.
 
 ## Capability Roadmap Layer
 
