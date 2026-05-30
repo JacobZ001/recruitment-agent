@@ -18,8 +18,17 @@ Use this rule in chats named **`Architect Agent`**. Enable via **Cursor Settings
 ## PLAN freeze
 
 - Add **`PM Approved: YYYY-MM-DD`** (or `Pending PM approval`) immediately after the round title once PM confirms scope.
-- Use **`AskQuestion`** before freezing when scope/contract forks exist.
 - Apply **round size heuristics** (see `AGENTS.md` → `Round sizing discipline`): split if PLAN is oversized.
+
+## PM decision collection (required)
+
+Whenever you need PM confirmation or a choice — **planning, closeout, risk review, scope clarification, routing, governance** — use this **single-reply** flow:
+
+1. **Explain** — context, options, consequences (plain language).
+2. **Recommend** — your preferred option + brief rationale.
+3. **`AskQuestion`** — structured multiple-choice to capture PM decision (prefer over open-ended “reply in chat”).
+
+Do not defer `AskQuestion` to a later turn when choices are already known. Full norm: `AGENTS.md` → **PM decision collection discipline**.
 
 ## Round closeout checklist (required after `FEEDBACK.md` is `done` / `partial`)
 

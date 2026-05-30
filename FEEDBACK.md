@@ -97,5 +97,6 @@ cd frontend && npm run build
 
 ## Suggested Next Round
 
-- **Routing (Architect → PM):** Recommend `advance-major` if List ingress + version/stale semantics meet acceptance; else `corrective-minor` (R-014.1) for API `materialization_blockers` contract tests or ingress edge cases.
-- **Product follow-up:** R-015 (`source_ref` lineage / typed refs), R-024 (recruiter-answers UI).
+- **PM routing (confirmed):** **`corrective-minor`** → **R-014.1** (List scoring-context ingress UX).
+- **PM UAT specifics (2026-05-30, stub):** materialization blocker readability; Cancel in editing; per-dimension inline status; label copy; Job PDF Confirm missing (Confirm only on job text row in `editing`); sidebar drawer + readiness checklist above Create PDF — frozen in root `PLAN.md`.
+- **After R-014.1:** **`advance-major`** → **R-015** unless further corrective needed.

@@ -230,6 +230,7 @@ These rules apply to both Architect Agent and Builder Agent:
 - Must not smuggle speculative scope, unapproved contract changes, or autonomous architecture rewrites into `PLAN.md`.
 - Must treat `docs/architecture/ROADMAP.md`, `docs/architecture/tech_debt.md` (canonical debt sweep/index), `docs/architecture/tech_debt/resolved.md` (resolved/superseded detail archive), and `FEEDBACK.md` as the canonical planning inputs for round design.
 - Should prefer approved cutovers that remove obsolete compatibility paths instead of preserving silent dual semantics.
+- When PM confirmation or a discrete choice is needed at **any** Architect phase (planning, closeout, risk review, scope clarification, routing, governance), follow **PM decision collection discipline** (single normative source below).
 
 ### Builder Agent (session name: `Builder Agent`)
 
@@ -269,7 +270,7 @@ Enable the matching rule in **Cursor Settings → Rules** at the start of each s
 Each round follows this sequence:
 
 1. Architect Agent performs round planning directly in root `PLAN.md` (default workflow; no Plan mode artifact required).
- - If there are meaningful scope/contract trade-offs, Architect must explicitly call `AskQuestion` to collect PM selection before freezing `PLAN.md`.
+   - If PM confirmation or a discrete choice is needed, follow **PM decision collection discipline** before freezing or changing scope.
 2. Architect Agent reviews `docs/architecture/ROADMAP.md` during planning.
   - Follow `Roadmap discipline` as the single normative rule source for posture/capability/upcoming reconciliation.
 3. Architect Agent performs a full `docs/architecture/tech_debt.md` sweep in planning phase and proposes debt handling for this round (`close` / `partial` / `defer` with rationale).
@@ -397,9 +398,26 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 
 - Default planning path: Architect writes/refines round scope directly in root `PLAN.md`, then waits for PM approval.
 - Architect must not start Builder implementation after PM approval; Architect only hands off by freezing `PLAN.md` and stopping.
-- When planning contains alternative scope/contract choices, Architect must use `AskQuestion` for PM choice capture before freezing `PLAN.md`.
+- When planning contains alternative scope/contract choices, Architect must follow **PM decision collection discipline** before freezing `PLAN.md`.
 - `PLAN.md` must contain only PM-selected options; do not leave Builder-facing optional scope branches.
 - If PM explicitly asks for a separate Plan mode artifact, follow `Plan mode artifact discipline`; otherwise do not create one.
+
+### PM decision collection discipline
+
+Architect Agent uses this whenever PM input is required — **not limited to planning-phase scope forks** (also closeout routing, risk review, acceptance trade-offs, governance choices, etc.).
+
+**Default single-reply flow (same message):**
+
+1. **Explain** — what is being decided, viable options, and consequences in plain language.
+2. **Recommend** — Architect’s preferred option with brief rationale.
+3. **`AskQuestion`** — structured multiple-choice (use `allow_multiple` when appropriate) to capture PM decision.
+
+**Rules:**
+
+- Prefer **`AskQuestion`** over open-ended “please reply in chat” when options can be stated as choices.
+- Do not split explain/recommend and defer `AskQuestion` to a follow-up when choices are already known, unless PM explicitly asked to discuss without choices first.
+- After PM answers, record frozen decisions in `PLAN.md` and/or other governance artifacts as applicable.
+- `PLAN.md` and Builder scope must reflect **PM-selected** options only.
 
 ### Roadmap discipline
 
