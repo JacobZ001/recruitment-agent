@@ -1,9 +1,15 @@
-import type { ScoringContextSummary } from '@/api/types'
+import type { ScoringContextResponse } from '@/api/types'
 import { NULL_DISPLAY, formatFieldLabel } from '@/lib/format'
 
 type ScoringContextPanelProps = {
-  sc: ScoringContextSummary | Record<string, unknown> | null | undefined
+  sc: ScoringContextResponse | Record<string, unknown> | null | undefined
   title?: string
+}
+
+function renderValue(value: unknown): string {
+  if (value == null || value === '') return NULL_DISPLAY
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
 }
 
 export function ScoringContextPanel({
@@ -18,26 +24,47 @@ export function ScoringContextPanel({
       </section>
     )
   }
-  const row = sc as Record<string, unknown>
-  const fields: { key: string; value: unknown }[] = [
-    { key: 'context_version', value: row.context_version },
-    { key: 'status', value: row.status },
-    { key: 'organization', value: row.organization },
-    { key: 'job_title', value: row.job_title },
-    { key: 'recruiter_actor_id', value: row.recruiter_actor_id },
+  const ctx = sc as ScoringContextResponse
+  const scalarFields: { key: keyof ScoringContextResponse; value: unknown }[] = [
+    { key: 'context_version', value: ctx.context_version },
+    { key: 'status', value: ctx.status },
+    { key: 'organization_authoring_text', value: ctx.organization_authoring_text },
+    { key: 'recruiter_actor_authoring_text', value: ctx.recruiter_actor_authoring_text },
+    { key: 'job_authoring_text', value: ctx.job_authoring_text },
+    { key: 'derived_l2_criteria', value: ctx.derived_l2_criteria },
+    { key: 'derived_l3_criteria', value: ctx.derived_l3_criteria },
+    { key: 'source_refs', value: ctx.source_refs },
+    { key: 'created_at', value: ctx.created_at },
+    { key: 'updated_at', value: ctx.updated_at },
+    { key: 'ready_at', value: ctx.ready_at },
+    { key: 'stale_at', value: ctx.stale_at },
+  ]
+  const objectFields: { key: string; value: unknown }[] = [
+    { key: 'organization_context', value: ctx.organization_context },
+    { key: 'recruiter_actor_context', value: ctx.recruiter_actor_context },
+    { key: 'job_context', value: ctx.job_context },
   ]
   return (
     <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      <p className="text-xs text-slate-500">Read-only active scoring context (list testing surface).</p>
-      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {fields.map(({ key, value }) => (
-          <div key={key} className="border-b border-slate-100 pb-3">
+      <dl className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {scalarFields.map(({ key, value }) => (
+          <div key={String(key)} className="border-b border-slate-100 pb-3">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {formatFieldLabel(String(key))}
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap font-mono text-xs text-slate-900">
+              {renderValue(value)}
+            </dd>
+          </div>
+        ))}
+        {objectFields.map(({ key, value }) => (
+          <div key={key} className="border-b border-slate-100 pb-3 lg:col-span-2">
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {formatFieldLabel(key)}
             </dt>
-            <dd className="mt-1 text-sm text-slate-900">
-              {value != null && value !== '' ? String(value) : NULL_DISPLAY}
+            <dd className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 font-mono text-xs text-slate-900">
+              {renderValue(value)}
             </dd>
           </div>
         ))}

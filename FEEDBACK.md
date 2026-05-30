@@ -1,83 +1,77 @@
-# FEEDBACK — R-011.2
+# FEEDBACK — R-012
 
 ## Round ID + Status
 
-- **Round:** R-011.2 (corrective minor, parent R-011)
+- **Round:** R-012 (major)
 - **Status:** `done`
 
 ## Step Completion Mapping
 
 | PLAN step | Status | Notes |
 |-----------|--------|-------|
-| 1. Inventory & absorb `candidate_aggregate.py` | done | Logic split: writes/dual-write → `use_cases.py` + `bootstrap.py`; snapshot finalize/ref → `projection.py` |
-| 2. Delete `candidate_aggregate.py` + fix refs | done | File deleted; all imports retargeted |
-| 3. Delete `runtime/demo_candidate_fixture.py` + fix tests | done | File deleted; boundary test updated; planner doc points to `modules.recruitment.fixtures` |
-| 4. Remove legacy `OrchestrationState` fields | done | Removed `links`, `ingress_profile`, `evaluation`; removed `StateLink` class |
-| 5. Clean legacy runtime reads | done | Planner, inspection explainer, tests updated; no `state.links` / `ingress_profile` / `evaluation` reads remain |
-| 6. Minimal test fixes | done | Persistence, ingestion, scoring, inspection tests adjusted |
-| 7. Verification matrix | done | See below |
-| 8. Overwrite FEEDBACK.md | done | This file |
+| 1. Inventory ingress call chains | done | Reused `submit_cv` / `submit_cv_pdf` / scoring-context author + refresh |
+| 2. `POST /candidates/cv/pdf` create+upload API | done | Server-assigned `candidate_id`; response includes full ingress fields |
+| 3. Atomic order ready → idempotency → write | done | Ready + replay/conflict before allocation; write via existing ingress |
+| 4. Idempotency (TD-API-011 bounded) | done | SQLite + in-memory store; 24h lazy purge; dev_reset clears table |
+| 5. Frontend PDF create button + idempotency UX | done | `CreateCandidatePdfUpload` with session key + retry/new session |
+| 6. Scoring context text + job PDF ingress UI | done | `ScoringContextIngress` component |
+| 7. Confirm → upsert/clear + auto refresh | done | Confirm triggers POST or DELETE then `POST /scoring-context/refresh` |
+| 8. DELETE clear routes (3) + use cases | done | Clears authoring + structured + derived; returns full response |
+| 9. Ready gating (backend + UI) | done | `ScoringContextStatus.READY` required; UI blocks upload when non-ready |
+| 10. Full GET field visualization | done | `ScoringContextPanel` renders all `ScoringContextResponse` fields |
+| 11. Regression tests | done | New API tests + existing suite green |
+| 12. Verification + FEEDBACK | done | This file |
 
 ## File Change Summary
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/candidate_aggregate.py` | D |
-| `runtime/demo_candidate_fixture.py` | D |
-| `schemas/state_schema.py` | M |
-| `modules/recruitment/projection.py` | M |
+| `modules/recruitment/idempotency_store.py` | A |
+| `modules/recruitment/exceptions.py` | M |
 | `modules/recruitment/use_cases.py` | M |
-| `modules/recruitment/bootstrap.py` | M |
 | `modules/recruitment/runtime.py` | M |
-| `modules/recruitment/state_init.py` | M |
-| `orchestrator/vertical_slice_planner.py` | M |
-| `runtime/in_memory_state_store.py` | M |
-| `runtime/inspection/decision_explainer.py` | M |
-| `tests/modules/test_candidate_snapshot_sync.py` | M |
-| `tests/modules/test_recruitment_boundary.py` | M |
-| `tests/modules/test_cv_ingestion.py` | M |
-| `tests/modules/test_cv_pdf_ingestion.py` | M |
-| `tests/modules/test_scoring_context.py` | M |
-| `tests/persistence/test_sqlite_state_store.py` | M |
-| `tests/persistence/test_sqlite_cv_extensions.py` | M |
-| `tests/inspection/test_decision_evidence_navigation.py` | M |
+| `modules/recruitment/scoring_context_service.py` | M |
+| `modules/recruitment/__init__.py` | M |
+| `integrations/api/app.py` | M |
+| `integrations/api/errors.py` | M |
+| `integrations/api/schemas_http.py` | M |
+| `runtime/persistence/sqlite_state_store.py` | M |
+| `tests/api/test_candidates_cv_pdf_create.py` | A |
+| `frontend/src/api/client.ts` | M |
+| `frontend/src/api/types.ts` | M |
+| `frontend/src/pages/CandidateListPage.tsx` | M |
+| `frontend/src/components/recruiter/ScoringContextPanel.tsx` | M |
+| `frontend/src/components/recruiter/ScoringContextIngress.tsx` | A |
+| `frontend/src/components/recruiter/CreateCandidatePdfUpload.tsx` | A |
 | `FEEDBACK.md` | M |
-
-## Logic Absorption Map
-
-| Former `candidate_aggregate` concern | New owner |
-|--------------------------------------|-----------|
-| `ensure_candidate_record`, `find_candidate_ids_by_dedup_signals`, `persist_candidate_and_snapshot_with_reconcile` | `modules/recruitment/use_cases.py` |
-| `apply_skill_results_to_candidate` (+ parse/merge helpers) | `modules/recruitment/bootstrap.py` |
-| `finalize_orchestration_snapshot`, `evaluation_status_ref_from_evaluation`, `evaluation_ref_lags_candidate`, `evaluation_from_candidate` | `modules/recruitment/projection.py` |
 
 ## Test Commands & Results
 
 ```text
 python -m pytest -q
-→ 180 passed, 2 skipped
+→ 187 passed, 2 skipped
 
 cd frontend && npm test -- --run
 → 3 files, 7 tests passed
 
 cd frontend && npm run build
 → success
-
-API smoke (TestClient lifespan): GET /health, /candidate/{id}, /candidates → 200
 ```
 
 ## Risks, Deviations, Blockers
 
 - **No blockers.**
-- **Deviation:** None material; scope stayed within PLAN.
-- **Residual risk:** Existing SQLite rows may still contain stripped JSON keys from older snapshots; in-memory/test paths are clean. Full local DB delete + reseed recommended if a persistent dev DB shows stale deserialization warnings (not required for test matrix pass).
+- **Deviation:** `POST /candidates/cv/pdf` success/replay responses use `JSONResponse` with sorted JSON keys for byte-identical HTTP replay (OpenAPI still documents `CandidateCreatePdfIngressResponse`). Tracked as **`TD-API-015 + Idempotency HTTP response canonicalization vs OpenAPI (POST /candidates/cv/pdf)`** — deferred to API hardening (R-015).
+- **Residual:** Orphan candidates after failed create+upload mid-write remain until R-013 dedup/governance. Legacy snapshot JSON keys stripped on SQLite read (R-011.2 compat) — not idempotency-related.
 
 ## Debt Handling
 
-- **TD-PERSISTENCE-008 + Candidate/snapshot write ownership still split across transitional helpers** — **partial close:** transitional `candidate_aggregate.py` removed; dual-write and ensure-record live in `use_cases`, skill merge in `bootstrap`, finalize/ref projection in `projection`. Residual: write paths still span bootstrap subscriber + use_cases (by design for this round).
-- **TD-DX-002 + Demo-era fixture/profile assumptions still leak into runtime path** — **partial close:** `runtime/demo_candidate_fixture.py` deleted; demo merge remains on `modules/recruitment/fixtures` only. Full demo phase-out still deferred (`R-019`).
+- **TD-SKILLS-001 + CV ingestion evolution (MVP cv_submitted)** — **partial close:** real PDF create+upload path is primary recruiter ingress for new candidates.
+- **TD-PERSISTENCE-009 + Single active scoring_context store** — **partial close:** context ingress → refresh → ready → scoring consumption visible in UI; still single active store.
+- **TD-API-011 + HTTP ingress idempotency and replay-safe retries** — **partial close:** implemented for `POST /candidates/cv/pdf` only; other ingress deferred.
+- **TD-API-012 + API boundary coupling to bootstrap helpers** — **partial close:** create+upload reuses use-case ingress; no second business semantics layer.
 
 ## Suggested Next Round
 
-- **Routing:** `advance-major` → open **R-012** (hard-filter capability per roadmap).
-- Residual TD-PERSISTENCE-008 ownership consolidation can be revisited only if PM prioritizes further write-path unification before R-012.
+- **Routing:** `advance-major` → **R-013** (dedup merge policy + orphan candidate governance per roadmap).
+- Optional hardening: extend idempotency pattern to other ingress endpoints in a dedicated API round.

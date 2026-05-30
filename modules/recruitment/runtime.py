@@ -29,7 +29,8 @@ from runtime.persistence.sqlite_state_store import SQLiteStateStore
 from runtime.recording_event_bus import RecordingInMemoryEventBus
 from schemas.state_schema import OrchestrationState, PipelinePhase
 
-from .exceptions import DemoRunPreconditionError
+from .exceptions import DemoRunPreconditionError, IdempotencyKeyInProgressError
+from .idempotency_store import InMemoryIdempotencyStore, SQLiteIdempotencyStore
 from .scoring_context_store import InMemoryScoringContextStore, SQLiteScoringContextStore
 
 
@@ -54,6 +55,7 @@ class VerticalSliceApiRuntime:
             sql_store = SQLiteStateStore(db_path, config=InMemoryStateStoreConfig())
             cand_store = SQLiteCandidateStore(db_path)
             self.scoring_context_store = SQLiteScoringContextStore(db_path)
+            self.idempotency_store = SQLiteIdempotencyStore(db_path)
             self.candidate_store = cand_store
             self.bundle: VerticalSliceRuntimeBundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
@@ -63,6 +65,7 @@ class VerticalSliceApiRuntime:
             )
         else:
             self.scoring_context_store = InMemoryScoringContextStore()
+            self.idempotency_store = InMemoryIdempotencyStore()
             self.candidate_store = InMemoryCandidateStore()
             self.bundle = wire_vertical_slice_runtime(
                 bus=RecordingInMemoryEventBus(),
@@ -71,6 +74,20 @@ class VerticalSliceApiRuntime:
             )
         self._seq = 0
         self._lock = threading.Lock()
+        self._idempotency_active: set[str] = set()
+        self._idempotency_active_lock = threading.Lock()
+
+    def begin_idempotency_operation(self, idempotency_key: str) -> None:
+        with self._idempotency_active_lock:
+            if idempotency_key in self._idempotency_active:
+                raise IdempotencyKeyInProgressError(
+                    "idempotency_key_in_progress: concurrent request with same key"
+                )
+            self._idempotency_active.add(idempotency_key)
+
+    def end_idempotency_operation(self, idempotency_key: str) -> None:
+        with self._idempotency_active_lock:
+            self._idempotency_active.discard(idempotency_key)
 
     @property
     def candidate_id(self) -> UUID:
@@ -108,6 +125,7 @@ class VerticalSliceApiRuntime:
             )
             store = self.bundle.store
             self.scoring_context_store.clear()
+            self.idempotency_store.clear_all()
             if isinstance(self.candidate_store, InMemoryCandidateStore):
                 self.candidate_store.clear_all()
             sqlite_cleared = False
@@ -119,6 +137,7 @@ class VerticalSliceApiRuntime:
                 conn.execute("DELETE FROM orchestration_state")
                 if isinstance(self.candidate_store, SQLiteCandidateStore):
                     conn.execute("DELETE FROM candidate")
+                conn.execute("DELETE FROM ingress_idempotency")
                 try:
                     conn.execute("DELETE FROM sqlite_sequence WHERE name='state_transition_audit'")
                 except sqlite3.OperationalError:

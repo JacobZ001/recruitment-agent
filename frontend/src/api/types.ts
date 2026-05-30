@@ -40,9 +40,34 @@ export type ScoringContextSummary = {
 export type ScoringContextResponse = {
   context_version: number
   status: string
-  organization_context?: { company_name?: string | null } | null
-  recruiter_actor_context?: { actor_id?: string | null } | null
-  job_context?: { title?: string | null } | null
+  organization_authoring_text: string
+  recruiter_actor_authoring_text: string
+  job_authoring_text: string
+  organization_context?: Record<string, unknown> | null
+  recruiter_actor_context?: Record<string, unknown> | null
+  job_context?: Record<string, unknown> | null
+  derived_l2_criteria: string[]
+  derived_l3_criteria: string[]
+  created_at: string
+  updated_at: string
+  ready_at?: string | null
+  stale_at?: string | null
+  source_refs: string[]
+}
+
+export type CandidateCreatePdfIngressResponse = {
+  candidate_id: string
+  ingress_accepted: boolean
+  publish_status: string
+  event_id: string
+  event_type: string
+  publish_result: Record<string, unknown>
+  state_summary?: {
+    pipeline_phase: string
+    transitions_count: number
+    state_id: string
+    store_revision?: number | null
+  } | null
 }
 
 export type ScoreCriterion = {
@@ -75,21 +100,27 @@ export type CandidateProfile = {
   extensions: Record<string, unknown>
 } | null
 
+export type CandidateScores = {
+  criteria?: ScoreCriterion[]
+  overall_score?: CandidateListItemOverallScore | null
+  context_version?: number | null
+  stale?: boolean | null
+}
+
 export type CandidateViewResponse = {
   candidate_id: string
   stage: string
   status: CandidateViewStatus
   summary: string
   profile?: CandidateProfile
+  decision: Record<string, unknown>
   evaluation?: Record<string, unknown> | null
-  scoring_context?: ScoringContextSummary
-  scores: {
-    criteria?: ScoreCriterion[]
-    overall_score?: { value?: number | null; type?: string | null }
-    context_version?: number | null
-    stale?: boolean | null
-  }
+  scoring_context?: Record<string, unknown> | null
+  flags: Record<string, unknown>
+  scores: CandidateScores
+  ranking: Record<string, unknown>
   available_actions: RecruiterActionItem[]
+  next_actions: string[]
 }
 
 export type ApiErrorBody = {

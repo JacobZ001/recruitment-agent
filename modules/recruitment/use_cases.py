@@ -6,12 +6,14 @@ Runtime is always passed in by the API layer; this module does not construct run
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import logging
-from typing import Any, Dict, List, Optional, Protocol
-from uuid import UUID
+from typing import Any, Dict, List, Optional, Protocol, Tuple
+from uuid import UUID, uuid4
 
 from interfaces.skill_interface import (
     ExecutionContext,
@@ -31,12 +33,20 @@ from . import policies
 from .exceptions import (
     CandidateNotFoundError,
     DemoRunPreconditionError,
+    IdempotencyKeyConflictError,
+    IdempotencyKeyInProgressError,
+    IdempotencyKeyRequiredError,
+    IdempotencyReplayError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
     InvalidRecruiterActionPayloadError,
     InvalidScoringContextError,
     ScoringContextNotReadyError,
     ScoringFailedError,
+)
+from .idempotency_store import (
+    IDEMPOTENCY_METHOD_PATH,
+    IdempotencyRecordStatus,
 )
 from .pdf_ingest import decode_pdf_base64, extract_text_from_pdf_bytes
 from .projection import (
@@ -54,6 +64,9 @@ from .scoring_context_service import (
     recruiter_actor_context_to_authoring_text,
     recruiter_answers_to_job_authoring_text,
     scoring_context_is_ready,
+    clear_job_from_scoring_context,
+    clear_organization_from_scoring_context,
+    clear_recruiter_actor_from_scoring_context,
     update_scoring_context,
 )
 from schemas.state_schema import (
@@ -93,6 +106,13 @@ class IngressRuntime(Protocol):
     @property
     def scoring_context_store(self) -> Any: ...
 
+    @property
+    def idempotency_store(self) -> Any: ...
+
+    def begin_idempotency_operation(self, idempotency_key: str) -> None: ...
+
+    def end_idempotency_operation(self, idempotency_key: str) -> None: ...
+
     def next_publish_sequence(self) -> int: ...
 
     def run_primary_demo_sequence(self) -> OrchestrationState: ...
@@ -100,6 +120,17 @@ class IngressRuntime(Protocol):
 
 @dataclass(frozen=True)
 class EventIngressResult:
+    ingress_accepted: bool
+    publish_status: str
+    event_id: str
+    event_type: str
+    publish_result: Dict[str, Any]
+    state_summary: Optional[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class CandidatePdfIngressResult:
+    candidate_id: UUID
     ingress_accepted: bool
     publish_status: str
     event_id: str
@@ -642,6 +673,166 @@ def submit_cv_pdf(
         extracted.cv_text,
         correlation_id=correlation_id,
     )
+
+
+def _cv_pdf_payload_fingerprint(pdf_bytes: bytes, file_name: str) -> str:
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    return f"{digest}:{file_name.strip()}"
+
+
+def _ingress_result_to_pdf_response(
+    candidate_id: UUID,
+    result: EventIngressResult,
+) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "candidate_id": str(candidate_id),
+        "ingress_accepted": result.ingress_accepted,
+        "publish_status": result.publish_status,
+        "event_id": result.event_id,
+        "event_type": result.event_type,
+        "publish_result": result.publish_result,
+    }
+    if result.state_summary is not None:
+        body["state_summary"] = result.state_summary
+    return body
+
+
+def candidate_pdf_ingress_response_dict(
+    candidate_id: UUID,
+    result: EventIngressResult,
+) -> Dict[str, Any]:
+    return _ingress_result_to_pdf_response(candidate_id, result)
+
+
+def create_and_submit_cv_pdf(
+    runtime: IngressRuntime,
+    *,
+    idempotency_key: str,
+    pdf_base64: str,
+    file_name: str = "cv.pdf",
+    correlation_id: Optional[UUID] = None,
+) -> CandidatePdfIngressResult:
+    """
+    Single-step candidate create + CV PDF ingress (R-012).
+
+    Order: idempotency decision (incl. ready check before write allocation) -> write.
+    """
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise IdempotencyKeyRequiredError("Idempotency-Key header is required")
+
+    pdf_bytes = decode_pdf_base64(pdf_base64, file_name=file_name)
+    fingerprint = _cv_pdf_payload_fingerprint(pdf_bytes, file_name)
+
+    store = runtime.idempotency_store
+    store.purge_expired()
+    record = store.get(IDEMPOTENCY_METHOD_PATH, key)
+
+    if record is not None and record.status == IdempotencyRecordStatus.SUCCEEDED:
+        if record.payload_fingerprint != fingerprint:
+            raise IdempotencyKeyConflictError(
+                "idempotency_key_conflict: payload fingerprint differs from first success"
+            )
+        if record.response_status_code is None or record.response_body_json is None:
+            raise RuntimeError("idempotency record missing stored HTTP response")
+        raise IdempotencyReplayError(
+            status_code=int(record.response_status_code),
+            body=json.loads(record.response_body_json),
+        )
+
+    _require_ready_scoring_context(runtime)
+
+    runtime.begin_idempotency_operation(key)
+    try:
+        record = store.get(IDEMPOTENCY_METHOD_PATH, key)
+        if record is not None and record.status == IdempotencyRecordStatus.SUCCEEDED:
+            if record.payload_fingerprint != fingerprint:
+                raise IdempotencyKeyConflictError(
+                    "idempotency_key_conflict: payload fingerprint differs from first success"
+                )
+            raise IdempotencyReplayError(
+                status_code=int(record.response_status_code or 200),
+                body=json.loads(record.response_body_json or "{}"),
+            )
+
+        if (
+            record is not None
+            and record.status == IdempotencyRecordStatus.IN_PROGRESS
+            and record.candidate_id
+        ):
+            if record.payload_fingerprint != fingerprint:
+                raise IdempotencyKeyConflictError(
+                    "idempotency_key_conflict: payload fingerprint differs from in-flight request"
+                )
+            candidate_id = UUID(record.candidate_id)
+        else:
+            if record is not None and record.payload_fingerprint != fingerprint:
+                raise IdempotencyKeyConflictError(
+                    "idempotency_key_conflict: payload fingerprint differs from prior attempt"
+                )
+            candidate_id = uuid4()
+            store.upsert_in_progress(
+                method_path=IDEMPOTENCY_METHOD_PATH,
+                idempotency_key=key,
+                payload_fingerprint=fingerprint,
+                candidate_id=str(candidate_id),
+            )
+
+        extracted = extract_text_from_pdf_bytes(pdf_bytes, file_name=file_name)
+        ingress = submit_cv(
+            runtime,
+            candidate_id,
+            extracted.cv_text,
+            correlation_id=correlation_id,
+        )
+        response_body = _ingress_result_to_pdf_response(candidate_id, ingress)
+        store.mark_succeeded(
+            method_path=IDEMPOTENCY_METHOD_PATH,
+            idempotency_key=key,
+            response_status_code=200,
+            response_body=response_body,
+        )
+        return CandidatePdfIngressResult(
+            candidate_id=candidate_id,
+            ingress_accepted=ingress.ingress_accepted,
+            publish_status=ingress.publish_status,
+            event_id=ingress.event_id,
+            event_type=ingress.event_type,
+            publish_result=ingress.publish_result,
+            state_summary=ingress.state_summary,
+        )
+    finally:
+        runtime.end_idempotency_operation(key)
+
+
+def clear_organization_context(runtime: IngressRuntime) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = clear_organization_from_scoring_context(current)
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def clear_recruiter_actor_context(runtime: IngressRuntime) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = clear_recruiter_actor_from_scoring_context(current)
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
+
+
+def clear_job_context(runtime: IngressRuntime) -> ScoringContext:
+    current = get_active_scoring_context(runtime)
+    updated = clear_job_from_scoring_context(current)
+    persisted = _persist_scoring_context(runtime, updated)
+    _mark_existing_candidate_evaluations_stale(
+        runtime, active_context_version=persisted.context_version
+    )
+    return persisted
 
 
 def record_recruiter_decision(

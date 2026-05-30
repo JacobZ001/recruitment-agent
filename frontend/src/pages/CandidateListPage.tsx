@@ -5,7 +5,8 @@ import { getScoringContext, listCandidates } from '@/api/client'
 import type { CandidateListItem, RecruiterActionItem } from '@/api/types'
 import { RecruiterActionDialog } from '@/components/recruiter/RecruiterActionDialog'
 import { RecruiterActionsSection } from '@/components/recruiter/RecruiterActionsSection'
-import { ScoringContextPanel } from '@/components/recruiter/ScoringContextPanel'
+import { CreateCandidatePdfUpload } from '@/components/recruiter/CreateCandidatePdfUpload'
+import { ScoringContextIngress } from '@/components/recruiter/ScoringContextIngress'
 import { StageTag, StatusTag } from '@/components/recruiter/StageStatusTags'
 import { useRecruiterActions } from '@/hooks/useRecruiterActions'
 import { formatScorePercent } from '@/lib/format'
@@ -60,17 +61,7 @@ export function CandidateListPage() {
 
   const capped = useMemo(() => filtered.slice(0, LIST_DISPLAY_LIMIT), [filtered])
 
-  const scoringPanelData = useMemo(() => {
-    if (!scoringQ.data) return null
-    const ctx = scoringQ.data
-    return {
-      context_version: ctx.context_version,
-      status: ctx.status,
-      organization: ctx.organization_context?.company_name ?? null,
-      job_title: ctx.job_context?.title ?? null,
-      recruiter_actor_id: ctx.recruiter_actor_context?.actor_id ?? null,
-    }
-  }, [scoringQ.data])
+  const contextReady = scoringQ.data?.status === 'ready'
 
   const openRowAction = (candidateId: string, action: RecruiterActionItem) => {
     rowActions.openAction(action, candidateId)
@@ -176,10 +167,10 @@ export function CandidateListPage() {
                       </Link>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <StageTag stage={row.stage} />
+                      <StageTag stage={row.stage} compact />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <StatusTag kind={row.status.kind} />
+                      <StatusTag kind={row.status.kind} compact />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-800">
                       <span className="font-semibold">
@@ -205,7 +196,14 @@ export function CandidateListPage() {
         </div>
       )}
 
-      <ScoringContextPanel sc={scoringPanelData} />
+      <CreateCandidatePdfUpload contextReady={contextReady} />
+
+      <ScoringContextIngress
+        context={scoringQ.data}
+        isLoading={scoringQ.isPending}
+        isError={scoringQ.isError}
+        errorMessage={scoringQ.error instanceof Error ? scoringQ.error.message : undefined}
+      />
 
       {rowActions.dialog.open && (
         <RecruiterActionDialog

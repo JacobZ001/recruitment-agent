@@ -421,6 +421,75 @@ def refresh_scoring_context(
     )
 
 
+def _clear_dimension_status(existing: ScoringContext) -> tuple[ScoringContextStatus, Optional[datetime]]:
+    if existing.status == ScoringContextStatus.READY:
+        return ScoringContextStatus.STALE, _now_utc()
+    return ScoringContextStatus.COLLECTING, existing.stale_at
+
+
+def clear_organization_from_scoring_context(
+    existing: Optional[ScoringContext],
+) -> ScoringContext:
+    now = _now_utc()
+    if existing is None:
+        return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
+    next_status, stale_at = _clear_dimension_status(existing)
+    return _copy_context(
+        existing,
+        context_version=int(existing.context_version) + 1,
+        organization_authoring_text="",
+        organization_context=None,
+        status=next_status,
+        updated_at=now,
+        ready_at=None,
+        stale_at=stale_at,
+        derived_l2_criteria=[],
+        derived_l3_criteria=[],
+    )
+
+
+def clear_recruiter_actor_from_scoring_context(
+    existing: Optional[ScoringContext],
+) -> ScoringContext:
+    now = _now_utc()
+    if existing is None:
+        return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
+    next_status, stale_at = _clear_dimension_status(existing)
+    return _copy_context(
+        existing,
+        context_version=int(existing.context_version) + 1,
+        recruiter_actor_authoring_text="",
+        recruiter_actor_context=None,
+        status=next_status,
+        updated_at=now,
+        ready_at=None,
+        stale_at=stale_at,
+        derived_l2_criteria=[],
+        derived_l3_criteria=[],
+    )
+
+
+def clear_job_from_scoring_context(
+    existing: Optional[ScoringContext],
+) -> ScoringContext:
+    now = _now_utc()
+    if existing is None:
+        return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
+    next_status, stale_at = _clear_dimension_status(existing)
+    return _copy_context(
+        existing,
+        context_version=int(existing.context_version) + 1,
+        job_authoring_text="",
+        job_context=None,
+        status=next_status,
+        updated_at=now,
+        ready_at=None,
+        stale_at=stale_at,
+        derived_l2_criteria=[],
+        derived_l3_criteria=[],
+    )
+
+
 def update_scoring_context(
     existing: Optional[ScoringContext],
     *,

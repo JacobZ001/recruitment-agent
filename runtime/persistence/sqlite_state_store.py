@@ -166,7 +166,10 @@ class SQLiteStateStore:
                 ),
             )
         snap_json, rev = row
-        snap = OrchestrationState.model_validate_json(snap_json)
+        raw = json.loads(snap_json)
+        for legacy_key in ("links", "ingress_profile", "evaluation"):
+            raw.pop(legacy_key, None)
+        snap = OrchestrationState.model_validate(raw)
         now = self._config.clock()
         return StateStoreResult(
             ok=True,

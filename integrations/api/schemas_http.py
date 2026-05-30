@@ -142,6 +142,12 @@ class EventIngressResponse(BaseModel):
     state_summary: Optional[StateSummaryResponse] = None
 
 
+class CandidateCreatePdfIngressResponse(EventIngressResponse):
+    """``POST /candidates/cv/pdf`` — server-assigned candidate + ingress outcome."""
+
+    candidate_id: str
+
+
 class DemoCandidateResponse(BaseModel):
     """Demo fixture profile plus current slice snapshot (inspection-oriented, not a domain aggregate)."""
 

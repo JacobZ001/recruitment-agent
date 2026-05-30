@@ -6,15 +6,16 @@ HTTP concerns only; recruitment business actions live in ``modules.recruitment``
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from integrations.api.demo_page import build_demo_recruiter_html
@@ -22,6 +23,7 @@ from integrations.api.errors import raise_recruitment_http
 from integrations.api.schemas_http import (
     AdminResetResponse,
     CandidateActionBody,
+    CandidateCreatePdfIngressResponse,
     CandidatePdfIngressBody,
     CandidateListItem,
     CandidateViewResponse,
@@ -39,6 +41,7 @@ from integrations.api.schemas_http import (
     TimelineResponse,
     VerticalSliceIngressEventBody,
 )
+from modules.recruitment.exceptions import IdempotencyReplayError
 from modules.recruitment.runtime import VerticalSliceApiRuntime
 from modules.recruitment import (
     RecruitmentUseCaseError,
@@ -47,6 +50,10 @@ from modules.recruitment import (
     author_job_context_from_text,
     author_organization_context_from_text,
     author_recruiter_actor_context_from_text,
+    clear_job_context,
+    clear_organization_context,
+    clear_recruiter_actor_context,
+    create_and_submit_cv_pdf,
     get_active_scoring_context,
     get_candidate_view_for_runtime,
     get_demo_candidate,
@@ -308,6 +315,72 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)
+
+    @app.delete("/scoring-context/organization", response_model=ScoringContextResponse)
+    def delete_organization_context(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            clear_organization_context(rt)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.delete("/scoring-context/recruiter-actor", response_model=ScoringContextResponse)
+    def delete_recruiter_actor_context(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            clear_recruiter_actor_context(rt)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.delete("/scoring-context/job", response_model=ScoringContextResponse)
+    def delete_job_context(
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            clear_job_context(rt)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/candidates/cv/pdf", response_model=CandidateCreatePdfIngressResponse)
+    def post_candidates_cv_pdf(
+        body: CandidatePdfIngressBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+        idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    ):
+        try:
+            result = create_and_submit_cv_pdf(
+                rt,
+                idempotency_key=idempotency_key,
+                pdf_base64=body.pdf_base64,
+                file_name=body.file_name,
+                correlation_id=body.correlation_id,
+            )
+        except IdempotencyReplayError as exc:
+            return JSONResponse(status_code=exc.status_code, content=exc.body)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc)
+
+        state_summary = None
+        if result.state_summary is not None:
+            state_summary = StateSummaryResponse(**result.state_summary)
+        body = {
+            "candidate_id": str(result.candidate_id),
+            "ingress_accepted": result.ingress_accepted,
+            "publish_status": result.publish_status,
+            "event_id": result.event_id,
+            "event_type": result.event_type,
+            "publish_result": result.publish_result,
+        }
+        if state_summary is not None:
+            body["state_summary"] = state_summary.model_dump(mode="json")
+        return JSONResponse(
+            content=json.loads(json.dumps(body, sort_keys=True, separators=(",", ":"))),
+        )
 
     @app.post("/events", response_model=EventIngressResponse)
     def post_event(

@@ -49,3 +49,24 @@ class CandidateStoreUnavailableError(RecruitmentUseCaseError):
 
 class CandidateCanonicalMissingError(RecruitmentUseCaseError):
     """Orchestration state exists but canonical Candidate row is absent (fail-fast; no legacy fallback)."""
+
+
+class IdempotencyKeyRequiredError(RecruitmentUseCaseError):
+    """POST /candidates/cv/pdf requires an Idempotency-Key header."""
+
+
+class IdempotencyKeyConflictError(RecruitmentUseCaseError):
+    """Same idempotency key was used with a different payload fingerprint."""
+
+
+class IdempotencyKeyInProgressError(RecruitmentUseCaseError):
+    """Another in-flight request holds the same idempotency key."""
+
+
+class IdempotencyReplayError(RecruitmentUseCaseError):
+    """Carries stored HTTP replay response (status + body) for idempotent success replay."""
+
+    def __init__(self, *, status_code: int, body: dict) -> None:
+        self.status_code = status_code
+        self.body = body
+        super().__init__("idempotency_http_replay")

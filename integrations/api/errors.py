@@ -12,6 +12,10 @@ from modules.recruitment.exceptions import (
     CandidateNotFoundError,
     CandidateStoreUnavailableError,
     DemoRunPreconditionError,
+    IdempotencyKeyConflictError,
+    IdempotencyKeyInProgressError,
+    IdempotencyKeyRequiredError,
+    IdempotencyReplayError,
     InvalidCvPdfError,
     InvalidCandidateActionError,
     InvalidIngressEventError,
@@ -121,6 +125,32 @@ def recruitment_error_to_http(
                 "diagnostic": "fail_fast_no_legacy_snapshot_fallback",
             },
         )
+    if isinstance(exc, IdempotencyKeyRequiredError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "idempotency_key_required",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, IdempotencyKeyConflictError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "idempotency_key_conflict",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, IdempotencyKeyInProgressError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "idempotency_key_in_progress",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, IdempotencyReplayError):
+        return HTTPException(status_code=exc.status_code, detail=exc.body)
     return HTTPException(
         status_code=400,
         detail={

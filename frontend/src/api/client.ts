@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  CandidateCreatePdfIngressResponse,
   CandidateListItem,
   CandidateViewResponse,
   ScoringContextResponse,
@@ -80,5 +81,66 @@ export function postCandidateAction(
   return fetchJson<CandidateViewResponse>(`/candidates/${candidateId}/action`, {
     method: 'POST',
     body: JSON.stringify({ event_type: eventType, payload }),
+  })
+}
+
+export function postOrganizationContext(raw_text: string): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/organization', {
+    method: 'POST',
+    body: JSON.stringify({ raw_text }),
+  })
+}
+
+export function postRecruiterActorContext(raw_text: string): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/recruiter-actor', {
+    method: 'POST',
+    body: JSON.stringify({ raw_text }),
+  })
+}
+
+export function postJobContextText(raw_text: string): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/job/text', {
+    method: 'POST',
+    body: JSON.stringify({ raw_text }),
+  })
+}
+
+export function postJobContextPdf(pdf_base64: string, file_name: string): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/job/pdf', {
+    method: 'POST',
+    body: JSON.stringify({ pdf_base64, file_name }),
+  })
+}
+
+export function refreshScoringContext(): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/refresh', { method: 'POST' })
+}
+
+export function clearOrganizationContext(): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/organization', { method: 'DELETE' })
+}
+
+export function clearRecruiterActorContext(): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/recruiter-actor', { method: 'DELETE' })
+}
+
+export function clearJobContext(): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/job', { method: 'DELETE' })
+}
+
+export function createCandidateWithPdf(args: {
+  pdf_base64: string
+  file_name: string
+  idempotencyKey: string
+  correlation_id?: string
+}): Promise<CandidateCreatePdfIngressResponse> {
+  return fetchJson<CandidateCreatePdfIngressResponse>('/candidates/cv/pdf', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': args.idempotencyKey },
+    body: JSON.stringify({
+      pdf_base64: args.pdf_base64,
+      file_name: args.file_name,
+      correlation_id: args.correlation_id,
+    }),
   })
 }

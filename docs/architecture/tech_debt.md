@@ -797,12 +797,12 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Status**: OPEN
 - **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, and before any external integrator/webhook ingress depends on retry-safe semantics
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: **`POST /events`** has **no** enforced idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation). The broader event schema already reserves an ``idempotency_key`` concept, but the public HTTP ingress and application publish path do **not** yet honor that field with deterministic dedupe behavior or stable retry outcomes.
-- **Rationale**: Sync-first reference boundary prioritizes validated publish semantics over distributed ingress guarantees; idempotency keys, dedupe stores, and ingress audit trails imply infrastructure and policy choices deferred for the slice.
-- **Future impact**: Retries, double-clicks, and proxy duplicates can produce **duplicate workflow signals** or confusing audit narratives unless upstream compensates; compliance-heavy deployments will need **replay-safe** ingress semantics.
+- **Last reviewed**: 2026-05-30
+- **Current decision**: **`POST /candidates/cv/pdf`** (R-012) enforces required ``Idempotency-Key``, SQLite-backed dedupe/replay, and bounded retry semantics for create+upload only. **`POST /events`** and other ingress routes still have **no** enforced idempotency contract: duplicate submits may enqueue **duplicate** envelopes (subject to existing orchestration validation).
+- **Rationale**: Sync-first reference boundary prioritizes validated publish semantics over distributed ingress guarantees; idempotency keys, dedupe stores, and ingress audit trails imply infrastructure and policy choices deferred for the slice beyond the bounded create+upload path.
+- **Future impact**: Retries, double-clicks, and proxy duplicates on non-idempotent routes can still produce **duplicate workflow signals** or confusing audit narratives unless upstream compensates; compliance-heavy deployments will need **replay-safe** ingress semantics on all public write surfaces.
 - **Priority**: High
-- **Recommended future direction**: Define **idempotency keys** (header or body), **dedupe policy** (window, scope, outcome mapping), **replay-safe retry** rules, and **ingress audit** records (who/when/key hash)—implemented in **deterministic** layers adjacent to the bus/persistence, not in LLM or autonomous routing; coordinate with **Orchestration side-effect consistency after publish failure** and shared delivery taxonomy.
+- **Recommended future direction**: Extend the R-012 pattern (key scope, payload fingerprint, response snapshot replay, TTL) to remaining ingress endpoints; define **ingress audit** records (who/when/key hash)—implemented in **deterministic** layers adjacent to the bus/persistence, not in LLM or autonomous routing; coordinate with **Orchestration side-effect consistency after publish failure** and shared delivery taxonomy.
 
 
 ### TD-API-012 API boundary coupling to bootstrap helpers (`_envelope`, fixed clock)
@@ -827,6 +827,18 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Future impact**: Ranking visibility is still thin, and explainer-derived text can drift from historical operator expectations unless versioned or persisted.
 - **Priority**: Low
 - **Recommended future direction**: Persist or version human-facing explanation strings when audit-stable copy becomes necessary, and replace the ranking stub once multi-candidate read models mature.
+
+
+### TD-API-015 Idempotency HTTP response canonicalization vs OpenAPI (`POST /candidates/cv/pdf`)
+- **Status**: OPEN
+- **Revisit when**: When `Upcoming (Action Queue)` schedules `API hardening`, or before OpenAPI-driven client generation for ingress integrators
+- **Introduced in**: 2026-05-30 (R-012)
+- **Last reviewed**: 2026-05-30
+- **Current decision**: ``POST /candidates/cv/pdf`` declares ``response_model=CandidateCreatePdfIngressResponse`` but success and **HTTP idempotency replay** responses are emitted via hand-built ``JSONResponse`` with ``json.dumps(..., sort_keys=True)`` so stored replay bodies are byte-identical. OpenAPI therefore documents Pydantic default serialization, not the canonical on-the-wire JSON used for replay.
+- **Rationale**: R-012 required strict HTTP response snapshot replay (status + JSON body). Sorting JSON keys at the boundary was the smallest deterministic way to stabilize bytes without a shared serializer.
+- **Future impact**: OpenAPI/codegen clients may assume default FastAPI response encoding (key order, optional omission rules) that differs from replay bytes; integrators comparing raw bodies to schema examples may see harmless but confusing drift. Terminology risk: this is **HTTP idempotency replay**, not inspection event replay or audit-trail replay.
+- **Priority**: Low
+- **Recommended future direction**: Extract one **canonical ingress JSON encoder** (used for first success, replay return, and persistence) and align OpenAPI examples or response class serialization with that encoder; optionally document replay semantics explicitly on the route. Coordinate with **TD-API-011** global ingress hardening.
 
 
 ---

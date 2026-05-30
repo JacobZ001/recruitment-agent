@@ -50,6 +50,10 @@ from .use_cases import (
     author_organization_context_from_text,
     author_recruiter_actor_context,
     author_recruiter_actor_context_from_text,
+    clear_job_context,
+    clear_organization_context,
+    clear_recruiter_actor_context,
+    create_and_submit_cv_pdf,
     get_active_scoring_context,
     refresh_active_scoring_context,
     publish_ingress_event,
@@ -60,6 +64,7 @@ from .use_cases import (
     run_primary_demo_sequence,
     submit_cv,
     submit_cv_pdf,
+    CandidatePdfIngressResult,
 )
 
 __all__ = (
@@ -111,5 +116,10 @@ __all__ = (
     "run_primary_demo_sequence",
     "submit_cv",
     "submit_cv_pdf",
+    "CandidatePdfIngressResult",
+    "clear_job_context",
+    "clear_organization_context",
+    "clear_recruiter_actor_context",
+    "create_and_submit_cv_pdf",
     "VerticalSliceApiRuntime",
 )
