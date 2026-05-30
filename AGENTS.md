@@ -257,16 +257,16 @@ These rules apply to both Architect Agent and Builder Agent:
 
 Each round follows this sequence:
 
-1. Architect Agent proactively switches to Plan mode for round design and proposes a light high-level structured plan for PM review.
+1. Architect Agent performs round planning directly in root `PLAN.md` (default workflow; no Plan mode artifact required).
+ - If there are meaningful scope/contract trade-offs, Architect must explicitly call `AskQuestion` to collect PM selection before freezing `PLAN.md`.
 2. Architect Agent reviews `docs/architecture/ROADMAP.md` during planning.
   - Follow `Roadmap discipline` as the single normative rule source for posture/capability/upcoming reconciliation.
 3. Architect Agent performs a full `docs/architecture/tech_debt.md` sweep in planning phase and proposes debt handling for this round (`close` / `partial` / `defer` with rationale).
   - Debt triage, ID allocation, status correction, and archive handling must follow `Debt registry discipline` (single rule source).
   - Architect updates the file-level `Last full registry sweep` date when a full sweep is performed and updates per-entry `Last reviewed` for explicitly triaged items.
 4. PM reviews and confirms scope, risks, acceptance criteria, debt handling decisions, and proposed roadmap-aligned action selection.
-  - If planning was done through a Plan mode artifact, approval/build transition does **not** start Builder implementation directly in this repository workflow.
-  - Post-approval handoff boundary uses `Plan mode artifact discipline` as the single normative rule source.
-5. Architect Agent completes `PLAN.md` handoff for the approved round.
+5. If planning was done through a Plan mode artifact, Architect Agent completes `PLAN.md` handoff for the approved round.
+  - approval/build transition does **not** start Builder implementation directly in this repository workflow.
   - Behavior and boundary constraints: see `Plan mode artifact discipline` and `Single Source of Truth Files`.
 6. Builder Agent executes the approved round plan in the corresponding implementation session.
   - Execution boundaries and scope constraints: see `Governance and Guardrails`.
@@ -280,7 +280,7 @@ Each round follows this sequence:
   - run a corrective minor round within the same major round,
   - or advance to the next major round.
 12. Architect Agent executes a round-level git snapshot commit for every completed round (major or minor), then proposes the next round using the PM-confirmed routing decision.
-13. Architect Agent proposes next round in Plan mode using the updated roadmap / debt / ADR context and the confirmed routing decision.
+13. Architect Agent proposes the next round by updating root `PLAN.md` directly using the updated roadmap / debt / ADR context and the confirmed routing decision.
 
 ### Artifact routing Protocol
 
@@ -367,6 +367,7 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
 ### Plan mode artifact discipline
 
 - Plan mode artifacts are Architect planning / PM review artifacts, not execution instruction sources.
+- This discipline is **optional fallback** only when PM explicitly requests a separate Plan mode artifact; it is not the default planning path for this repository.
 - In this repository, a plan artifact's purpose is to help Architect and PM converge on the next round before `PLAN.md` is overwritten.
 - **Every development-round plan artifact must include an explicit handoff note stating:** "After PM approval, Architect only overwrites root `PLAN.md` and then stops; Builder implementation must run in a separate `Builder Agent` session."
 - Plan artifacts may be written in Chinese by default for PM readability; use English only when PM explicitly requests it.
@@ -378,6 +379,14 @@ Ownership and write mode for `PLAN.md` / `FEEDBACK.md` are defined in `Single So
   1. Architect first overwrites `PLAN.md` (and may apply only the small governance doc edits explicitly listed in the approved plan, such as a one-line `AGENTS.md` clarification)
   2. Architect **stops**; Builder-oriented implementation work begins only in a **new** session named **Builder Agent**, reading the frozen `PLAN.md`
 - This is a repository workflow convention layered on top of Cursor Plan mode; `PLAN.md` remains the only execution instruction source for Builder Agent.
+
+### Direct `PLAN.md` planning discipline (default)
+
+- Default planning path: Architect writes/refines round scope directly in root `PLAN.md`, then waits for PM approval.
+- Architect must not start Builder implementation after PM approval; Architect only hands off by freezing `PLAN.md` and stopping.
+- When planning contains alternative scope/contract choices, Architect must use `AskQuestion` for PM choice capture before freezing `PLAN.md`.
+- `PLAN.md` must contain only PM-selected options; do not leave Builder-facing optional scope branches.
+- If PM explicitly asks for a separate Plan mode artifact, follow `Plan mode artifact discipline`; otherwise do not create one.
 
 ### Roadmap discipline
 
