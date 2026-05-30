@@ -76,16 +76,20 @@ from .projection import (
 )
 from .projection import get_candidate_view_for_runtime as _projection_candidate_view
 from .scoring_context_service import (
-    job_context_to_authoring_text,
-    mark_evaluation_stale,
-    organization_context_to_authoring_text,
-    refresh_scoring_context,
-    recruiter_actor_context_to_authoring_text,
-    recruiter_answers_to_job_authoring_text,
-    scoring_context_is_ready,
+    clear_evaluation_stale_flags_on_candidate,
     clear_job_from_scoring_context,
     clear_organization_from_scoring_context,
     clear_recruiter_actor_from_scoring_context,
+    compute_scoring_context_materialization_blockers,
+    finalize_ready_context_with_fingerprint,
+    force_mark_evaluations_stale_on_candidate,
+    job_context_to_authoring_text,
+    mark_evaluation_stale,
+    organization_context_to_authoring_text,
+    recruiter_actor_context_to_authoring_text,
+    recruiter_answers_to_job_authoring_text,
+    refresh_scoring_context,
+    scoring_context_is_ready,
     update_scoring_context,
 )
 from schemas.state_schema import (
@@ -263,6 +267,76 @@ def _refresh_materialized_context_from_prose(
     )
 
 
+def _context_was_ready(context: Optional[ScoringContext]) -> bool:
+    return context is not None and context.status == ScoringContextStatus.READY
+
+
+def force_mark_all_candidate_evaluations_stale(runtime: IngressRuntime) -> None:
+    """Mark every candidate light/deep evaluation stale (R-014 edit from ready)."""
+    cand_store = runtime.candidate_store
+    ostore = runtime.bundle.store
+    for cid in cand_store.list_candidate_ids():
+        got_c = cand_store.get(cid)
+        if not got_c.ok or got_c.candidate is None or got_c.meta is None:
+            continue
+        evaluation = got_c.candidate.evaluation_status
+        if evaluation is None:
+            continue
+        next_evaluation = force_mark_evaluations_stale_on_candidate(evaluation)
+        if next_evaluation is evaluation:
+            continue
+        next_cand = _model_copy_local(
+            got_c.candidate,
+            evaluation_status=next_evaluation,
+            evaluation_revision=got_c.candidate.evaluation_revision + 1,
+        )
+        rep_c = cand_store.replace(next_cand, expected_store_revision=got_c.meta.store_revision)
+        if not rep_c.ok or rep_c.candidate is None:
+            continue
+        got_s = ostore.get_for_candidate(cid)
+        if not got_s.ok or got_s.snapshot is None or got_s.meta is None:
+            continue
+        snap = finalize_orchestration_snapshot(got_s.snapshot, rep_c.candidate)
+        ostore.replace(
+            got_s.meta.state_id,
+            snap,
+            expected_store_revision=got_s.meta.store_revision,
+        )
+
+
+def clear_all_candidate_evaluation_stale_flags(runtime: IngressRuntime) -> None:
+    """Clear evaluation stale after idempotent re-ready (R-014)."""
+    cand_store = runtime.candidate_store
+    ostore = runtime.bundle.store
+    for cid in cand_store.list_candidate_ids():
+        got_c = cand_store.get(cid)
+        if not got_c.ok or got_c.candidate is None or got_c.meta is None:
+            continue
+        evaluation = got_c.candidate.evaluation_status
+        if evaluation is None:
+            continue
+        next_evaluation = clear_evaluation_stale_flags_on_candidate(evaluation)
+        if next_evaluation is evaluation:
+            continue
+        next_cand = _model_copy_local(
+            got_c.candidate,
+            evaluation_status=next_evaluation,
+            evaluation_revision=got_c.candidate.evaluation_revision + 1,
+        )
+        rep_c = cand_store.replace(next_cand, expected_store_revision=got_c.meta.store_revision)
+        if not rep_c.ok or rep_c.candidate is None:
+            continue
+        got_s = ostore.get_for_candidate(cid)
+        if not got_s.ok or got_s.snapshot is None or got_s.meta is None:
+            continue
+        snap = finalize_orchestration_snapshot(got_s.snapshot, rep_c.candidate)
+        ostore.replace(
+            got_s.meta.state_id,
+            snap,
+            expected_store_revision=got_s.meta.store_revision,
+        )
+
+
 def _mark_existing_candidate_evaluations_stale(
     runtime: IngressRuntime, *, active_context_version: int
 ) -> None:
@@ -323,6 +397,7 @@ def author_organization_context(
     context: OrganizationContext,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         organization_authoring_text=organization_context_to_authoring_text(context),
@@ -330,9 +405,8 @@ def author_organization_context(
         source_refs=context.source_refs,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -341,6 +415,7 @@ def author_recruiter_actor_context(
     context: RecruiterActorContext,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         recruiter_actor_authoring_text=recruiter_actor_context_to_authoring_text(context),
@@ -348,9 +423,8 @@ def author_recruiter_actor_context(
         source_refs=context.source_refs,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -359,6 +433,7 @@ def author_job_context(
     context: JobContext,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         job_authoring_text=job_context_to_authoring_text(context),
@@ -366,9 +441,8 @@ def author_job_context(
         source_refs=context.source_refs,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -382,15 +456,15 @@ def author_organization_context_from_text(
     if not text:
         raise InvalidScoringContextError("organization_context text must be non-empty")
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         organization_authoring_text=text,
         source_refs=[source_ref] if source_ref else None,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -404,15 +478,15 @@ def author_recruiter_actor_context_from_text(
     if not text:
         raise InvalidScoringContextError("recruiter_actor_context text must be non-empty")
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         recruiter_actor_authoring_text=text,
         source_refs=[source_ref] if source_ref else None,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -426,15 +500,15 @@ def author_job_context_from_text(
     if not text:
         raise InvalidScoringContextError("job_context text must be non-empty")
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = update_scoring_context(
         current,
         job_authoring_text=text,
         source_refs=[source_ref] if source_ref else None,
     )
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
@@ -483,17 +557,31 @@ def refresh_active_scoring_context(
     materializer: Optional[ScoringContextMaterializeFromProseSkill] = None,
 ) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    prev_fp = current.last_ready_materialized_fingerprint if current is not None else None
     refreshed = _refresh_materialized_context_from_prose(
         runtime,
         current,
         materializer=materializer,
     )
     if refreshed.status != ScoringContextStatus.READY:
-        raise InvalidScoringContextError(
+        blockers = compute_scoring_context_materialization_blockers(refreshed)
+        detail = (
             "scoring_context cannot become ready until prose authoring is normalized into "
             "typed context and materialized L2/L3 criteria succeed"
         )
-    return _persist_scoring_context(runtime, refreshed)
+        if blockers:
+            detail = f"{detail}; blockers: {'; '.join(blockers)}"
+        raise InvalidScoringContextError(detail)
+    finalized = finalize_ready_context_with_fingerprint(current, refreshed)
+    persisted = _persist_scoring_context(runtime, finalized)
+    new_fp = persisted.last_ready_materialized_fingerprint
+    if prev_fp is not None and new_fp == prev_fp:
+        clear_all_candidate_evaluation_stale_flags(runtime)
+    elif prev_fp is not None and new_fp != prev_fp:
+        _mark_existing_candidate_evaluations_stale(
+            runtime, active_context_version=persisted.context_version
+        )
+    return persisted
 
 
 def _ensure_demo_scoring_context_ready(runtime: IngressRuntime) -> None:
@@ -1096,31 +1184,31 @@ def keep_separate_candidate_dedup(
 
 def clear_organization_context(runtime: IngressRuntime) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = clear_organization_from_scoring_context(current)
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
 def clear_recruiter_actor_context(runtime: IngressRuntime) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = clear_recruiter_actor_from_scoring_context(current)
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 
 def clear_job_context(runtime: IngressRuntime) -> ScoringContext:
     current = get_active_scoring_context(runtime)
+    was_ready = _context_was_ready(current)
     updated = clear_job_from_scoring_context(current)
     persisted = _persist_scoring_context(runtime, updated)
-    _mark_existing_candidate_evaluations_stale(
-        runtime, active_context_version=persisted.context_version
-    )
+    if was_ready:
+        force_mark_all_candidate_evaluations_stale(runtime)
     return persisted
 
 

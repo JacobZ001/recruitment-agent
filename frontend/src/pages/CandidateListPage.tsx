@@ -80,6 +80,8 @@ export function CandidateListPage() {
         </p>
       </div>
 
+      <CreateCandidatePdfUpload contextReady={contextReady} />
+
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-slate-700">Stage</span>
@@ -203,8 +205,6 @@ export function CandidateListPage() {
           </div>
         </div>
       )}
-
-      <CreateCandidatePdfUpload contextReady={contextReady} />
 
       <ScoringContextIngress
         context={scoringQ.data}

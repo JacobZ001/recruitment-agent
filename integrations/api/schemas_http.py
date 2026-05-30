@@ -114,8 +114,9 @@ class ScoringContextResponse(BaseModel):
     created_at: str
     updated_at: str
     ready_at: Optional[str] = None
-    stale_at: Optional[str] = None
+    last_ready_materialized_fingerprint: Optional[str] = None
     source_refs: List[str] = Field(default_factory=list)
+    materialization_blockers: List[str] = Field(default_factory=list)
 
 
 class TimelineResponse(BaseModel):

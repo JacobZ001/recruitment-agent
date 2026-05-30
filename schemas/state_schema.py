@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 try:  # Pydantic v2
-    from pydantic import ConfigDict, field_validator
+    from pydantic import ConfigDict, field_validator, model_validator
 
     _PYDANTIC_V2 = True
 except Exception:  # Pydantic v1 fallback
     from pydantic import validator as field_validator  # type: ignore
 
+    model_validator = None  # type: ignore[misc, assignment]
     _PYDANTIC_V2 = False
 
 
@@ -277,7 +278,6 @@ class IngressProfile(_SchemaBase):
 class ScoringContextStatus(str, Enum):
     COLLECTING = "collecting"
     READY = "ready"
-    STALE = "stale"
 
 
 class OrganizationContext(_SchemaBase):
@@ -332,8 +332,20 @@ class ScoringContext(_SchemaBase):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     ready_at: Optional[datetime] = Field(default=None)
-    stale_at: Optional[datetime] = Field(default=None)
+    last_ready_materialized_fingerprint: Optional[str] = Field(default=None)
     source_refs: List[str] = Field(default_factory=list)
+
+    if _PYDANTIC_V2 and model_validator is not None:
+
+        @model_validator(mode="before")
+        @classmethod
+        def _normalize_legacy_scoring_context(cls, data: Any) -> Any:
+            if isinstance(data, Mapping):
+                data = dict(data)
+                if data.get("status") == "stale":
+                    data["status"] = ScoringContextStatus.COLLECTING.value
+                data.pop("stale_at", None)
+            return data
 
 
 class CriterionScore(_SchemaBase):

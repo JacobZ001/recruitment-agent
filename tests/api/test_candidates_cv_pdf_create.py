@@ -136,4 +136,4 @@ def test_clear_organization_context(
     body = cleared.json()
     assert body["organization_authoring_text"] == ""
     assert body["organization_context"] is None
-    assert body["status"] in ("stale", "collecting")
+    assert body["status"] == "collecting"

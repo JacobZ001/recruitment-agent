@@ -67,8 +67,9 @@ export type ScoringContextResponse = {
   created_at: string
   updated_at: string
   ready_at?: string | null
-  stale_at?: string | null
+  last_ready_materialized_fingerprint?: string | null
   source_refs: string[]
+  materialization_blockers?: string[]
 }
 
 export type CandidateCreatePdfIngressResponse = {

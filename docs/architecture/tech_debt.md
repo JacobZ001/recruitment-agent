@@ -2,7 +2,7 @@
 
 Purpose: track active deferred architecture improvements, scaling risks, and engineering rationale so we don't lose critical future considerations, while keeping a lightweight summary index for resolved/superseded debt IDs. This project prioritizes **deterministic orchestration** and **verifiable behavior** over “smart prompts”.
 
-- **Last full registry sweep**: 2026-05-30 (R-013.2 closeout triage: TD-API-016 resolved; TD-PERSISTENCE-001 reviewed)
+- **Last full registry sweep**: 2026-05-30 (R-014 closeout partial triage: TD-PERSISTENCE-009, TD-API-001 reviewed; TD-API-016 resolved in R-013.2)
 - **Resolved/Superseded archive**: `docs/architecture/tech_debt/resolved.md`
 
 ## Debt lifecycle
@@ -552,8 +552,8 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Status**: OPEN
 - **Revisit when**: When the reference runtime must support more than one concurrent requisition / job context
 - **Introduced in**: 2026-05-25
-- **Last reviewed**: 2026-05-26
-- **Current decision**: The runtime still persists exactly one canonical active `scoring_context` for the whole single-tenant process. In `R-005`, that single object now stores prose-first authoring text, normalized typed context, and persisted `derived_l2_criteria` / `derived_l3_criteria`; candidate snapshots still store only the `context_version` used for scoring plus stale flags.
+- **Last reviewed**: 2026-05-30
+- **Current decision**: The runtime still persists exactly one canonical active `scoring_context` for the whole single-tenant process. **R-014** added `last_ready_materialized_fingerprint`, fingerprint-gated `context_version` bumps, and List ingress UX on the product path; requisition-scoped context ids remain deferred.
 - **Rationale**: This keeps prose authoring auditability, normalized control-plane semantics, and canonical scorer inputs together without introducing a premature requisition aggregate or duplicating context payloads onto candidate snapshots.
 - **Future impact**: Multiple simultaneous roles/jobs still cannot carry isolated authoring drafts, ready/stale context lifecycles, or candidate-to-context binding semantics; prose-first authoring increases the value of eventual requisition scoping because the active singleton now holds richer draft state.
 - **Priority**: High
@@ -708,8 +708,8 @@ Purpose: track active deferred architecture improvements, scaling risks, and eng
 - **Status**: OPEN
 - **Revisit when**: When roadmap work is scheduled for `Runtime scope / isolation hygiene` or `Multi-tenant isolation and production infrastructure`, or earlier if shared-runtime interference blocks single-tenant recruiter workflows
 - **Introduced in**: 2026-05-12
-- **Last reviewed**: 2026-05-26
-- **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). All requests share the **same** runtime-owned event bus, snapshot store, and active `scoring_context` store. Stage B multi-candidate routing now allows **multiple candidate snapshots** inside that one shared runtime, but there is still **no** per-request, per-session, or per-tenant isolation boundary in v1.
+- **Last reviewed**: 2026-05-30
+- **Current decision**: The reference HTTP ingress (`integrations/api/`) wires **one** `VerticalSliceApiRuntime` per application process (singleton-style lifespan). **R-014** improved single-process scoring-context operability (ingress blockers, ready gating) without changing isolation boundaries.
 - **Rationale**: **Deterministic-first**, **bounded** vertical-slice validation: a single shared world maximizes reproducibility for demos and integration tests without introducing session factories, pooling, or multi-tenant routing in the API layer yet.
 - **Future impact**: Multi-candidate support now exists, but all clients still operate inside the **same shared runtime world**: concurrent users can interfere through shared candidate lists, shared active scoring context, and dev/reset behavior. Shared environments, realistic multi-session testing, or tenant isolation will need explicit runtime scopes or stronger process boundaries.
 - **Priority**: Medium

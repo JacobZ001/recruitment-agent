@@ -179,6 +179,10 @@ def _resolve_vertical_slice_db_path(explicit: Optional[str]) -> Optional[str]:
 
 def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     def _context_response(rt: VerticalSliceApiRuntime) -> ScoringContextResponse:
+        from modules.recruitment.scoring_context_service import (
+            compute_scoring_context_materialization_blockers,
+        )
+
         context = get_active_scoring_context(rt)
         if context is None:
             raise HTTPException(status_code=404, detail={"code": "scoring_context_missing"})
@@ -186,6 +190,9 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
             payload = context.model_dump(mode="json")
         else:
             payload = context.dict()
+        payload["materialization_blockers"] = compute_scoring_context_materialization_blockers(
+            context
+        )
         return ScoringContextResponse(**payload)
 
     @asynccontextmanager

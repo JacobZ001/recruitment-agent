@@ -13,7 +13,7 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 ## Current Operating Posture
 
 The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs, including full dedup governance (pre-create block, suspected fingerprint, post-parse `post_ingress_duplicate`, link/keep-separate, orphan/in-progress flags, indexed lookups).
-As of **R-013.2**, local SQLite dedup-index upgrades require deleting `data/app.db` (no runtime migration); create+upload runs post-parse high-confidence dedup after cv_parse with merged matches and idempotent in-flight retry handling.
+As of **R-014**, List scoring-context ingress is recruiter-operable on the product path (Confirm/clear/refresh, materialization blockers, fingerprint-gated `context_version`, evaluation stale semantics); local SQLite cutovers still require deleting `data/app.db` when canonical schema fields change.
 
 ## Capability Roadmap Layer
 
@@ -32,7 +32,7 @@ Stage status: `Partial`
 - Multi-candidate persistent recruiter workflow - `Partial`
 - Recruiter-facing state and candidate views - `Partial`
 - Product-grade recruiter frontend / workflow workspace - `Partial`
-- Real PDF + scoring-context ingress on List (recruiter-operable baseline) - `Partial`
+- Real PDF + scoring-context ingress on List (recruiter-operable baseline) - `Partial` (R-014: ready gating, ingress state machine, version/fingerprint; requisition scope still deferred)
 - Candidate-scoped workflow timeline/history - `Gap`
 - Deterministic hard-filtered canonical ingress path - `Gap`
 
@@ -49,7 +49,7 @@ Stage status: `Partial`
 
 - CV profile parsing - `Partial`
 - Job-aware layered light scoring - `Partial`
-- Ready-state criteria generation governance - `Partial`
+- Ready-state criteria generation governance - `Partial` (R-014: `collecting`|`ready`, fingerprint idempotency, candidate evaluation stale)
 - Real-input cognition quality evaluation (non-fixture ingress path) - `Partial`
 - Deep scoring maturity and questionnaire continuity - `Gap`
 - Deterministic provider failure taxonomy - `Gap`
@@ -76,13 +76,9 @@ This is the near-term action queue derived from capability gaps plus debt priori
 
 **List format:** entries are **not** numbered. The **round ID** (e.g. `R-014`) is the sole stable identifier; add/remove/reorder rows without renumbering. Priority is top-to-bottom in this file until PM reprioritizes.
 
-- **R-014 — Scoring context ingress hardening** (`TD-PERSISTENCE-009 + Single active scoring_context store (not requisition-scoped yet)`, `TD-API-001 + API runtime singleton (single process, shared runtime)`; PM-selected after recruiter SPA exercise)
-  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
-  - Goal: harden List-page scoring-context ingress (confirm/clear/refresh, ready gating for PDF create+upload, deterministic error surfaces, processed-context visibility) from PM-observed frontend issues; keep scope on product-path ingress UX + API alignment, not timeline or global API hardening.
-
-- **R-015 — Candidate-scoped timeline safety** (`TD-INSPECTION-002 + Timeline rendering format (plain text vs structured projections)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
-  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
-  - Goal: replace process-global timeline behavior with candidate-aware history, or explicitly narrow timeline product scope.
+- **R-015 — Candidate-scoped timeline safety** (`TD-INSPECTION-002 + Timeline rendering format (plain text vs structured projections)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`; **`TD-CONTRACTS-015` partial — scoring_context `source_ref` lineage through materialize**)
+  - Advances: `Recruiter Workflow Operation`, `Operational Readiness`, `Controlled Cognition` (provenance slice)
+  - Goal: replace process-global timeline behavior with candidate-aware history, or explicitly narrow timeline product scope; **also** thread recruiter-authored `source_ref` (prose Confirm / Job PDF) into materialized typed `source_refs` and reduce top-level vs typed provenance drift (bounded slice of evidence-reference debt — not full `TD-CONTRACTS-015` contract redesign).
 
 - **R-016 — API hardening** (`TD-API-011 + HTTP ingress idempotency and replay-safe retries`, `TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-API-015 + Idempotency HTTP response canonicalization vs OpenAPI (POST /candidates/cv/pdf)`)
   - Advances: `Operational Readiness`
@@ -105,6 +101,10 @@ This is the near-term action queue derived from capability gaps plus debt priori
   - Goal: remove `/demo*` routes and compatibility shims, including default candidate bootstrap path (`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`); keep product-path recruiter/API surfaces only.
   - **Production runtime clock policy (post-cutover):** product-path ingress, audit, and governance timestamps must use real UTC time (`datetime.now(timezone.utc)` or injected clock provider). `modules/recruitment/ingress.FIXED_CLOCK` and other demo fixed clocks must not be used for production audit/governance write paths after cutover.
 
+- **Scoring context golden prose regression (pytest fixtures; round unassigned)** — **queue after R-020**
+  - Advances: `Controlled Cognition`, `Operational Readiness`
+  - Goal: add version-controlled org / recruiter / job authoring prose under `tests/fixtures/` (distinct from DB seed script `scripts/seed_testing_candidate_from_pdf.py`); under **`LLM_PROVIDER=stub`**, pytest asserts stable **materialized fingerprint** (and bounded L2/L3) after refresh/materialize so skill or fingerprint-rule changes fail CI intentionally. Does not replace PM List UAT; does not eliminate live-LLM drift (accepted risk unless pinned live CI is later approved). Assign round ID when Architect schedules with PM.
+
 - **R-021 — Contract and timestamp hardening** (`TD-CONTRACTS-005 + Timezone-aware datetime handling`, `TD-CONTRACTS-011 + Shared execution metadata structures`, `TD-CONTRACTS-012 + Future shared timing/audit abstractions`)
   - Advances: `Deterministic Foundation`, `Operational Readiness`
   - Goal: remove naive UTC defaults and tighten shared execution metadata/timing semantics before broader contract hardening.
@@ -116,6 +116,10 @@ This is the near-term action queue derived from capability gaps plus debt priori
 - **R-023 — Governance domain storage evaluation (planning spike)**
   - Advances: `Human Governance`, `Deterministic Foundation`
   - Goal: decide whether `DecisionState` / `CommunicationState` remain on `OrchestrationState` or split storage without cross-store coupling in orchestrator hot path.
+
+- **R-024 — Job context recruiter Q&A ingress (recruiter-answers productization)**
+  - Advances: `Recruiter Workflow Operation`, `Controlled Cognition`
+  - Goal: recruiter-facing guided Q&A (LLM-driven) to build job scoring context, wired to existing or evolved job-context authoring APIs (successor to raw `POST /scoring-context/job/recruiter-answers` + prose/PDF paths on List).
 
 ## Deferred Without Round Assignment
 

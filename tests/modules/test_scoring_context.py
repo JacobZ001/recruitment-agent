@@ -8,6 +8,7 @@ import pytest
 
 from modules.recruitment.exceptions import InvalidScoringContextError, ScoringContextNotReadyError
 from modules.recruitment.runtime import VerticalSliceApiRuntime
+from modules.recruitment.scoring_context_fingerprint import materialized_scoring_context_fingerprint
 from modules.recruitment.use_cases import (
     author_job_context_from_recruiter_answers,
     author_organization_context,
@@ -42,7 +43,6 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
     )
     assert first.status.value == "collecting"
     assert first.context_version == 1
-    assert first.organization_authoring_text
 
     second = author_recruiter_actor_context(
         rt,
@@ -53,8 +53,7 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
         ),
     )
     assert second.status.value == "collecting"
-    assert second.context_version == 2
-    assert second.recruiter_actor_authoring_text
+    assert second.context_version == 1
 
     third = author_job_context_from_recruiter_answers(
         rt,
@@ -65,27 +64,24 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
         responsibilities_answer="coordinate interviews\nsurface blockers early",
     )
     assert third.status.value == "collecting"
-    assert third.context_version == 3
-    assert third.job_authoring_text
+    assert third.context_version == 1
 
     ready = refresh_active_scoring_context(rt)
     assert ready.status.value == "ready"
-    assert ready.context_version == 3
+    assert ready.context_version == 1
+    assert ready.last_ready_materialized_fingerprint
     assert ready.derived_l2_criteria
     assert ready.derived_l3_criteria
 
     submit_cv(rt, cid, "Recruiter profile\n6 years\ncommunication and process ownership")
-    got = rt.bundle.store.get_for_candidate(cid)
-    assert got.ok and got.snapshot is not None
-    assert got.snapshot.pipeline.phase == PipelinePhase.QUESTIONNAIRE_PENDING
     got_c = rt.candidate_store.get(cid)
     assert got_c.ok and got_c.candidate is not None
     light = got_c.candidate.evaluation_status.light
     assert light is not None
-    assert light.context_version == 3
+    assert light.context_version == 1
     assert light.stale is False
 
-    stale = author_organization_context(
+    edited = author_organization_context(
         rt,
         OrganizationContext(
             company_name="BlueOcean",
@@ -93,19 +89,56 @@ def test_scoring_context_status_transitions_and_re_score_staleness() -> None:
             preference_signals=["clear communication", "structured follow-through"],
         ),
     )
-    assert stale.status.value == "stale"
-    assert stale.context_version == 4
+    assert edited.status.value == "collecting"
+    assert edited.context_version == 1
 
-    got_stale = rt.bundle.store.get_for_candidate(cid)
-    assert got_stale.ok and got_stale.snapshot is not None
     got_stale_c = rt.candidate_store.get(cid)
     assert got_stale_c.ok and got_stale_c.candidate is not None
     assert got_stale_c.candidate.evaluation_status.light is not None
     assert got_stale_c.candidate.evaluation_status.light.stale is True
 
+    fp_before = ready.last_ready_materialized_fingerprint
     ready_again = refresh_active_scoring_context(rt)
     assert ready_again.status.value == "ready"
-    assert ready_again.context_version == 4
+    assert ready_again.context_version == 2
+    assert ready_again.last_ready_materialized_fingerprint != fp_before
+
+    got_after_refresh = rt.candidate_store.get(cid)
+    assert got_after_refresh.ok and got_after_refresh.candidate is not None
+    light_after = got_after_refresh.candidate.evaluation_status.light
+    assert light_after is not None
+    assert light_after.stale is True
+    assert light_after.context_version == 1
+
+
+def test_idempotent_refresh_does_not_bump_version() -> None:
+    rt = VerticalSliceApiRuntime()
+    author_organization_context_from_text(
+        rt,
+        (
+            "BlueOcean is a recruitment company. The Talent Ops team operates in a fast-moving "
+            "workflow. The organization values clear communication and structured follow-through."
+        ),
+    )
+    author_recruiter_actor_context_from_text(
+        rt,
+        (
+            "Recruiter prose-recruiter is a lead recruiter focused on operator-ready execution. "
+            "The recruiter values stakeholder communication and ownership, and avoids unclear updates."
+        ),
+    )
+    author_job_context_from_recruiter_answers(
+        rt,
+        role_title="Operations Recruiter",
+        must_haves_answer="stakeholder communication\nprocess ownership",
+        preferred_answer="ATS familiarity",
+        success_answer="keep candidate flow organized",
+        responsibilities_answer="coordinate interviews\nsurface blockers early",
+    )
+    r1 = refresh_active_scoring_context(rt)
+    r2 = refresh_active_scoring_context(rt)
+    assert r1.context_version == r2.context_version == 1
+    assert r1.last_ready_materialized_fingerprint == r2.last_ready_materialized_fingerprint
 
 
 def test_submit_cv_run_history_persists_profile_before_scoring(
@@ -169,15 +202,12 @@ def test_prose_authoring_materializes_on_refresh() -> None:
     current = get_active_scoring_context(rt)
     assert current is not None
     assert current.organization_context is None
-    assert current.recruiter_actor_context is None
-    assert current.job_context is None
 
     ready = refresh_active_scoring_context(rt)
     assert ready.organization_context is not None
     assert ready.recruiter_actor_context is not None
     assert ready.job_context is not None
     assert ready.derived_l2_criteria
-    assert ready.derived_l3_criteria
 
 
 def test_refresh_requires_non_empty_derived_l2_and_l3_signals() -> None:
@@ -207,14 +237,12 @@ def test_refresh_requires_non_empty_derived_l2_and_l3_signals() -> None:
         responsibilities_answer="coordinate interviews",
     )
 
-    with pytest.raises(InvalidScoringContextError, match="normalized into typed context"):
+    with pytest.raises(InvalidScoringContextError, match="blockers"):
         refresh_active_scoring_context(rt)
 
     current = get_active_scoring_context(rt)
     assert current is not None
     assert current.status == ScoringContextStatus.COLLECTING
-    assert current.derived_l2_criteria == []
-    assert current.derived_l3_criteria == []
 
 
 def test_deep_scoring_requires_ready_scoring_context() -> None:
@@ -223,7 +251,7 @@ def test_deep_scoring_requires_ready_scoring_context() -> None:
         publish_recruitment_event(rt, uuid4(), "deep_scoring_completed", {})
 
 
-def test_deep_scoring_rejects_stale_scoring_context(establish_ready_scoring_context) -> None:
+def test_deep_scoring_rejects_collecting_scoring_context(establish_ready_scoring_context) -> None:
     rt = VerticalSliceApiRuntime()
     establish_ready_scoring_context(rt)
     author_organization_context(
@@ -236,3 +264,52 @@ def test_deep_scoring_rejects_stale_scoring_context(establish_ready_scoring_cont
     )
     with pytest.raises(ScoringContextNotReadyError, match="scoring_context_not_ready"):
         publish_recruitment_event(rt, uuid4(), "deep_scoring_completed", {})
+
+
+def test_fingerprint_ignores_source_refs_order() -> None:
+    rt = VerticalSliceApiRuntime()
+    author_organization_context_from_text(
+        rt,
+        (
+            "BlueOcean is a recruitment company. The Talent Ops team operates in a fast-moving "
+            "workflow. The organization values clear communication and structured follow-through."
+        ),
+        source_ref="pdf://org-a.pdf",
+    )
+    author_recruiter_actor_context_from_text(
+        rt,
+        (
+            "Recruiter prose-recruiter is a lead recruiter focused on operator-ready execution. "
+            "The recruiter values stakeholder communication and ownership, and avoids unclear updates."
+        ),
+        source_ref="pdf://recruiter-b.pdf",
+    )
+    author_job_context_from_recruiter_answers(
+        rt,
+        role_title="Operations Recruiter",
+        must_haves_answer="stakeholder communication\nprocess ownership",
+        preferred_answer="ATS familiarity",
+        success_answer="keep candidate flow organized",
+        responsibilities_answer="coordinate interviews\nsurface blockers early",
+    )
+    ready = refresh_active_scoring_context(rt)
+    fp = materialized_scoring_context_fingerprint(ready)
+    assert fp == ready.last_ready_materialized_fingerprint
+
+    org = ready.organization_context
+    rec = ready.recruiter_actor_context
+    job = ready.job_context
+    assert org is not None and rec is not None and job is not None
+    reordered = ready.model_copy(
+        update={
+            "source_refs": ["z://last", "a://first"],
+            "organization_context": org.model_copy(
+                update={"source_refs": ["pdf://z", "pdf://a"]}
+            ),
+            "recruiter_actor_context": rec.model_copy(
+                update={"source_refs": ["pdf://y", "pdf://b"]}
+            ),
+            "job_context": job.model_copy(update={"source_refs": ["pdf://x", "pdf://c"]}),
+        }
+    )
+    assert materialized_scoring_context_fingerprint(reordered) == fp

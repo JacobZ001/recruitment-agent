@@ -37,7 +37,8 @@ export function ScoringContextPanel({
     { key: 'created_at', value: ctx.created_at },
     { key: 'updated_at', value: ctx.updated_at },
     { key: 'ready_at', value: ctx.ready_at },
-    { key: 'stale_at', value: ctx.stale_at },
+    { key: 'last_ready_materialized_fingerprint', value: ctx.last_ready_materialized_fingerprint },
+    { key: 'materialization_blockers', value: ctx.materialization_blockers },
   ]
   const objectFields: { key: string; value: unknown }[] = [
     { key: 'organization_context', value: ctx.organization_context },

@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from schemas.state_schema import (
     CriterionScore,
+    EvaluationState,
     JobContext,
     OrganizationContext,
     RecruiterActorContext,
@@ -18,6 +19,8 @@ from schemas.state_schema import (
     ScoringContext,
     ScoringContextStatus,
 )
+
+from .scoring_context_fingerprint import materialized_scoring_context_fingerprint
 
 _MAX_ITEMS = 8
 _MAX_ITEM_LEN = 120
@@ -359,6 +362,30 @@ def scoring_context_is_ready(context: ScoringContext) -> bool:
     return list(context.derived_l2_criteria) == list(l2) and list(context.derived_l3_criteria) == list(l3)
 
 
+def compute_scoring_context_materialization_blockers(context: ScoringContext) -> List[str]:
+    """Deterministic pre-LLM checklist for why context is not ready (R-014)."""
+    if scoring_context_is_ready(context):
+        return []
+    blockers: List[str] = []
+    if not str(context.organization_authoring_text or "").strip():
+        blockers.append("organization authoring prose is missing or not confirmed")
+    if not str(context.recruiter_actor_authoring_text or "").strip():
+        blockers.append("recruiter actor authoring prose is missing or not confirmed")
+    if not str(context.job_authoring_text or "").strip():
+        blockers.append("job authoring prose is missing or not confirmed")
+    try:
+        _validate_materialized_payload(
+            organization_context=context.organization_context,
+            recruiter_actor_context=context.recruiter_actor_context,
+            job_context=context.job_context,
+            derived_l2_criteria=context.derived_l2_criteria,
+            derived_l3_criteria=context.derived_l3_criteria,
+        )
+    except ValueError as exc:
+        blockers.append(str(exc))
+    return blockers
+
+
 def refresh_scoring_context(
     existing: Optional[ScoringContext],
     *,
@@ -415,16 +442,15 @@ def refresh_scoring_context(
         status=ScoringContextStatus.READY,
         updated_at=now,
         ready_at=now,
-        stale_at=None,
         derived_l2_criteria=l2,
         derived_l3_criteria=l3,
     )
 
 
-def _clear_dimension_status(existing: ScoringContext) -> tuple[ScoringContextStatus, Optional[datetime]]:
+def _dimension_edit_status(existing: ScoringContext) -> ScoringContextStatus:
     if existing.status == ScoringContextStatus.READY:
-        return ScoringContextStatus.STALE, _now_utc()
-    return ScoringContextStatus.COLLECTING, existing.stale_at
+        return ScoringContextStatus.COLLECTING
+    return ScoringContextStatus.COLLECTING
 
 
 def clear_organization_from_scoring_context(
@@ -433,16 +459,14 @@ def clear_organization_from_scoring_context(
     now = _now_utc()
     if existing is None:
         return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
-    next_status, stale_at = _clear_dimension_status(existing)
+    next_status = _dimension_edit_status(existing)
     return _copy_context(
         existing,
-        context_version=int(existing.context_version) + 1,
         organization_authoring_text="",
         organization_context=None,
         status=next_status,
         updated_at=now,
         ready_at=None,
-        stale_at=stale_at,
         derived_l2_criteria=[],
         derived_l3_criteria=[],
     )
@@ -454,16 +478,14 @@ def clear_recruiter_actor_from_scoring_context(
     now = _now_utc()
     if existing is None:
         return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
-    next_status, stale_at = _clear_dimension_status(existing)
+    next_status = _dimension_edit_status(existing)
     return _copy_context(
         existing,
-        context_version=int(existing.context_version) + 1,
         recruiter_actor_authoring_text="",
         recruiter_actor_context=None,
         status=next_status,
         updated_at=now,
         ready_at=None,
-        stale_at=stale_at,
         derived_l2_criteria=[],
         derived_l3_criteria=[],
     )
@@ -475,16 +497,14 @@ def clear_job_from_scoring_context(
     now = _now_utc()
     if existing is None:
         return ScoringContext(created_at=now, updated_at=now, status=ScoringContextStatus.COLLECTING)
-    next_status, stale_at = _clear_dimension_status(existing)
+    next_status = _dimension_edit_status(existing)
     return _copy_context(
         existing,
-        context_version=int(existing.context_version) + 1,
         job_authoring_text="",
         job_context=None,
         status=next_status,
         updated_at=now,
         ready_at=None,
-        stale_at=stale_at,
         derived_l2_criteria=[],
         derived_l3_criteria=[],
     )
@@ -506,16 +526,14 @@ def update_scoring_context(
         context = ScoringContext(created_at=now, updated_at=now)
     else:
         context = _copy_context(existing)
-    next_version = 1 if existing is None else int(existing.context_version) + 1
     next_source_refs = _bounded_items(list(context.source_refs) + list(source_refs or ()))
-    next_status = ScoringContextStatus.COLLECTING
-    stale_at = context.stale_at
-    if existing is not None and existing.status == ScoringContextStatus.READY:
-        next_status = ScoringContextStatus.STALE
-        stale_at = now
+    next_status = (
+        _dimension_edit_status(existing)
+        if existing is not None
+        else ScoringContextStatus.COLLECTING
+    )
     return _copy_context(
         context,
-        context_version=next_version,
         organization_authoring_text=(
             _clean_authored_text(organization_authoring_text)
             if organization_authoring_text is not None
@@ -540,8 +558,7 @@ def update_scoring_context(
         job_context=job_context if job_context is not None else context.job_context,
         status=next_status,
         updated_at=now,
-        stale_at=stale_at,
-        ready_at=None if next_status != ScoringContextStatus.READY else context.ready_at,
+        ready_at=None,
         derived_l2_criteria=[],
         derived_l3_criteria=[],
         source_refs=next_source_refs,
@@ -766,6 +783,69 @@ def mark_evaluation_stale(
     if evaluation.context_version >= active_context_version:
         return evaluation
     return _copy_score_evaluation(evaluation, stale=True)
+
+
+def force_mark_evaluations_stale_on_candidate(evaluation: EvaluationState) -> EvaluationState:
+    """Explicit stale=True on light/deep when global context leaves ready (R-014)."""
+    light = evaluation.light
+    deep = evaluation.deep
+    next_light = (
+        _copy_score_evaluation(light, stale=True) if light is not None and not light.stale else light
+    )
+    next_deep = (
+        _copy_score_evaluation(deep, stale=True) if deep is not None and not deep.stale else deep
+    )
+    if next_light is light and next_deep is deep:
+        return evaluation
+    return _copy_evaluation_status(evaluation, light=next_light, deep=next_deep)
+
+
+def clear_evaluation_stale_flags_on_candidate(evaluation: EvaluationState) -> EvaluationState:
+    """Clear light/deep stale when idempotent re-ready with unchanged fingerprint (R-014)."""
+    light = evaluation.light
+    deep = evaluation.deep
+    next_light = (
+        _copy_score_evaluation(light, stale=False) if light is not None and light.stale else light
+    )
+    next_deep = (
+        _copy_score_evaluation(deep, stale=False) if deep is not None and deep.stale else deep
+    )
+    if next_light is light and next_deep is deep:
+        return evaluation
+    return _copy_evaluation_status(evaluation, light=next_light, deep=next_deep)
+
+
+def _copy_evaluation_status(evaluation: EvaluationState, **updates: Any) -> EvaluationState:
+    if hasattr(evaluation, "model_copy"):
+        return evaluation.model_copy(update=updates, deep=True)
+    return evaluation.copy(update=updates, deep=True)
+
+
+def finalize_ready_context_with_fingerprint(
+    existing: Optional[ScoringContext],
+    materialized: ScoringContext,
+) -> ScoringContext:
+    """
+    Apply context_version + last_ready_materialized_fingerprint after successful materialize.
+
+    - First ready: version unchanged (default 1).
+    - Same fingerprint as last ready: version unchanged (idempotent re-ready).
+    - Different fingerprint: version +1.
+    """
+    fp = materialized_scoring_context_fingerprint(materialized)
+    base_version = int(existing.context_version) if existing is not None else 1
+    prev_fp = existing.last_ready_materialized_fingerprint if existing is not None else None
+    if prev_fp is not None and fp == prev_fp:
+        next_version = base_version
+    elif prev_fp is None:
+        next_version = base_version
+    else:
+        next_version = base_version + 1
+    return _copy_context(
+        materialized,
+        context_version=next_version,
+        last_ready_materialized_fingerprint=fp,
+    )
 
 
 def _copy_context(context: ScoringContext, **updates) -> ScoringContext:
