@@ -26,6 +26,7 @@ export function CandidateGovernancePanel({
   const showDedup =
     flags.dedup_pending_resolution ||
     flags.dedup_status === 'suspected_duplicate' ||
+    flags.ingress_in_progress ||
     flags.orphan_ingress
   if (!showDedup && !flags.dedup_status) return null
 
@@ -58,9 +59,14 @@ export function CandidateGovernancePanel({
   return (
     <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm">
       <div className="flex flex-wrap gap-2">
+        {flags.ingress_in_progress && (
+          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-900">
+            ingress processing
+          </span>
+        )}
         {flags.orphan_ingress && (
           <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-950">
-            orphan ingress
+            orphan ingress (stale)
           </span>
         )}
         {flags.dedup_status && (

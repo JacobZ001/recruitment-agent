@@ -550,6 +550,7 @@ def get_candidate_view_for_runtime(
     runtime: ReadRuntime,
     candidate_id: UUID,
     *,
+    ingress_in_progress: bool = False,
     orphan_ingress: bool = False,
 ) -> Dict[str, Any]:
     candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, candidate_id)
@@ -559,7 +560,9 @@ def get_candidate_view_for_runtime(
         active_scoring_context=runtime.scoring_context_store.get(),
     )
     view["governance_flags"] = governance_flags_from_candidate(
-        candidate, orphan_ingress=orphan_ingress
+        candidate,
+        ingress_in_progress=ingress_in_progress,
+        orphan_ingress=orphan_ingress,
     )
     return view
 

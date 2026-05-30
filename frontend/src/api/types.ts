@@ -16,6 +16,7 @@ export type CandidateListItemOverallScore = {
 }
 
 export type CandidateGovernanceFlags = {
+  ingress_in_progress: boolean
   orphan_ingress: boolean
   dedup_status?: string | null
   dedup_pending_resolution: boolean

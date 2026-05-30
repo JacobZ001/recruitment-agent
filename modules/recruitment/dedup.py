@@ -1,5 +1,5 @@
 """
-Deterministic candidate deduplication evaluation (R-013).
+Deterministic candidate deduplication evaluation (R-013 / R-013.1).
 
 Programs own match rules; recruiters own link/keep-separate decisions.
 """
@@ -109,58 +109,83 @@ def _match_row(
         )
 
 
-def evaluate_dedup(
+def _full_name_for_candidate(store: Any, candidate_id: UUID) -> Optional[str]:
+    got = store.get(candidate_id)
+    if got.ok and got.candidate is not None:
+        return got.candidate.identity.full_name
+    return None
+
+
+def _collect_high_confidence_matches(
+    store: Any,
+    signals: DedupIngressSignals,
+    *,
+    exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+) -> Dict[UUID, DedupMatch]:
+    high: Dict[UUID, DedupMatch] = {}
+    if signals.normalized_email:
+        for cid in store.find_candidate_ids_by_normalized_email(
+            signals.normalized_email,
+            exclude_candidate_ids=exclude_candidate_ids,
+        ):
+            _match_row(
+                cid,
+                full_name=_full_name_for_candidate(store, cid),
+                kind="normalized_email",
+                by_id=high,
+            )
+    if signals.normalized_phone:
+        for cid in store.find_candidate_ids_by_normalized_phone(
+            signals.normalized_phone,
+            exclude_candidate_ids=exclude_candidate_ids,
+        ):
+            _match_row(
+                cid,
+                full_name=_full_name_for_candidate(store, cid),
+                kind="normalized_phone",
+                by_id=high,
+            )
+    return high
+
+
+def evaluate_dedup_high_confidence_from_ingress_signals(
     candidate_store: Any,
     signals: DedupIngressSignals,
     *,
     exclude_candidate_ids: Optional[Sequence[UUID]] = None,
 ) -> DedupEvaluation:
-    """
-    Balanced/hybrid matrix (R-013 default):
-    - email or phone hit => high-confidence duplicate (block create)
-    - fingerprint-only hit => suspected duplicate (allow create, flag)
-    """
-    excluded: Set[UUID] = set(exclude_candidate_ids or ())
-    high: Dict[UUID, DedupMatch] = {}
-    fingerprint_only: Dict[UUID, DedupMatch] = {}
-
-    for cid in candidate_store.list_candidate_ids():
-        uid = UUID(str(cid)) if not isinstance(cid, UUID) else cid
-        if uid in excluded:
-            continue
-        got = candidate_store.get(uid)
-        if not got.ok or got.candidate is None:
-            continue
-        cand = got.candidate
-        sig = cand.dedup_signals
-        name = cand.identity.full_name
-        email_hit = (
-            signals.normalized_email is not None
-            and sig.normalized_email is not None
-            and sig.normalized_email == signals.normalized_email
-        )
-        phone_hit = (
-            signals.normalized_phone is not None
-            and sig.normalized_phone is not None
-            and sig.normalized_phone == signals.normalized_phone
-        )
-        fp_hit = (
-            signals.cv_content_fingerprint is not None
-            and sig.cv_content_fingerprint is not None
-            and sig.cv_content_fingerprint == signals.cv_content_fingerprint
-        )
-        if email_hit:
-            _match_row(uid, full_name=name, kind="normalized_email", by_id=high)
-        if phone_hit:
-            _match_row(uid, full_name=name, kind="normalized_phone", by_id=high)
-        if fp_hit and uid not in high:
-            _match_row(uid, full_name=name, kind="cv_content_fingerprint", by_id=fingerprint_only)
-
+    """Email/phone indexed lookup only (R-013.1 create path — phase 1)."""
+    high = _collect_high_confidence_matches(
+        candidate_store, signals, exclude_candidate_ids=exclude_candidate_ids
+    )
     if high:
         return DedupEvaluation(
             outcome=DedupOutcome.HIGH_CONFIDENCE_DUPLICATE,
             matches=sorted(high.values(), key=lambda m: str(m.candidate_id)),
             signals=signals,
+        )
+    return DedupEvaluation(outcome=DedupOutcome.NONE, matches=[], signals=signals)
+
+
+def evaluate_dedup_fingerprint_suspected_from_ingress_signals(
+    candidate_store: Any,
+    signals: DedupIngressSignals,
+    *,
+    exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+) -> DedupEvaluation:
+    """Fingerprint indexed lookup only when high-confidence did not match (phase 2)."""
+    if not signals.cv_content_fingerprint:
+        return DedupEvaluation(outcome=DedupOutcome.NONE, matches=[], signals=signals)
+    fingerprint_only: Dict[UUID, DedupMatch] = {}
+    for cid in candidate_store.find_candidate_ids_by_cv_fingerprint(
+        signals.cv_content_fingerprint,
+        exclude_candidate_ids=exclude_candidate_ids,
+    ):
+        _match_row(
+            cid,
+            full_name=_full_name_for_candidate(candidate_store, cid),
+            kind="cv_content_fingerprint",
+            by_id=fingerprint_only,
         )
     if fingerprint_only:
         return DedupEvaluation(
@@ -169,6 +194,39 @@ def evaluate_dedup(
             signals=signals,
         )
     return DedupEvaluation(outcome=DedupOutcome.NONE, matches=[], signals=signals)
+
+
+def evaluate_dedup_from_ingress_signals(
+    candidate_store: Any,
+    signals: DedupIngressSignals,
+    *,
+    exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+) -> DedupEvaluation:
+    """
+    Balanced/hybrid matrix (R-013 default) via indexed store lookups (R-013.1).
+    """
+    high_eval = evaluate_dedup_high_confidence_from_ingress_signals(
+        candidate_store, signals, exclude_candidate_ids=exclude_candidate_ids
+    )
+    if high_eval.outcome == DedupOutcome.HIGH_CONFIDENCE_DUPLICATE:
+        return high_eval
+    return evaluate_dedup_fingerprint_suspected_from_ingress_signals(
+        candidate_store, signals, exclude_candidate_ids=exclude_candidate_ids
+    )
+
+
+def evaluate_dedup(
+    candidate_store: Any,
+    signals: DedupIngressSignals,
+    *,
+    exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+) -> DedupEvaluation:
+    """Compatibility wrapper — delegates to indexed evaluation."""
+    return evaluate_dedup_from_ingress_signals(
+        candidate_store,
+        signals,
+        exclude_candidate_ids=exclude_candidate_ids,
+    )
 
 
 def dedup_matches_to_json(matches: Sequence[DedupMatch]) -> List[Dict[str, Any]]:
@@ -185,10 +243,12 @@ def dedup_matches_to_json(matches: Sequence[DedupMatch]) -> List[Dict[str, Any]]
 def governance_flags_from_candidate(
     candidate: Any,
     *,
+    ingress_in_progress: bool = False,
     orphan_ingress: bool = False,
 ) -> Dict[str, Any]:
     dedup = dict((candidate.extensions or {}).get("dedup") or {})
     flags: Dict[str, Any] = {
+        "ingress_in_progress": bool(ingress_in_progress),
         "orphan_ingress": bool(orphan_ingress),
         "dedup_status": dedup.get("status"),
         "dedup_pending_resolution": bool(dedup.get("pending_resolution")),

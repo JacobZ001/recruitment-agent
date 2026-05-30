@@ -49,9 +49,14 @@ from .exceptions import (
 from .dedup import (
     DedupOutcome,
     dedup_matches_to_json,
-    evaluate_dedup,
+    evaluate_dedup_fingerprint_suspected_from_ingress_signals,
+    evaluate_dedup_high_confidence_from_ingress_signals,
     extract_ingress_signals_from_cv_text,
     governance_flags_from_candidate,
+)
+from .ingress_governance import (
+    IngressGovernanceFlags,
+    ingress_governance_by_candidate_id,
 )
 from .idempotency_store import (
     IDEMPOTENCY_METHOD_PATH,
@@ -783,14 +788,19 @@ def create_and_submit_cv_pdf(
                 )
             extracted_for_dedup = extract_text_from_pdf_bytes(pdf_bytes, file_name=file_name)
             signals = extract_ingress_signals_from_cv_text(extracted_for_dedup.cv_text)
-            dedup_eval = evaluate_dedup(runtime.candidate_store, signals)
-            if dedup_eval.outcome == DedupOutcome.HIGH_CONFIDENCE_DUPLICATE:
+            high_eval = evaluate_dedup_high_confidence_from_ingress_signals(
+                runtime.candidate_store, signals
+            )
+            if high_eval.outcome == DedupOutcome.HIGH_CONFIDENCE_DUPLICATE:
                 raise DuplicateCandidateHighConfidenceError(
                     "duplicate_candidate_high_confidence: email or phone matches existing candidate",
-                    matches=dedup_matches_to_json(dedup_eval.matches),
+                    matches=dedup_matches_to_json(high_eval.matches),
                 )
-            if dedup_eval.outcome == DedupOutcome.SUSPECTED_FINGERPRINT:
-                suspected_dedup = dedup_eval
+            fp_eval = evaluate_dedup_fingerprint_suspected_from_ingress_signals(
+                runtime.candidate_store, signals
+            )
+            if fp_eval.outcome == DedupOutcome.SUSPECTED_FINGERPRINT:
+                suspected_dedup = fp_eval
             candidate_id = uuid4()
             store.upsert_in_progress(
                 method_path=IDEMPOTENCY_METHOD_PATH,
@@ -834,6 +844,10 @@ def create_and_submit_cv_pdf(
         runtime.end_idempotency_operation(key)
 
 
+def _dedup_now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _dedup_audit_entry(
     *,
     action: str,
@@ -845,19 +859,39 @@ def _dedup_audit_entry(
         "action": action,
         "actor_id": actor_id,
         "reason": reason,
-        "recorded_at": _FIXED_CLOCK.isoformat(),
+        "recorded_at": _dedup_now_utc().isoformat(),
     }
     if target_candidate_id is not None:
         entry["target_candidate_id"] = str(target_candidate_id)
     return entry
 
 
-def _orphan_candidate_ids(runtime: IngressRuntime) -> set[UUID]:
-    orphans: set[UUID] = set()
-    for rec in runtime.idempotency_store.list_in_progress():
-        if rec.candidate_id:
-            orphans.add(UUID(rec.candidate_id))
-    return orphans
+def _ingress_governance_by_candidate(
+    runtime: IngressRuntime,
+    *,
+    now: Optional[datetime] = None,
+    stale_seconds: Optional[int] = None,
+) -> Dict[UUID, IngressGovernanceFlags]:
+    kwargs: Dict[str, Any] = {"now": now}
+    if stale_seconds is not None:
+        kwargs["stale_seconds"] = stale_seconds
+    return ingress_governance_by_candidate_id(
+        runtime.idempotency_store.list_in_progress(),
+        **kwargs,
+    )
+
+
+def _governance_flags_for_candidate(
+    candidate: Any,
+    ingress: Dict[UUID, IngressGovernanceFlags],
+    candidate_id: UUID,
+) -> Dict[str, Any]:
+    gov = ingress.get(candidate_id)
+    return governance_flags_from_candidate(
+        candidate,
+        ingress_in_progress=bool(gov.ingress_in_progress) if gov else False,
+        orphan_ingress=bool(gov.orphan_ingress) if gov else False,
+    )
 
 
 def _mark_candidate_suspected_duplicate(
@@ -872,7 +906,7 @@ def _mark_candidate_suspected_duplicate(
         "status": "suspected_duplicate",
         "pending_resolution": True,
         "matches": dedup_matches_to_json(dedup_eval.matches),
-        "detected_at": _FIXED_CLOCK.isoformat(),
+        "detected_at": _dedup_now_utc().isoformat(),
         "audit": [],
     }
     updated = got.candidate.model_copy(
@@ -930,11 +964,13 @@ def link_candidate_dedup(
 
 
 def get_candidate_view_for_runtime(runtime: IngressRuntime, candidate_id: UUID) -> Dict[str, Any]:
-    orphan_ids = _orphan_candidate_ids(runtime)
+    ingress = _ingress_governance_by_candidate(runtime)
+    gov = ingress.get(candidate_id)
     return _projection_candidate_view(
         runtime,
         candidate_id,
-        orphan_ingress=candidate_id in orphan_ids,
+        ingress_in_progress=bool(gov.ingress_in_progress) if gov else False,
+        orphan_ingress=bool(gov.orphan_ingress) if gov else False,
     )
 
 
@@ -1049,7 +1085,7 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
     from .projection import load_candidate_and_snapshot_for_read
 
     store = runtime.bundle.store
-    orphan_ids = _orphan_candidate_ids(runtime)
+    ingress = _ingress_governance_by_candidate(runtime)
     items: List[Dict[str, Any]] = []
     for state_id in store.list_all_state_ids():
         got = store.get(state_id)
@@ -1061,8 +1097,8 @@ def list_candidates(runtime: IngressRuntime) -> List[Dict[str, Any]]:
                 continue
             candidate, snapshot = load_candidate_and_snapshot_for_read(runtime, cid)
             row = build_candidate_list_item(snapshot, candidate=candidate)
-            row["governance_flags"] = governance_flags_from_candidate(
-                candidate, orphan_ingress=cid in orphan_ids
+            row["governance_flags"] = _governance_flags_for_candidate(
+                candidate, ingress, cid
             )
             items.append(row)
         except ValueError:
@@ -1201,20 +1237,23 @@ def find_candidate_ids_by_dedup_signals(
     cv_content_fingerprint: Optional[str] = None,
 ) -> List[UUID]:
     """Deterministic lookup helper (no auto-merge)."""
+    seen: set[UUID] = set()
     matches: List[UUID] = []
-    for cid in store.list_candidate_ids():
-        got = store.get(cid)
-        if not got.ok or got.candidate is None:
-            continue
-        sig = got.candidate.dedup_signals
-        if normalized_email and sig.normalized_email == normalized_email:
-            matches.append(cid)
-            continue
-        if normalized_phone and sig.normalized_phone == normalized_phone:
-            matches.append(cid)
-            continue
-        if cv_content_fingerprint and sig.cv_content_fingerprint == cv_content_fingerprint:
-            matches.append(cid)
+    if normalized_email:
+        for cid in store.find_candidate_ids_by_normalized_email(normalized_email):
+            if cid not in seen:
+                seen.add(cid)
+                matches.append(cid)
+    if normalized_phone:
+        for cid in store.find_candidate_ids_by_normalized_phone(normalized_phone):
+            if cid not in seen:
+                seen.add(cid)
+                matches.append(cid)
+    if cv_content_fingerprint:
+        for cid in store.find_candidate_ids_by_cv_fingerprint(cv_content_fingerprint):
+            if cid not in seen:
+                seen.add(cid)
+                matches.append(cid)
     return matches
 
 

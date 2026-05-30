@@ -1,51 +1,45 @@
-# FEEDBACK — R-013
+# FEEDBACK — R-013.1
 
 ## Round ID + Status
 
-- **Round:** R-013 (major)
+- **Round:** R-013.1 (minor, parent R-013)
 - **Status:** `done`
 
 ## Step Completion Mapping
 
 | PLAN step | Status | Notes |
 |-----------|--------|-------|
-| 1. Dedup inputs + normalization | done | `modules/recruitment/dedup.py` — email/phone/fingerprint + CV text extraction |
-| 2. Dedup evaluation model | done | `DedupOutcome`, `DedupMatch`, `DedupEvaluation` |
-| 3. `POST /candidates/cv/pdf` dedup分流 | done | High-confidence block before allocate; suspected flag after success |
-| 4. Link / keep-separate API + audit | done | `POST .../dedup/link`, `POST .../dedup/keep-separate` on `candidate.extensions.dedup` |
-| 5. Frontend duplicate + governance UI | done | Create flow shows block matches; list/detail governance panel |
-| 6. Orphan detection | done | `idempotency_store.list_in_progress()` → `governance_flags.orphan_ingress` on list/detail |
-| 7. Tests | done | `test_dedup.py`, `test_candidate_dedup_r013.py`; full suite green |
-| 8. FEEDBACK | done | This file |
+| 1. Dedup audit UTC timestamps | done | `_dedup_audit_entry`, `detected_at` use `datetime.now(timezone.utc)` |
+| 2. Orphan vs ingress_in_progress | done | `ingress_governance.py`, 24h `ORPHAN_INGRESS_STALE_SECONDS` |
+| 3. API/projection/frontend flags | done | `ingress_in_progress` + distinct UI copy |
+| 4. Indexed dedup lookup | done | SQLite columns/indexes + in-memory indexes; `evaluate_dedup_from_ingress_signals` |
+| 5. Regression tests + verify | done | `test_r013_1_hardening.py`, `test_candidate_governance_r013_1.py` |
+| 6. FEEDBACK | done | This file |
 
 ## File Change Summary
 
 | Path | Change |
 |------|--------|
-| `modules/recruitment/dedup.py` | A |
-| `modules/recruitment/exceptions.py` | M |
+| `modules/recruitment/dedup.py` | M |
+| `modules/recruitment/ingress_governance.py` | A |
 | `modules/recruitment/use_cases.py` | M |
 | `modules/recruitment/projection.py` | M |
-| `modules/recruitment/idempotency_store.py` | M |
-| `modules/recruitment/__init__.py` | M |
-| `integrations/api/app.py` | M |
-| `integrations/api/errors.py` | M |
+| `runtime/persistence/candidate_store_dedup.py` | A |
+| `runtime/persistence/sqlite_candidate_schema.sql` | M |
+| `runtime/persistence/sqlite_candidate_store.py` | M |
+| `runtime/persistence/in_memory_candidate_store.py` | M |
 | `integrations/api/schemas_http.py` | M |
-| `tests/modules/test_dedup.py` | A |
-| `tests/api/test_candidate_dedup_r013.py` | A |
-| `frontend/src/api/client.ts` | M |
 | `frontend/src/api/types.ts` | M |
-| `frontend/src/pages/CandidateListPage.tsx` | M |
-| `frontend/src/pages/CandidateDetailPage.tsx` | M |
-| `frontend/src/components/recruiter/CandidateGovernancePanel.tsx` | A |
-| `frontend/src/components/recruiter/CreateCandidatePdfUpload.tsx` | M |
+| `frontend/src/components/recruiter/CandidateGovernancePanel.tsx` | M |
+| `tests/modules/test_r013_1_hardening.py` | A |
+| `tests/api/test_candidate_governance_r013_1.py` | A |
 | `FEEDBACK.md` | M |
 
 ## Test Commands & Results
 
 ```text
 python -m pytest -q
-→ 192 passed, 2 skipped
+→ 199 passed, 2 skipped
 
 cd frontend && npm test -- --run
 → 7 passed
@@ -57,17 +51,17 @@ cd frontend && npm run build
 ## Risks, Deviations, Blockers
 
 - **No blockers.**
-- **Deviation:** Dedup signals for create+upload are extracted from CV text pre-create (regex), not post-parse skill output; aligns with “block before write” and may miss email only present after LLM parse (conservative for high-confidence block).
-- **Deviation:** `TD-API-016` registry entry not added in this Builder pass (Architect/PM may add in roadmap/debt sync).
-- **Residual:** Link governance records audit on source candidate only; no cross-candidate data merge (by design).
+- **Note:** Existing SQLite DBs get `ALTER TABLE` + backfill on store open; no separate migration runner.
+- **Note:** `ORPHAN_INGRESS_STALE_SECONDS` is a module constant (tests override via `ingress_governance_by_candidate_id(stale_seconds=...)`).
 
 ## Debt Handling
 
-- **TD-API-016 + Candidate deduplication, merge/link, and orphan governance** — **partial close:** deterministic dedup matrix, create+upload分流, link/keep-separate with audit, orphan visibility.
-- **TD-API-004 + Candidate list is store-driven** — **partial close:** `governance_flags` on list/detail rows.
-- **TD-API-011 + HTTP ingress idempotency** — **partial close:** dedup runs after idempotency replay path, before new allocation; replay unchanged.
+- **TD-API-016 + Candidate deduplication, merge/link, and orphan governance** — **partial close:** real audit timestamps; orphan only after stale threshold; indexed dedup lookups.
+- **TD-API-004 + Candidate list is store-driven** — **partial close:** `ingress_in_progress` vs `orphan_ingress` on list/detail.
+- **TD-API-011 + HTTP ingress idempotency** — **deferred** (global extension → R-015 per PLAN).
+- **TD-API-012 + API boundary coupling to bootstrap helpers** — **deferred** (R-015 per PLAN).
 
 ## Suggested Next Round
 
-- **Routing:** `advance-major` → **R-014** (timeline / inspection productization per roadmap) or PM-selected API hardening (**R-015**).
-- Architect: register **TD-API-016** in `tech_debt.md` if not already present; reconcile `ROADMAP.md`.
+- **Routing:** `advance-major` → **R-014** (timeline / inspection productization) per prior R-013 closeout, unless PM prioritizes **R-015** API hardening.
+- Architect: reconcile `ROADMAP.md` / `tech_debt.md` for TD-API-016 partial close from R-013 + R-013.1.

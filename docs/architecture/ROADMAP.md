@@ -12,8 +12,8 @@ Build a deterministic, AI-native human evaluation infrastructure for recruitment
 
 ## Current Operating Posture
 
-The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs for controlled local operation.
-As of **R-013**, the recruiter path adds deterministic dedup governance (high-confidence block / suspected flag), operator `link` / `keep-separate` actions, and orphan/incomplete visibility on list/detail without silent auto-merge.
+The current repo operates as a deterministic, single-process SQLite runtime with multi-candidate routing and a recruiter SPA over list/detail/action APIs, including dedup governance (high-confidence block / suspected flag), operator `link` / `keep-separate`, and indexed dedup lookups on create+upload.
+As of **R-013.1**, dedup audit and suspected `detected_at` use real UTC; list/detail expose `ingress_in_progress` separately from stale `orphan_ingress` (24h threshold); create+upload blocks on email/phone index hits before allocation and uses fingerprint only as a second-stage suspected check.
 
 ## Capability Roadmap Layer
 
@@ -97,6 +97,7 @@ This is the near-term action queue derived from capability gaps plus debt priori
 6. **R-019 — Full demo phase-out** (`TD-API-012 + API boundary coupling to bootstrap helpers (_envelope, fixed clock)`, `TD-INSPECTION-003 + Timeline is global, not candidate-scoped (multi-candidate safety)`)
    - Advances: `Recruiter Workflow Operation`, `Operational Readiness`
    - Goal: remove `/demo*` routes and compatibility shims, including default candidate bootstrap path (`VERTICAL_SLICE_DEFAULT_CANDIDATE_ID`); keep product-path recruiter/API surfaces only.
+   - **Production runtime clock policy (post-cutover):** product-path ingress, audit, and governance timestamps must use real UTC time (`datetime.now(timezone.utc)` or injected clock provider). `modules/recruitment/ingress.FIXED_CLOCK` and other demo fixed clocks must not be used for production audit/governance write paths after cutover.
 
 7. **R-020 — Contract and timestamp hardening** (`TD-CONTRACTS-005 + Timezone-aware datetime handling`, `TD-CONTRACTS-011 + Shared execution metadata structures`, `TD-CONTRACTS-012 + Future shared timing/audit abstractions`)
     - Advances: `Deterministic Foundation`, `Operational Readiness`

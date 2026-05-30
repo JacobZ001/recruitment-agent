@@ -169,6 +169,7 @@ class CandidateViewStatus(BaseModel):
 
 
 class CandidateGovernanceFlags(BaseModel):
+    ingress_in_progress: bool = False
     orphan_ingress: bool = False
     dedup_status: Optional[str] = None
     dedup_pending_resolution: bool = False

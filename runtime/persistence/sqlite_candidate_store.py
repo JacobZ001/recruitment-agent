@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from uuid import UUID
 
 from schemas.candidate_schema import Candidate
+
+from runtime.persistence.candidate_store_dedup import dedup_index_triple, filter_excluded
 
 
 def _schema_sql() -> str:
@@ -57,10 +59,53 @@ class SQLiteCandidateStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_schema_sql())
+        self._migrate_dedup_columns()
         self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
+
+    def _migrate_dedup_columns(self) -> None:
+        cur = self._conn.execute("PRAGMA table_info(candidate)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "dedup_email" not in cols:
+            self._conn.execute("ALTER TABLE candidate ADD COLUMN dedup_email TEXT")
+        if "dedup_phone" not in cols:
+            self._conn.execute("ALTER TABLE candidate ADD COLUMN dedup_phone TEXT")
+        if "dedup_cv_fingerprint" not in cols:
+            self._conn.execute("ALTER TABLE candidate ADD COLUMN dedup_cv_fingerprint TEXT")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_candidate_dedup_email ON candidate(dedup_email)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_candidate_dedup_phone ON candidate(dedup_phone)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_candidate_dedup_cv_fingerprint "
+            "ON candidate(dedup_cv_fingerprint)"
+        )
+        self._backfill_dedup_columns()
+
+    def _backfill_dedup_columns(self) -> None:
+        cur = self._conn.execute(
+            "SELECT candidate_id, candidate_json FROM candidate "
+            "WHERE dedup_email IS NULL AND dedup_phone IS NULL AND dedup_cv_fingerprint IS NULL"
+        )
+        rows = cur.fetchall()
+        for cid, payload in rows:
+            try:
+                cand = Candidate.model_validate_json(payload)
+            except Exception:
+                continue
+            email, phone, fp = dedup_index_triple(cand)
+            self._conn.execute(
+                """
+                UPDATE candidate
+                SET dedup_email = ?, dedup_phone = ?, dedup_cv_fingerprint = ?
+                WHERE candidate_id = ?
+                """,
+                (email, phone, fp, cid),
+            )
 
     def get(self, candidate_id: UUID) -> CandidateStoreResult:
         cur = self._conn.execute(
@@ -108,12 +153,16 @@ class SQLiteCandidateStore:
             )
         now = _utc_now_iso()
         payload = candidate.model_dump_json()
+        email, phone, fp = dedup_index_triple(candidate)
         self._conn.execute(
             """
-            INSERT INTO candidate (candidate_id, candidate_json, store_revision, created_at, updated_at)
-            VALUES (?, ?, 1, ?, ?)
+            INSERT INTO candidate (
+                candidate_id, candidate_json, store_revision, created_at, updated_at,
+                dedup_email, dedup_phone, dedup_cv_fingerprint
+            )
+            VALUES (?, ?, 1, ?, ?, ?, ?, ?)
             """,
-            (cid, payload, now, now),
+            (cid, payload, now, now, email, phone, fp),
         )
         self._conn.commit()
         return CandidateStoreResult(
@@ -154,12 +203,15 @@ class SQLiteCandidateStore:
         now = _utc_now_iso()
         next_rev = current_rev + 1
         payload = candidate.model_dump_json()
+        email, phone, fp = dedup_index_triple(candidate)
         self._conn.execute(
             """
-            UPDATE candidate SET candidate_json = ?, store_revision = ?, updated_at = ?
+            UPDATE candidate SET
+                candidate_json = ?, store_revision = ?, updated_at = ?,
+                dedup_email = ?, dedup_phone = ?, dedup_cv_fingerprint = ?
             WHERE candidate_id = ?
             """,
-            (payload, next_rev, now, cid),
+            (payload, next_rev, now, email, phone, fp, cid),
         )
         self._conn.commit()
         got = self.get(candidate.candidate_id)
@@ -168,6 +220,45 @@ class SQLiteCandidateStore:
     def list_candidate_ids(self) -> List[UUID]:
         cur = self._conn.execute("SELECT candidate_id FROM candidate ORDER BY candidate_id")
         return [UUID(row[0]) for row in cur.fetchall()]
+
+    def find_candidate_ids_by_normalized_email(
+        self,
+        email: str,
+        *,
+        exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+    ) -> List[UUID]:
+        cur = self._conn.execute(
+            "SELECT candidate_id FROM candidate WHERE dedup_email = ?",
+            (email,),
+        )
+        ids = [UUID(row[0]) for row in cur.fetchall()]
+        return filter_excluded(ids, exclude_candidate_ids=exclude_candidate_ids)
+
+    def find_candidate_ids_by_normalized_phone(
+        self,
+        phone: str,
+        *,
+        exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+    ) -> List[UUID]:
+        cur = self._conn.execute(
+            "SELECT candidate_id FROM candidate WHERE dedup_phone = ?",
+            (phone,),
+        )
+        ids = [UUID(row[0]) for row in cur.fetchall()]
+        return filter_excluded(ids, exclude_candidate_ids=exclude_candidate_ids)
+
+    def find_candidate_ids_by_cv_fingerprint(
+        self,
+        fingerprint: str,
+        *,
+        exclude_candidate_ids: Optional[Sequence[UUID]] = None,
+    ) -> List[UUID]:
+        cur = self._conn.execute(
+            "SELECT candidate_id FROM candidate WHERE dedup_cv_fingerprint = ?",
+            (fingerprint,),
+        )
+        ids = [UUID(row[0]) for row in cur.fetchall()]
+        return filter_excluded(ids, exclude_candidate_ids=exclude_candidate_ids)
 
     def clear_all(self) -> None:
         self._conn.execute("DELETE FROM candidate")
