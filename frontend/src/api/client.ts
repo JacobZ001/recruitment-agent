@@ -93,10 +93,40 @@ export function postOrganizationContext(raw_text: string): Promise<ScoringContex
   })
 }
 
+export function postOrganizationContextStructured(body: {
+  company_name: string
+  industry?: string
+  team_name?: string
+  environment_signals: string[]
+  preference_signals: string[]
+  summary?: string
+  source_ref: string
+}): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/organization/structured', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export function postRecruiterActorContext(raw_text: string): Promise<ScoringContextResponse> {
   return fetchJson<ScoringContextResponse>('/scoring-context/recruiter-actor', {
     method: 'POST',
     body: JSON.stringify({ raw_text }),
+  })
+}
+
+export function postRecruiterActorContextStructured(body: {
+  actor_id: string
+  actor_role?: string
+  hiring_focus?: string[]
+  preference_signals: string[]
+  avoid_signals: string[]
+  summary?: string
+  source_ref: string
+}): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/recruiter-actor/structured', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 
@@ -111,6 +141,20 @@ export function postJobContextPdf(pdf_base64: string, file_name: string): Promis
   return fetchJson<ScoringContextResponse>('/scoring-context/job/pdf', {
     method: 'POST',
     body: JSON.stringify({ pdf_base64, file_name }),
+  })
+}
+
+export function postJobContextStructured(body: {
+  role_title: string
+  must_haves_answer?: string
+  preferred_answer?: string
+  success_answer?: string
+  responsibilities_answer?: string
+  source_ref?: string
+}): Promise<ScoringContextResponse> {
+  return fetchJson<ScoringContextResponse>('/scoring-context/job/structured', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 

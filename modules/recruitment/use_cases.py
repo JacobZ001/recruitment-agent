@@ -446,6 +446,18 @@ def author_job_context(
     return persisted
 
 
+def append_scoring_context_source_ref(runtime: IngressRuntime, source_ref: str) -> ScoringContext:
+    """Append a top-level scoring_context source_ref without changing authoring content (R-014.2)."""
+    sref = str(source_ref or "").strip()
+    if not sref:
+        raise InvalidScoringContextError("source_ref must be non-empty")
+    current = get_active_scoring_context(runtime)
+    if current is None:
+        raise InvalidScoringContextError("scoring_context_missing: cannot append source_ref")
+    updated = update_scoring_context(current, source_refs=[sref])
+    return _persist_scoring_context(runtime, updated)
+
+
 def author_organization_context_from_text(
     runtime: IngressRuntime,
     raw_text: str,

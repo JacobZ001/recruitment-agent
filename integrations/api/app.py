@@ -37,7 +37,9 @@ from integrations.api.schemas_http import (
     JobContextPdfBody,
     JobContextTextBody,
     OrganizationContextBody,
+    OrganizationContextStructuredBody,
     RecruiterActorContextBody,
+    RecruiterActorContextStructuredBody,
     RecruiterJobAnswersBody,
     ScoringContextResponse,
     StateSummaryResponse,
@@ -51,8 +53,11 @@ from modules.recruitment import (
     author_job_context_from_pdf,
     author_job_context_from_recruiter_answers,
     author_job_context_from_text,
+    author_organization_context,
     author_organization_context_from_text,
+    author_recruiter_actor_context,
     author_recruiter_actor_context_from_text,
+    append_scoring_context_source_ref,
     clear_job_context,
     clear_organization_context,
     clear_recruiter_actor_context,
@@ -74,6 +79,7 @@ from modules.recruitment import (
     run_primary_demo_sequence,
     submit_cv_pdf,
 )
+from schemas.state_schema import OrganizationContext, RecruiterActorContext
 from modules.recruitment.bootstrap import VERTICAL_SLICE_DEFAULT_CANDIDATE_ID
 from runtime.persistence.sqlite_state_store import SQLiteStateStore
 
@@ -267,6 +273,26 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)
 
+    @app.post("/scoring-context/organization/structured", response_model=ScoringContextResponse)
+    def post_organization_context_structured(
+        body: OrganizationContextStructuredBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            ctx = OrganizationContext(
+                company_name=body.company_name,
+                industry=body.industry,
+                team_name=body.team_name,
+                environment_signals=body.environment_signals,
+                preference_signals=body.preference_signals,
+                summary=body.summary,
+                source_refs=[body.source_ref],
+            )
+            author_organization_context(rt, ctx)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
     @app.post("/scoring-context/recruiter-actor", response_model=ScoringContextResponse)
     def post_recruiter_actor_context(
         body: RecruiterActorContextBody,
@@ -274,6 +300,26 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
     ) -> ScoringContextResponse:
         try:
             author_recruiter_actor_context_from_text(rt, body.raw_text, source_ref=body.source_ref)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/recruiter-actor/structured", response_model=ScoringContextResponse)
+    def post_recruiter_actor_context_structured(
+        body: RecruiterActorContextStructuredBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            ctx = RecruiterActorContext(
+                actor_id=body.actor_id,
+                actor_role=body.actor_role,
+                hiring_focus=body.hiring_focus,
+                preference_signals=body.preference_signals,
+                avoid_signals=body.avoid_signals,
+                summary=body.summary,
+                source_refs=[body.source_ref],
+            )
+            author_recruiter_actor_context(rt, ctx)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)
@@ -314,6 +360,28 @@ def create_app(*, db_path: Optional[str] = None) -> FastAPI:
                 success_answer=body.success_answer,
                 responsibilities_answer=body.responsibilities_answer,
             )
+            if body.source_ref:
+                append_scoring_context_source_ref(rt, body.source_ref)
+        except RecruitmentUseCaseError as exc:
+            raise_recruitment_http(exc, candidate_id=rt.candidate_id)
+        return _context_response(rt)
+
+    @app.post("/scoring-context/job/structured", response_model=ScoringContextResponse)
+    def post_job_context_structured(
+        body: RecruiterJobAnswersBody,
+        rt: VerticalSliceApiRuntime = Depends(get_runtime),
+    ) -> ScoringContextResponse:
+        try:
+            author_job_context_from_recruiter_answers(
+                rt,
+                role_title=body.role_title,
+                must_haves_answer=body.must_haves_answer,
+                preferred_answer=body.preferred_answer,
+                success_answer=body.success_answer,
+                responsibilities_answer=body.responsibilities_answer,
+            )
+            if body.source_ref:
+                append_scoring_context_source_ref(rt, body.source_ref)
         except RecruitmentUseCaseError as exc:
             raise_recruitment_http(exc, candidate_id=rt.candidate_id)
         return _context_response(rt)

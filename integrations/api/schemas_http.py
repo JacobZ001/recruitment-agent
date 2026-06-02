@@ -83,6 +83,26 @@ class RecruiterActorContextBody(BaseModel):
     source_ref: Optional[str] = Field(default=None)
 
 
+class OrganizationContextStructuredBody(BaseModel):
+    company_name: str = Field(..., min_length=1)
+    industry: Optional[str] = Field(default=None)
+    team_name: Optional[str] = Field(default=None)
+    environment_signals: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    summary: Optional[str] = Field(default=None)
+    source_ref: str = Field(..., min_length=1)
+
+
+class RecruiterActorContextStructuredBody(BaseModel):
+    actor_id: str = Field(..., min_length=1)
+    actor_role: str = Field(default="")
+    hiring_focus: List[str] = Field(default_factory=list)
+    preference_signals: List[str] = Field(default_factory=list)
+    avoid_signals: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    source_ref: str = Field(..., min_length=1)
+
+
 class JobContextTextBody(BaseModel):
     raw_text: str = Field(..., min_length=1)
     source_ref: Optional[str] = Field(default=None)
@@ -98,6 +118,7 @@ class RecruiterJobAnswersBody(BaseModel):
     preferred_answer: str = Field(default="")
     success_answer: str = Field(default="")
     responsibilities_answer: str = Field(default="")
+    source_ref: Optional[str] = Field(default=None)
 
 
 class ScoringContextResponse(BaseModel):

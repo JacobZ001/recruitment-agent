@@ -117,6 +117,74 @@ def test_scoring_context_authoring_routes_and_refresh() -> None:
         assert get_ready.json()["organization_authoring_text"]
 
 
+def test_scoring_context_structured_authoring_routes_and_refresh() -> None:
+    with TestClient(create_app(db_path="")) as client:
+        org = client.post(
+            "/scoring-context/organization/structured",
+            json={
+                "company_name": "BlueOcean Recruitment",
+                "industry": "Recruitment",
+                "team_name": "Talent Ops",
+                "environment_signals": ["Fast-paced recruiter workflow"],
+                "preference_signals": ["Clear communication", "Structured follow-through"],
+                "summary": "Boutique recruitment firm focused on ops excellence.",
+                "source_ref": "form://organization",
+            },
+        )
+        assert org.status_code == 200, org.text
+        payload = org.json()
+        assert payload["status"] == "collecting"
+        assert payload["organization_authoring_text"]
+        assert payload["organization_context"] is not None
+        assert payload["organization_context"]["company_name"] == "BlueOcean Recruitment"
+        assert "form://organization" in (payload.get("source_refs") or [])
+
+        recruiter = client.post(
+            "/scoring-context/recruiter-actor/structured",
+            json={
+                "actor_id": "Jane-recruiter",
+                "actor_role": "Lead Recruiter",
+                "preference_signals": ["Ownership"],
+                "avoid_signals": ["Unclear communication"],
+                "source_ref": "form://recruiter_actor",
+            },
+        )
+        assert recruiter.status_code == 200, recruiter.text
+        payload = recruiter.json()
+        assert payload["status"] == "collecting"
+        assert payload["recruiter_actor_authoring_text"]
+        assert payload["recruiter_actor_context"] is not None
+        assert payload["recruiter_actor_context"]["actor_id"] == "Jane-recruiter"
+        assert "form://recruiter_actor" in (payload.get("source_refs") or [])
+
+        job = client.post(
+            "/scoring-context/job/structured",
+            json={
+                "role_title": "Recruiting Operations Specialist",
+                "must_haves_answer": "Stakeholder communication\nProcess ownership",
+                "preferred_answer": "ATS familiarity",
+                "success_answer": "Keep candidate flow organized",
+                "responsibilities_answer": "Coordinate interviews\nSurface blockers early",
+                "source_ref": "form://job",
+            },
+        )
+        assert job.status_code == 200, job.text
+        payload = job.json()
+        assert payload["status"] == "collecting"
+        assert payload["job_authoring_text"]
+        assert "form://job" in (payload.get("source_refs") or [])
+
+        ready = client.post("/scoring-context/refresh")
+        assert ready.status_code == 200, ready.text
+        payload = ready.json()
+        assert payload["status"] == "ready"
+        assert payload["organization_context"]["company_name"] == "BlueOcean Recruitment"
+        assert payload["recruiter_actor_context"]["actor_id"] == "Jane-recruiter"
+        assert payload["job_context"]["title"] == "Recruiting Operations Specialist"
+        assert payload["derived_l2_criteria"]
+        assert payload["derived_l3_criteria"]
+
+
 def test_scoring_context_refresh_rejects_insufficient_derivation_signals() -> None:
     with TestClient(create_app(db_path="")) as client:
         client.post(

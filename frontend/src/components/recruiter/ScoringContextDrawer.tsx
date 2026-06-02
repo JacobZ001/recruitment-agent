@@ -18,15 +18,6 @@ export function ScoringContextDrawer({
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!open) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
-
-  useEffect(() => {
     if (open) {
       panelRef.current?.focus()
     }
